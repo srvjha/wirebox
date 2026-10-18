@@ -1,0 +1,137 @@
+import { CacheHitRateExplorer } from "@/components/visuals/cache-hit-rate-explorer"
+
+At 6 pm a band with four million followers announces one show, sold through Gatepass. Within a minute, 20,000 people a second are opening the same event page, and your database is answering the same question 20,000 times a second. The answer hasn't changed once.
+
+## The same question, thousands of times
+
+Here is what one page view costs today. The app server receives `GET /events/the-band-mumbai`, runs a query that joins the event, the venue, the ticket tiers and the remaining seat counts, turns the rows into JSON and sends it back. On a quiet database that query takes about 25 ms.
+
+Twenty-five milliseconds sounds cheap. Multiply it out: 20,000 requests a second × 25 ms is 500 seconds of database work every second. Even with good indexes and a large machine, your Postgres can do maybe 4,000 of these a second. The rest wait in a queue, the queue grows, and pages that took 25 ms start taking 3 seconds, then time out.
+
+The frustrating part is that almost all of this work is repeated. The event's name, date, venue and poster are fixed. The ticket tiers change a few times a day. Even the "seats left" count only matters to the nearest few dozen until the very end. You are paying full price to recompute an answer you computed a millisecond ago.
+
+<Diagram w={680} h={210} caption="Without a cache, every page view becomes a database query. The database is doing the same work thousands of times a second.">
+  <Box x={20} y={30} w={120} label="Fans" sub="20,000 req/s" icon="phone" />
+  <Box x={20} y={128} w={120} label="Fans" sub="same page" icon="phone" dim />
+  <Box x={270} y={79} w={130} label="App server" icon="server" />
+  <Box x={530} y={79} w={130} label="Postgres" sub="~4,000 q/s max" icon="db" tone="err" />
+  <Wire points={[[140, 56], [270, 98]]} tone="req" />
+  <Wire points={[[140, 154], [270, 114]]} tone="req" />
+  <Wire points={[[400, 105], [530, 105]]} tone="req" label="20,000 q/s" />
+  <Packet points={[[140, 56], [270, 98]]} dur={1.2} />
+  <Packet points={[[140, 154], [270, 114]]} dur={1.2} delay={0.4} />
+  <Packet points={[[400, 105], [530, 105]]} dur={0.9} />
+  <Packet points={[[400, 105], [530, 105]]} dur={0.9} delay={0.3} />
+  <Packet points={[[400, 105], [530, 105]]} dur={0.9} delay={0.6} />
+  <Tag x={595} y={160} tone="err">OVERLOADED</Tag>
+</Diagram>
+
+## What a cache is
+
+A cache is a small, fast store that keeps answers you've already computed, so the next request can reuse them. For Gatepass it will usually be an in-memory key-value store like Redis or Memcached, sitting next to your app servers. You ask it for `event:the-band-mumbai`; if it has the value, you get it back in under a millisecond. If not, you do the slow work once and put the result in the cache for everyone after you.
+
+Two words you'll use constantly:
+
+- A **hit** is a request the cache could answer.
+- A **miss** is a request it couldn't, which falls through to the database.
+
+Memory is fast because it is close and simple. Reading a value from Redis on the same network is roughly 0.5–1 ms, almost all of it network. The database query was 25 ms, and that was before it was overloaded. The cache doesn't make the database faster. It makes the database **unnecessary** for most requests.
+
+<KeyIdea>A cache doesn't speed up your database. It stops most requests from reaching it.</KeyIdea>
+
+## Hit rate is the number that matters
+
+Everything about a cache comes down to one ratio: hits divided by total requests. That **hit rate** decides how much load is left for the database, and the relationship is harsher than it looks.
+
+<table>
+  <thead>
+    <tr><th>Hit rate</th><th>Miss rate</th><th>Queries reaching the database (of 20,000/s)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>50%</td><td>50%</td><td>10,000</td></tr>
+    <tr><td>90%</td><td>10%</td><td>2,000</td></tr>
+    <tr><td>99%</td><td>1%</td><td>200</td></tr>
+    <tr><td>99.9%</td><td>0.1%</td><td>20</td></tr>
+  </tbody>
+</table>
+
+Going from 90% to 99% sounds like a 10% improvement. For the database it is a **10× drop** in load. Think in misses, not hits: the miss rate is what your database has to survive.
+
+Average latency follows the same shape. With a 1 ms cache and a 25 ms database, a 90% hit rate gives you about 3.5 ms on average. At 50% it's about 13.5 ms, if the database isn't overloaded, which at 10,000 queries a second it would be.
+
+<Quiz
+  id="why-cache-miss-rate"
+  question="Your hit rate drops from 98% to 96% after a release. What happens to database load?"
+  options={[
+    "It rises by about 2%",
+    "It roughly doubles",
+    "It stays the same, because the hit rate is still high",
+    "It halves",
+  ]}
+  answer={1}
+  explain={<>The miss rate went from 2% to 4%. The database serves only the misses, so its load doubles. A "small" drop in hit rate can be the difference between a calm database and an outage.</>}
+/>
+
+## Traffic is lumpy, and that's good news
+
+You can't cache everything. Gatepass has 5,000 live event, artist and venue pages, and the cache is far smaller than the database. So how can a small cache answer most requests?
+
+Because real traffic is never spread evenly. A few pages get most of the views and a long tail gets almost none. This shape is called a **power law** (or Zipf distribution): the most popular page gets about twice the traffic of the second, three times the traffic of the third, and so on. It is the same shape behind the "80/20 rule", and you'll find it in product pages, search terms, videos and short links.
+
+On announcement night the curve gets even steeper. One page, the band's show, is suddenly worth more than the next thousand combined. That's the best case for a cache: hold a handful of pages and you've absorbed most of the load.
+
+Try it. Start with a cache of 100 pages and typical traffic, then slide the skew to "Announcement". Then try "Flat" and see how much memory you'd need to protect the database.
+
+<CacheHitRateExplorer />
+
+A few things to notice:
+
+- With typical traffic, the top 1,000 pages (20% of them) take about 80% of requests. With announcement traffic, the top 100 take nearly as much.
+- The curve flattens. Each extra page you cache is less popular than the last, so doubling the cache does not double the hit rate. Past a point, memory buys you almost nothing.
+- The database cliff is sharp. Between "comfortable" and "timeouts" there are only a few points of hit rate, because queueing makes a busy database slow down much faster than its load rises.
+
+<Callout tone="tip" title="Measure the curve, don't guess it">
+Before sizing a cache, log a day of requests and count how often each key appears. Sort by count and plot the running total. That plot is your hit-rate curve, and it tells you how big the cache should be.
+</Callout>
+
+## What a cache costs you
+
+A cache is not free, and it's worth naming the price before you add one.
+
+- **Stale data.** The cache holds a copy. When the real data changes, the copy is wrong until you replace it. Lesson 3.3 is all about this.
+- **A second system to run.** Redis needs memory, monitoring and a plan for when it restarts. When it comes back empty (a *cold cache*), every request is a miss and the database takes the full load at once.
+- **More code paths.** Every read now has two outcomes, hit and miss, and both need to be correct and tested.
+- **Hidden dependence.** Once the database is sized for 2,000 queries a second because the cache absorbs the rest, the cache is no longer an optimisation. It is load-bearing. If it dies, the database dies with it.
+
+That last point surprises people. A cache starts as "make it faster" and quietly becomes "required to stay up". Plan for it the way you'd plan for any other critical component.
+
+<YourTurn
+  id="why-cache-what-to-cache"
+  prompt="List three things in Gatepass you would cache, and one you would never serve from a cache. Say why."
+  fields={4}
+  minAnswers={3}
+  hint="Ask of each piece of data: how often is it read, how often does it change, and what happens if a user sees an old copy for a few seconds?"
+>
+**Good candidates**
+
+- **Event pages** (name, date, venue, poster, tiers): read thousands of times per change.
+- **The list of events in a city** for the home screen: same answer for everyone in that city.
+- **Venue details and seat maps** (the layout, not availability): change almost never.
+- **A user's session or profile**: read on every request, changes rarely.
+
+**Never from a cache**
+
+- **The final "is this seat still free?" check when booking.** A stale answer here sells the same seat twice. That check must read the source of truth, inside a transaction.
+- Payment status, for the same reason.
+
+The general rule: cache what is read often, changes rarely, and is safe to be slightly old. Decisions that move money or seats go to the database.
+</YourTurn>
+
+The URL shortener lab at [/labs/url-shortener](/labs/url-shortener) is a near-perfect caching problem: a few writes, billions of redirects, and a small set of very popular links. You'll add a cache there and watch the database load fall in the load test.
+
+## Key takeaways
+
+- A cache stores answers you've already computed, so repeated reads skip the slow work. It removes load from the database rather than speeding it up.
+- Hit rate is the number to watch, but think in **misses**: going from 90% to 99% hits cuts database load by ten times.
+- Real traffic follows a power law, so a small cache holding the hottest keys absorbs most requests. Each extra key is worth less than the last.
+- A cache brings stale data, a cold-start risk and a new critical dependency. Once the database relies on it, losing the cache is an outage.
