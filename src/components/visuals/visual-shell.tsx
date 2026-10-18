@@ -83,6 +83,51 @@ export function Segmented<T extends string>({
   );
 }
 
+const MARKER_TONES: [string, string][] = [
+  ["default", "var(--fg-muted)"],
+  ["req", "var(--req)"],
+  ["res", "var(--res)"],
+  ["err", "var(--err)"],
+  ["info", "var(--info)"],
+  ["warn", "var(--warn)"],
+  ["ok", "var(--ok)"],
+  ["accent", "var(--accent)"],
+  ["muted", "var(--fg-subtle)"],
+];
+
+/**
+ * An SVG canvas for client visuals that use the diagram kit's Box/Wire/Tag.
+ * It defines the same arrow markers as <Diagram>, so Wire arrows render.
+ */
+export function VisualCanvas({
+  w,
+  h,
+  label,
+  children,
+  className,
+}: {
+  w: number;
+  h: number;
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("bg-dots overflow-hidden rounded-xl border border-line bg-bg p-2 sm:p-3", className)}>
+      <svg viewBox={`0 0 ${w} ${h}`} className="block h-auto w-full overflow-visible" role="img" aria-label={label} fontFamily="var(--font-geist-sans)">
+        <defs>
+          {MARKER_TONES.map(([t, c]) => (
+            <marker key={t} id={`arrow-${t}`} viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill={c} />
+            </marker>
+          ))}
+        </defs>
+        {children}
+      </svg>
+    </div>
+  );
+}
+
 /** A small action button used in visual toolbars. */
 export function VisualButton({
   children,

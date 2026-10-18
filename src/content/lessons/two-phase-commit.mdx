@@ -1,0 +1,86 @@
+import { TwoPhaseCommitSim } from "@/components/visuals/two-phase-commit-sim"
+
+A fan pays ₹1,800 for two seats. The payments service charges the card and commits. Then the booking service crashes before it saves the ticket. Every database is internally consistent, and the fan has paid for nothing. Inside one database, a transaction would have prevented this. This lesson looks at the classic protocol that stretches a transaction across several databases, and why you'll rarely use it between services.
+
+## Three databases, one decision
+
+When Gatepass was one app on one Postgres, booking was a single transaction: charge, mark seats sold, create the ticket, `COMMIT`. If anything failed, the database rolled all of it back. That all-or-nothing property is **atomicity**, and the database gave it to you for free.
+
+After the split into services, payments, seats and tickets each own a separate database. Each one can still commit its own part atomically, but no single database can see the whole booking. You need a way for three independent machines to agree on one outcome: everyone commits, or everyone rolls back. That is called **atomic commit**, and the textbook answer is **two-phase commit (2PC)**.
+
+## How two-phase commit works
+
+2PC adds a **coordinator**, often a component inside the service that started the work. The databases doing the work are the **participants**. The protocol has two rounds.
+
+**Phase 1: prepare.** The coordinator asks every participant: "can you commit your part?" Each participant does all the work it would do to commit, writes it durably to disk, keeps its locks, and then answers YES or NO. A YES is a binding promise: "If you tell me to commit, I will, even if I crash and restart in between." Once a participant says YES, it gives up the right to change its mind.
+
+**Phase 2: commit or abort.** If every participant voted YES, the coordinator writes COMMIT to its own log and tells everyone to commit. If any voted NO, or didn't answer in time, it writes ABORT and tells everyone to roll back. Participants apply the decision, release their locks and acknowledge.
+
+<Diagram w={680} h={320} caption="Two rounds. The transaction is decided at one precise moment: when the coordinator writes its decision to its log.">
+  <Box x={20} y={14} w={150} h={48} label="Coordinator" icon="service" tone="accent" />
+  <Box x={270} y={14} w={130} h={48} label="Payments" icon="db" />
+  <Box x={530} y={14} w={130} h={48} label="Seats" icon="db" />
+  <Wire points={[[95, 66], [95, 310]]} arrow={false} dashed />
+  <Wire points={[[335, 66], [335, 310]]} arrow={false} dashed />
+  <Wire points={[[595, 66], [595, 310]]} arrow={false} dashed />
+  <Wire points={[[95, 90], [331, 106]]} tone="req" label="PREPARE" labelAt={[215, 98]} />
+  <Wire points={[[95, 90], [591, 122]]} tone="req" />
+  <Wire points={[[331, 150], [99, 166]]} tone="res" label="YES" labelAt={[215, 158]} />
+  <Wire points={[[591, 150], [99, 182]]} tone="res" />
+  <Tag x={470} y={140} tone="info">locked</Tag>
+  <Box x={20} y={196} w={150} h={34} label="log COMMIT" tone="ok" />
+  <Wire points={[[95, 246], [331, 262]]} tone="ok" label="COMMIT" labelAt={[215, 254]} />
+  <Wire points={[[95, 246], [591, 278]]} tone="ok" />
+  <Text x={180} y={300} anchor="start" size={11} tone="muted">ACKs come back, locks are released</Text>
+</Diagram>
+
+Step through it below. Try a run where every database votes YES, then one where Seats votes NO because A12 was sold a moment ago.
+
+<TwoPhaseCommitSim />
+
+Notice the coordinator's log write. Before it, the transaction can still go either way. After it, the outcome is fixed, even if the coordinator crashes a millisecond later, because on restart it reads its log and finishes the job. Everything in 2PC is arranged around that one durable write.
+
+## The blocking problem
+
+Now reset the visual, step until every participant has voted YES, and crash the coordinator before it logs a decision. Look at the participants. They are **in doubt**.
+
+Each one has promised to commit if told to. It can't commit on its own, because maybe another participant voted NO and the outcome is ABORT. It can't abort on its own either, because maybe the coordinator logged COMMIT just before crashing and another participant has already committed. Breaking its promise in either direction could leave the databases disagreeing. So it waits, holding its locks.
+
+While it waits, seat A12 is locked. Every other fan trying to book A12, and possibly the whole row if locks are coarse, queues behind a transaction nobody can finish. If the coordinator's disk is gone for good, an operator has to decide by hand. This is why 2PC is called a **blocking** protocol: one machine's failure can stop others indefinitely.
+
+<KeyIdea>After voting YES, a participant can't decide alone. If the coordinator disappears at that moment, everything it locked stays locked until the coordinator comes back.</KeyIdea>
+
+<Callout tone="note" title="Can the blocking be fixed?">
+The usual fix is to stop the coordinator from being a single machine: replicate its log with a consensus protocol like Raft (module 13), so another node can take over and finish. This is how distributed databases such as Spanner and CockroachDB use 2PC internally. A variant called three-phase commit avoids blocking only under assumptions about timing that real networks break, so it is mostly a textbook topic.
+</Callout>
+
+## Why 2PC is rare between services
+
+2PC works, and it is used every day *inside* distributed databases and inside Kafka's own transactions. Between independently owned services, teams almost always avoid it. Each reason ties back to something you've already seen.
+
+- **Every participant must speak the protocol.** Your Postgres can prepare a transaction. Your payment provider's REST API can't. Neither can an SMS gateway or an email service. The most important step in the booking, charging the card, can't join.
+- **It's slow.** Two network round trips plus several forced disk writes, with locks held the whole time. Locks on a hot show's seats, held across the network, become a queue.
+- **Availability multiplies.** A transaction needs every participant and the coordinator to be up at the same moment. Three services at 99.9% gives about 99.7%, the same arithmetic as the call chain in the pub/sub lesson.
+- **It couples teams.** The payments team now can't restart its database without thinking about in-doubt transactions owned by the booking team's coordinator. That is the shared-database coupling microservices were meant to remove.
+
+So between services, Gatepass will give up the idea of one atomic transaction. Instead, it will run a sequence of local transactions and plan an undo for each step. That is a **saga**, the next lesson.
+
+<Quiz
+  id="2pc-in-doubt"
+  question="Payments and Seats both voted YES. Then the coordinator crashes before writing its decision. A minute later, what may the Seats database safely do on its own?"
+  options={[
+    "Commit, because everyone it knows of voted YES",
+    "Roll back, because the coordinator is gone",
+    "Nothing: keep the locks and wait for the coordinator or an operator",
+    "Ask Payments what to do and copy its choice"
+  ]}
+  answer={2}
+  explain={<>Seats can't know whether the coordinator logged COMMIT or ABORT before crashing, and a third participant might have voted NO without Seats knowing. Committing or rolling back alone could disagree with the real decision. Asking Payments only helps if Payments already heard the decision, and here it didn't. So it waits. That is the blocking problem.</>}
+/>
+
+## Key takeaways
+
+- Atomic commit across databases needs a protocol. 2PC is the classic one: prepare and vote, then commit or abort.
+- A YES vote is a durable promise. The transaction is decided the moment the coordinator logs its decision.
+- If the coordinator fails after the votes, participants are in doubt and hold locks until it recovers.
+- Inside one distributed database, with a replicated coordinator, 2PC works well. Between services, outside APIs can't take part, and latency, locks and coupling make it a poor fit.
