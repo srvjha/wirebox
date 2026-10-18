@@ -1,0 +1,108 @@
+import { EventSourcingReplay } from "@/components/visuals/event-sourcing-replay"
+
+A fan writes to support: "I booked A12 and A13, but my ticket says A12 and A14." The `bookings` row says A12 and A14, and that is all it can say, because every update overwrote the one before. The business wants a full history of every booking change. Event sourcing gives you that history by making it the only thing you store.
+
+## Store what happened, not just what is
+
+A normal table stores **current state**. When the fan swaps a seat, you run `UPDATE bookings SET seats = '{A12,A14}'`, and the fact that A13 was ever involved is gone. You can bolt on an audit table, but then you have two sources of truth that can drift apart.
+
+**Event sourcing** turns this around. The source of truth is an append-only list of **events**, the facts about what happened, in order:
+
+1. `SeatHeld { seat: A12 }`
+2. `SeatHeld { seat: A13 }`
+3. `SeatReleased { seat: A13 }`
+4. `SeatHeld { seat: A14 }`
+5. `PaymentCaptured { amount: 1800 }`
+6. `TicketIssued`
+
+Current state isn't stored at all. It is **derived** by starting from an empty booking and applying each event in order. That operation, folding a list of events into a value, is the heart of the pattern. In code it is a function `apply(state, event) → state`, and current state is `events.reduce(apply, empty)`.
+
+If this feels familiar, it should. A bank account is event-sourced: the ledger of deposits and withdrawals is the truth, and the balance is computed from it. The Kafka log is the same shape, and so is a database's own write-ahead log. Event sourcing applies that idea to your business data.
+
+<Diagram w={680} h={250} caption="Events are the source of truth. State is a function of the events, so you can rebuild it, or build new views, at any time.">
+  <Group x={16} y={24} w={250} h={208} label="event store (append-only)" tone="info" />
+  <Box x={32} y={42} w={218} h={34} label="1 SeatHeld A12" />
+  <Box x={32} y={82} w={218} h={34} label="2 SeatHeld A13" />
+  <Box x={32} y={122} w={218} h={34} label="3 SeatReleased A13" />
+  <Box x={32} y={162} w={218} h={34} label="4 … 6" dim />
+  <Box x={330} y={72} w={130} h={52} label="apply()" sub="fold in order" icon="worker" tone="accent" />
+  <Wire points={[[266, 128], [326, 98]]} tone="accent" />
+  <Box x={520} y={30} w={150} h={52} label="Booking now" sub="A12, A14 · ticketed" tone="res" />
+  <Box x={520} y={102} w={150} h={52} label="As of 10:41:30" sub="A12, A13 · holding" tone="info" />
+  <Box x={520} y={174} w={150} h={52} label="Seat-swap report" sub="new view, from history" tone="warn" />
+  <Wire points={[[460, 92], [490, 92], [490, 56], [516, 56]]} tone="res" />
+  <Wire points={[[460, 98], [516, 128]]} tone="info" />
+  <Wire points={[[460, 104], [490, 104], [490, 200], [516, 200]]} tone="warn" />
+</Diagram>
+
+## Rebuilding state, and time travel
+
+To load booking b_8812, the service reads its events and folds them. To see what the booking looked like at 10:41:30, it folds only the events up to that time. You get "what did we know then?" for free, which is exactly what support needs to answer the fan's question: they held A13 for 35 seconds, released it and picked A14.
+
+Play with it below. Append events with the commands, then drag the slider back.
+
+<EventSourcingReplay />
+
+A booking has a handful of events, so folding them is instant. A long-lived entity, such as a show's inventory with 40,000 seat events, would take too long to replay on every request. So you take **snapshots**: every N events, store the folded state with the event number it covers. Loading becomes "read the latest snapshot, then apply the few events after it". Snapshots are a cache, not a source of truth. You can delete them all and rebuild from events. Tick the snapshot box in the visual to see how many events each rebuild applies.
+
+## Commands become events
+
+Users don't send events; they send **commands**: "hold seat A15", "cancel my booking". A command is a request, and it can be refused. The service loads the current state, checks the rules (is A15 free? is this booking already cancelled?), and if the command is valid, appends one or more events. The visual does the same: buttons that would break a rule are disabled.
+
+Once appended, an event is a fact and is never refused again. When you replay events, you don't re-check business rules, because the rules might have changed since. A refund issued last year under last year's policy still happened.
+
+Two requests for the same booking can arrive at once. To stop both from appending conflicting events, the append carries the version the command was checked against: "append `SeatHeld A15`, expecting the stream to be at version 6". If someone else appended event 7 first, the append fails, and the service reloads and tries again. This is **optimistic concurrency**, and event stores support it directly.
+
+<KeyIdea>Commands are requests you may reject. Events are facts you never change. State is whatever you get by replaying the facts.</KeyIdea>
+
+## What you get, and what it costs
+
+The benefits are real:
+
+- **A complete audit trail** that can't drift from the data, because it *is* the data.
+- **Time travel** for support, debugging and disputes.
+- **New views from old data.** Product wants "how often do fans swap seats before paying?" A normal table can't answer that. With events, you write a new projection and run it over all of history.
+- **Natural integration with messaging.** The events you store are the events you publish.
+
+And so are the costs, which is why most Gatepass services don't use it:
+
+- **Events are forever.** You can't change an event's shape after the fact, because old events are still on disk. New code must read every version that ever existed, often by **upcasting** old events to the new shape as they load.
+- **Querying is hard.** "All bookings for show 17 in row A" can't be answered by scanning event streams. You need separate read models built from the events, which is the next lesson, CQRS.
+- **Deleting is hard.** Privacy laws may require erasing a fan's personal data from an append-only log. A common trick is to encrypt personal fields with a per-fan key and throw the key away.
+- **It's unfamiliar.** Most engineers think in tables. Debugging a fold is a new skill.
+
+Use it where history is the product: bookings, payments, ledgers, inventory. Don't use it for an organiser's profile page.
+
+<Quiz
+  id="es-rule-change"
+  question="Gatepass changes its rules: from today, bookings are limited to 4 seats. Last year's events include a booking with 6 SeatHeld events. What happens when that booking is replayed?"
+  options={[
+    "Replay fails, because the fifth SeatHeld breaks the rule",
+    "Replay applies all 6 events: they're facts, and rules are checked on commands, not on replay",
+    "Replay silently drops the last two seats",
+    "The old events must be rewritten to match the new rule"
+  ]}
+  answer={1}
+  explain={<>Business rules guard <strong>commands</strong>. Events record what was allowed when it happened. Replay just applies them, so the old booking still has 6 seats, which is the truth. Only new commands are checked against the 4-seat limit.</>}
+/>
+
+<YourTurn
+  id="es-events-for-show"
+  prompt="List the events you would store for a show (not a booking): from the organiser creating it to the night it happens. Name each as a past-tense fact with its key fields."
+  fields={4}
+>
+- `ShowCreated { showId, venueId, title, startsAt }`
+- `TicketTierAdded { tier: "Front row", price: 1500, seats: 120 }`
+- `SalesOpened { at }`, `SalesPaused { reason }`, `SalesClosed { at }`
+- `ShowRescheduled { from, to }` and `ShowCancelled { reason }`
+
+Note what's missing: no `ShowUpdated { ...everything }`. A generic "updated" event loses the *why*. Specific events like `ShowRescheduled` are what make the history useful, and what subscribers like email can react to.
+</YourTurn>
+
+## Key takeaways
+
+- Event sourcing stores an append-only list of events as the source of truth. Current state is a fold over them.
+- You get a complete audit trail, time travel, and the ability to build new views from all of history.
+- Commands are validated and may be rejected; events are facts and are replayed without re-checking rules.
+- Snapshots speed up rebuilding long streams; optimistic concurrency stops conflicting appends.
+- Costs: events are forever, queries need separate read models, and deletion needs care. Use it where history matters.
