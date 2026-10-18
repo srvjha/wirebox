@@ -1,0 +1,101 @@
+Three years in, Gatepass's `bookings` table holds 900 million rows. A fan opening "my tickets" cares about the last few weeks. Yet every query, index and backup carries the other 880 million rows along. Archiving is the unglamorous fix: stop paying hot-storage prices for cold data.
+
+## Data has a temperature
+
+Look at how Gatepass data is actually read:
+
+- **Hot** (last 30 days): constantly read and written. Upcoming gigs, new bookings, refunds in flight.
+- **Warm** (30 days to 2 years): read occasionally. A fan checks last year's ticket, support looks up a dispute.
+- **Cold** (older): almost never read. Kept for accounting, tax law or "we might need it".
+
+A large table hurts even when queries ignore old rows. Indexes grow until they no longer fit in memory, so lookups hit disk. Backups and restores take hours instead of minutes. Schema changes lock a monster table. Vacuum and maintenance jobs never finish. The database is doing work for data nobody asked about.
+
+<Diagram w={640} h={200} caption="Three tiers. Cost per GB falls as you move right; so does how fast you can read it.">
+  <Group x={10} y={20} w={190} h={160} label="hot: 30 days" tone="accent" />
+  <Box x={40} y={60} w={130} label="Primary DB" sub="SSD, ~40M rows" icon="db" tone="accent" />
+  <Group x={225} y={20} w={190} h={160} label="warm: 2 years" />
+  <Box x={255} y={60} w={130} label="Read replica" sub="cheaper disk" icon="db" />
+  <Group x={440} y={20} w={190} h={160} label="cold: forever" tone="info" />
+  <Box x={470} y={60} w={130} label="Object storage" sub="Parquet files" icon="storage" tone="info" />
+  <Wire points={[[172, 86], [253, 86]]} tone="muted" label="nightly job" labelAt={0.5} />
+  <Wire points={[[387, 86], [468, 86]]} tone="muted" label="monthly" labelAt={0.5} />
+  <Text x={105} y={158} size={11} anchor="middle" tone="muted">milliseconds</Text>
+  <Text x={320} y={158} size={11} anchor="middle" tone="muted">tens of ms</Text>
+  <Text x={535} y={158} size={11} anchor="middle" tone="muted">seconds to minutes</Text>
+</Diagram>
+
+## Decide what "old" means and who still needs it
+
+Before moving anything, write down the rule with the people who depend on the data. Gatepass's version:
+
+- Bookings for events that ended more than **90 days** ago and have no open refund or dispute are archivable.
+- Payment records must be retrievable for **7 years** (finance and tax), but nobody needs them in under a second.
+- Personal data, such as phone numbers, may need to be **deleted** on request regardless of age. Archiving is not deleting. If you copy a fan's data into files, your deletion process has to reach those files too.
+
+The condition should be a property of the row (`event_ended_at < now() - 90 days AND status = 'settled'`), not merely its age. Archiving a booking whose refund is still pending creates a very confusing bug.
+
+<Callout tone="warn" title="Retention is a policy, not an engineering default">
+How long you must keep data and how long you may keep it both come from law and contracts. Ask. "Keep everything forever" is also a liability: old personal data is data you can leak.
+</Callout>
+
+## How to move it without breaking things
+
+A safe archiving job is boring and incremental. The pattern:
+
+1. **Select a small batch** of eligible rows (say 5,000 by primary key range).
+2. **Copy** it to the archive: another table, a separate database, or files in object storage.
+3. **Verify** the copy: row count and a checksum.
+4. **Delete** the batch from the primary, in the same job, only after step 3 succeeded.
+5. Pause briefly, repeat.
+
+Small batches matter. One `DELETE FROM bookings WHERE …` of 400 million rows holds locks for hours, bloats the write-ahead log, floods replicas with lag and can take the site down. A job that moves 5,000 rows, sleeps 200 ms and repeats uses a trickle of resources.
+
+Make the job **idempotent**: if it dies between copy and delete, rerunning must not duplicate rows in the archive. Insert with the primary key and ignore conflicts, then delete. Run it off-peak and watch replica lag, backing off if it rises.
+
+A cheaper trick when data is time-ordered: **partition by month** and drop whole partitions. Dropping a partition is instant and costs almost nothing, unlike deleting millions of rows. The next lesson covers it.
+
+## Where archived data lives
+
+| Destination | Good for | Cost |
+| --- | --- | --- |
+| Same DB, `bookings_archive` table | Fast to build, easy joins | Still pays DB storage |
+| Cheaper replica or separate DB | Warm data, occasional queries | Two systems to run |
+| Object storage (S3), Parquet or CSV | Cold data, compliance, analytics | Pennies per GB; query with a batch tool |
+
+Object storage costs roughly a tenth of database disk and has no index to maintain. The price is that you can't `SELECT` it with the app's connection; you use a batch query engine or restore the slice you need.
+
+## Reading archived data
+
+Archiving only works if the product still behaves. Decide what the user sees:
+
+- **A fan opens 2023 tickets.** The app queries the primary, finds nothing, and falls back to the archive, answering a bit slower. Or the UI says "Older bookings load on request" and fetches them with a spinner.
+- **Support needs a three-year-old dispute.** An internal tool restores that fan's rows on demand.
+- **Analytics.** Run reports over the files, not the production database.
+
+The app-level fallback is the risky one. If a request for a missing id always checks the archive, a flood of lookups for ids that never existed becomes a flood of expensive archive reads. Use a small index (a table of `booking_id → archive file`) so the miss is cheap.
+
+## Prove it worked
+
+After the first archive run, Gatepass measures:
+
+- Primary table: 900 million rows down to about 45 million, indexes now fit in memory, "my tickets" p99 drops from 380 ms to 40 ms.
+- Backup time: 5 hours to 25 minutes. Restore, the number that matters in an outage, goes the same way.
+- Storage bill: the archive of 855 million rows is about 60 GB of compressed files.
+
+If you can't show numbers like these, you added complexity for nothing.
+
+<Quiz
+  id="archive-delete-order"
+  question="Your archive job copies 5,000 rows to S3 and then deletes them from the primary. Which ordering of safeguards is correct?"
+  options={["Delete first, then copy, so the table shrinks sooner", "Copy, verify the copy, then delete", "Copy and delete in two separate nightly jobs with no check", "Delete everything older than 90 days in one statement"]}
+  answer={1}
+  explain={<>Never delete data you haven't <strong>verified elsewhere</strong>. Copy first, check counts or checksums, delete only then, and keep batches small so locks stay short.</>}
+/>
+
+## Key takeaways
+
+- Most reads touch recent data. Large old tables slow every query, backup and migration even when nobody reads the old rows.
+- Define hot, warm and cold tiers with an explicit eligibility rule based on the row's state, not just its age.
+- Archive in small, idempotent batches: copy, verify, then delete. Never one giant `DELETE`.
+- Move cold data to cheap object storage; make the product degrade gracefully when users ask for it.
+- Archiving is not deleting: retention and privacy rules apply to the archive too.
