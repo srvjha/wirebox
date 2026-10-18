@@ -1,0 +1,94 @@
+import { SyncAsyncLatency } from "@/components/visuals/sync-async-latency"
+
+It's fest night. Gatepass's booking endpoint reserves the seat, charges the card, renders a PDF ticket, emails it and sends an SMS, all before it replies. Then the SMS provider slows down to four seconds per message. Nothing in Gatepass is broken, yet bookings start timing out, fans tap “Pay” again, and support gets angry messages about double charges.
+
+## A request is a promise to wait
+
+Whatever you do inside a request handler, the user waits for all of it. Their phone shows a spinner. Your server holds a connection, a worker thread or event-loop slot, and maybe a database connection, for the whole duration. If the handler calls five things in a row, the user's wait is the **sum** of all five, and the booking's reliability is the **product** of theirs.
+
+<Diagram w={640} h={170} caption="A synchronous booking: the fan waits for every step, including the ones they don't care about yet.">
+  <Box x={10} y={20} w={100} label="Phone" icon="phone" />
+  <Box x={150} y={20} w={100} h={52} label="Seat" sub="40 ms" tone="info" />
+  <Box x={270} y={20} w={100} h={52} label="Payment" sub="700 ms" tone="accent" />
+  <Box x={390} y={20} w={70} h={52} label="PDF" sub="350" tone="warn" />
+  <Box x={470} y={20} w={70} h={52} label="Email" sub="250" tone="res" />
+  <Box x={550} y={20} w={80} h={52} label="SMS" sub="4,000 ms" tone="err" />
+  <Wire points={[[112, 46], [148, 46]]} tone="req" />
+  <Wire points={[[150, 110], [630, 110]]} tone="err" label="5.3 s before the phone hears anything" />
+  <Text x={320} y={150} size={12}>Each step's latency adds up. Each step's failure fails the booking.</Text>
+</Diagram>
+
+Look at the reliability side. If the payment provider, the PDF renderer, the email API and the SMS API are each up 99.5% of the time, the chance all four work for a given booking is 0.995⁴, about 98%. One booking in fifty fails because of something the fan didn't need yet.
+
+## What the user must wait for
+
+Sort every step with one question: **does the response depend on it?**
+
+- **Reserving the seat** decides the answer (“you got C14” or “sorry, it's gone”). It must run in the request.
+- **Charging the card** too. The fan has to know whether they paid.
+- **The PDF, the email and the SMS** don't change the answer. The booking is real the moment the transaction commits. Delivering the ticket can happen a few seconds later.
+
+That gives you the split: do the decision in the request, record that the follow-up work is owed, reply, and do the follow-up work afterwards in the background.
+
+<KeyIdea>Do in the request only what the answer depends on. Everything else is a promise you keep after replying.</KeyIdea>
+
+## Try it: when the SMS provider slows down
+
+Start with everything inline and drag the SMS response time to 4 seconds. Then move the PDF, email and SMS out of the request.
+
+<SyncAsyncLatency />
+
+Two things change when you move work out. The obvious one is speed: the fan's wait drops from seconds to under a second, and it no longer depends on the SMS provider at all. The less obvious one is **failure isolation**: an SMS outage now delays texts instead of stopping ticket sales. The reserve and payment steps can't move, and that's fine. They're the product.
+
+## The new contract with the user
+
+Asynchronous work changes what your response means. “201 Created” no longer says “you have your ticket in your inbox”. It says “your booking is confirmed and the ticket is on its way”. Design the product around that:
+
+- The confirmation screen shows the ticket from the database immediately, with a QR code the app can render itself. The PDF is a convenience, not the ticket.
+- The “My tickets” page shows delivery status: “Email sent”, “SMS pending”.
+- If delivery fails for good, someone (or something) notices. That's the dead-letter lesson at the end of this module.
+
+## How work gets “later”
+
+The tempting shortcut is to start the work without waiting for it: fire off a promise or a thread inside the request handler and reply right away. It looks async and it is fragile. If the server restarts during a deploy or crashes, every in-flight email is gone, and nothing records that it was ever owed.
+
+Background work needs to be **written down somewhere durable** before you reply, so another process can pick it up even if this one dies. That's a **queue**, and the processes that take work from it are **workers**. The next lesson builds them.
+
+<Diagram w={640} h={170} caption="The split: commit the decision, write down the follow-up work, reply. Workers do the rest.">
+  <Box x={10} y={58} w={100} label="Phone" icon="phone" />
+  <Box x={160} y={58} w={130} label="Booking API" sub="seat + payment" icon="server" />
+  <Box x={340} y={10} w={120} label="Postgres" icon="db" />
+  <Box x={340} y={106} w={120} label="Queue" sub="3 jobs" icon="queue" tone="info" />
+  <Box x={510} y={106} w={120} label="Workers" sub="PDF · email · SMS" icon="worker" />
+  <Wire points={[[112, 84], [158, 84]]} tone="req" />
+  <Wire points={[[292, 72], [338, 40]]} tone="req" label="1 commit" labelAt={[312, 46]} />
+  <Wire points={[[292, 96], [338, 128]]} tone="info" label="2 enqueue" labelAt={[312, 124]} />
+  <Wire points={[[158, 98], [112, 98]]} tone="res" />
+  <Text x={135} y={128} size={10.5} mono tone="res">3 reply</Text>
+  <Wire points={[[462, 132], [508, 132]]} tone="info" flow />
+</Diagram>
+
+<Callout tone="warn" title="Commit first, then enqueue, and know the gap">
+If you enqueue before the transaction commits, a worker can send a ticket for a booking that then rolls back. If you commit and the server crashes before enqueueing, the ticket is never sent. The usual fixes are to save the job in the same database transaction (an “outbox” table, covered in module 16), or to have a sweeper find bookings with no ticket sent after a minute.
+</Callout>
+
+<Quiz
+  id="sync-async-which"
+  question="Which of these should stay inside Gatepass's booking request?"
+  options={[
+    "Updating the organiser's sales dashboard",
+    "Checking that the seat is still free and marking it sold",
+    "Sending a “you might also like” recommendation email",
+    "Generating the PDF ticket",
+  ]}
+  answer={1}
+  explain={<>The response is “you got the seat” or “you didn't”, so the seat check and update must happen before replying. The dashboard, recommendations and the PDF don't change that answer, so they can happen after.</>}
+/>
+
+## Key takeaways
+
+- Everything inside a request adds to the user's wait, and every dependency in it can fail the whole request.
+- Keep in the request only what the response depends on. For a booking: the seat and the payment.
+- Moving slow work out makes responses fast **and** stops a slow third party from taking your main feature down.
+- Async work must be written down durably before you reply. A background thread in the web server is not durable.
+- Asynchronous work changes the promise your response makes, so the product must show pending and failed states.
