@@ -1,0 +1,96 @@
+At 19:00 sharp, tickets for a headline gig went on sale. Gatepass had eight booking partitions, all healthy, all sized the same. Seven of them sat near 5% CPU. The eighth, which held that one event's inventory, hit 100% and started timing out. Adding more partitions would have changed nothing. The problem was not the amount of data. It was one key.
+
+## Skew and hot keys
+
+Partitioning spreads *keys* evenly. It does not spread *traffic*. Real traffic follows a power law: a few keys get a huge share of requests, and most keys get almost none. The usual names:
+
+- **Skew**: partitions carry unequal load.
+- **Hot partition**: one partition carries far more than its share.
+- **Hot key**: a single key so busy that one machine can't keep up, however you place it.
+
+A hash function can't fix this. Every request for `event:headline-gig` hashes to the same place. The same applies to a celebrity's profile, a viral product, a live match score, or a global config row that every request reads.
+
+Hot keys come in two flavours, and the cure differs:
+
+- **Read-hot**: millions read, few write. A show's description page on sale day.
+- **Write-hot**: many writers hit the same row. A seat counter or "tickets sold" number, incremented on every purchase.
+
+## Find it before it finds you
+
+You can't fix what you can't see. Per-partition averages hide this, because the other seven partitions pull the mean down. Look at:
+
+- **Max versus median** load across partitions. A ratio above 2 or 3 is a warning.
+- **Top-K keys** by request count in a short window, from a sampled counter or a streaming sketch (a count-min sketch uses a few kilobytes to find heavy hitters).
+- **Per-key latency and error rate**, so the key behind a timeout storm shows up in a dashboard.
+
+Also watch the *shape* over time. Some hot keys are predictable (a big on-sale is on your calendar). Others appear in minutes, after a tweet. Predictable ones can be prepared for. Surprise ones need automatic responses.
+
+## Fixing read-hot keys
+
+Reads are the easy case, because copies don't conflict.
+
+**Cache in front.** A cache absorbs nearly all reads of a popular key. At 50,000 requests per second for the same event page, a cache with a 5-second TTL turns it into roughly one database read per 5 seconds per cache node. Add **request coalescing** so that on expiry, only one request goes to the database while the rest wait for its answer, avoiding a stampede.
+
+**Replicate the hot key.** Keep extra copies on several nodes and let reads go to any of them. Some stores do this automatically, replicating a hot partition's data for reads only.
+
+**Push it to the edge.** Static-ish content like descriptions and images belongs on a CDN, where it never reaches your partitions.
+
+**Local in-process caches.** For the very hottest data, a tiny cache inside each application server with a 1 to 2 second TTL removes even the network hop.
+
+## Fixing write-hot keys
+
+Writes are harder, since every write must land somewhere and copies must agree. The central technique is to **split the key**.
+
+<Diagram w={680} h={230} caption="Key splitting. A single counter becomes several sub-counters on different partitions. Writes pick one at random; reads add them up.">
+  <Text x={110} y={24} size={11} tone="err" mono>BEFORE</Text>
+  <Box x={20} y={40} w={100} h={40} label="Buyers" icon="user" />
+  <Box x={20} y={140} w={190} h={44} label="sold:gig  (1 key)" sub="one partition, 100% CPU" tone="err" icon="db" />
+  <Wire points={[[70, 80], [70, 140]]} tone="err" label="all writes" labelAt={[70, 112]} />
+  <Text x={500} y={24} size={11} tone="ok" mono>AFTER</Text>
+  <Box x={340} y={40} w={100} h={40} label="Buyers" icon="user" />
+  <Box x={300} y={140} w={96} h={44} label="gig#0" sub="P1" icon="db" />
+  <Box x={410} y={140} w={96} h={44} label="gig#1" sub="P4" icon="db" />
+  <Box x={520} y={140} w={96} h={44} label="gig#2" sub="P6" icon="db" />
+  <Wire points={[[390, 80], [348, 140]]} tone="ok" />
+  <Wire points={[[390, 80], [458, 140]]} tone="ok" />
+  <Wire points={[[390, 80], [568, 140]]} tone="ok" />
+  <Text x={458} y={212} size={11}>read = gig#0 + gig#1 + gig#2</Text>
+</Diagram>
+
+**Key suffixing / sharded counters.** Append a small random number to the hot key (`sold:gig#0` to `sold:gig#9`). Each write goes to a random suffix, so ten partitions share the load. A read fetches all ten and sums them. You trade a read that is 10 times more expensive for writes that scale 10 times. Because hot-key reads are usually cached, this is a good deal.
+
+**Pick the suffix by something useful.** Use the user id or the hour instead of random if you later want to query by it. Keep the suffix count small and known, or reads become a scatter-gather nightmare.
+
+**Buffer and batch.** Don't update the shared row per event. Aggregate in memory for a short time (say 200 ms) and write one combined update: "plus 340" instead of 340 separate increments. You exchange a little delay for a large drop in write rate.
+
+**Move the contention elsewhere.** For seat inventory, you can't just split the counter, since two buyers must not get the same seat. Instead, **pre-allocate**: split the 5,000 seats of the gig into 10 blocks of 500, each owned by one partition. A buyer is routed to a block. Contention drops 10-fold without breaking the one-seat-one-buyer rule. When a block runs out, the router moves buyers to the next.
+
+**Queue it.** Put purchases in a queue for that event and process them in order from a single worker (see the queues module). The hot key becomes a steady drip instead of a spike, and the worker owns correctness.
+
+## Don't forget the people
+
+Some of the worst hot keys are really *hot tenants*. A single large organiser can account for half your traffic. A directory-based scheme lets you move that tenant to dedicated hardware. And a rate limiter per key or per tenant makes sure one noisy customer cannot take the whole fleet down.
+
+<Callout tone="tip" title="Plan for the on-sale">
+For events you know will be hot, don't wait for an alert. Warm caches, pre-split counters and pre-allocate seat blocks before the sale opens.
+</Callout>
+
+<YourTurn
+  id="hot-key-plan"
+  prompt="Gatepass shows a live 'tickets left' number on a headline gig page, read 30,000 times per second and updated on every purchase (up to 800 per second). Name the hot key problems here and one fix for each."
+  fields={3}
+  minAnswers={2}
+  hint="Separate the read side from the write side."
+>
+There are two problems. The **read side** (30,000 reads per second on one key) is solved with caching: a short-TTL cache or local in-process cache, plus coalescing, since "tickets left" can be a second behind without anyone noticing.
+
+The **write side** (800 updates per second on one counter row) is solved by splitting or batching: keep the authoritative count in sharded sub-counters or per-block seat inventory, and push the displayed number out on a timer. Buyers hit the authoritative inventory; the page shows a cached approximation.
+</YourTurn>
+
+## Key takeaways
+
+- Partitioning evens out keys, not traffic. One hot key can overload a partition no matter how many you add.
+- Find hot keys by comparing max to median load and tracking top-K keys, not by looking at averages.
+- Read-hot keys are fixed with caches, request coalescing, replicas and CDNs.
+- Write-hot keys are fixed by splitting the key into sub-keys, batching writes, pre-allocating blocks or serialising through a queue.
+- Some hot keys are hot tenants: isolate them and rate-limit them.
