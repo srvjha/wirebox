@@ -40,13 +40,11 @@ Play with it below. Start with N = 3, W = 2, R = 2 and try to make a read stale 
 
 Pick them and you pick a personality:
 
-| N | W | R | Behaviour |
-| --- | --- | --- | --- |
-| 3 | 2 | 2 | Balanced. Survives one node down for both reads and writes. Reads see the latest write. |
-| 3 | 3 | 1 | Fast reads from any one replica, but a single dead node blocks all writes. |
-| 3 | 1 | 3 | Fast writes, but reads must reach every replica, so one dead node blocks reads. |
-| 3 | 1 | 1 | Fastest and always available, with no overlap. Reads can be stale. |
-| 5 | 3 | 3 | Survives two nodes down and still overlaps. |
+- **N = 3, W = 2, R = 2**: Balanced. Survives one node down for both reads and writes. Reads see the latest write.
+- **N = 3, W = 3, R = 1**: Fast reads from any one replica, but a single dead node blocks all writes.
+- **N = 3, W = 1, R = 3**: Fast writes, but reads must reach every replica, so one dead node blocks reads.
+- **N = 3, W = 1, R = 1**: Fastest and always available, with no overlap. Reads can be stale.
+- **N = 5, W = 3, R = 3**: Survives two nodes down and still overlaps.
 
 Notice the trade: raising W makes writes slower and less available but makes reads cheaper, and vice versa. Latency follows the slowest of the fastest W (or R) replies. With W = 2 of 3, a single slow replica doesn't hurt you, because you stop waiting once two have answered.
 

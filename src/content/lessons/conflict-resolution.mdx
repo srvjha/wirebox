@@ -68,14 +68,12 @@ CRDTs have costs. Metadata grows (tombstones for removed items, a counter per re
 
 ## Choosing a strategy
 
-| Data | Strategy |
-| --- | --- |
-| Seat ownership | Avoid: single leader per show |
-| Payment state | Avoid: one writer, with a state machine |
-| Viewer counts | CRDT counter |
-| Saved shows (wishlist) | OR-set CRDT, or union merge of siblings |
-| Profile fields | Per-field LWW with hybrid clocks |
-| Last seen | Plain LWW |
+- **Seat ownership**: Avoid: single leader per show
+- **Payment state**: Avoid: one writer, with a state machine
+- **Viewer counts**: CRDT counter
+- **Saved shows (wishlist)**: OR-set CRDT, or union merge of siblings
+- **Profile fields**: Per-field LWW with hybrid clocks
+- **Last seen**: Plain LWW
 
 The pattern: the more a lost update would hurt, the more you should avoid concurrency altogether, and the more harmless it is, the more you can let a merge rule settle it.
 

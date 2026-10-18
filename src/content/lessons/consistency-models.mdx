@@ -53,14 +53,12 @@ Read-your-writes and monotonic reads only constrain what <em>one user</em> sees.
 
 The common mistake is choosing one level for the whole system. Pick it per feature, based on what a wrong answer costs.
 
-| Feature | Wrong answer costs | Choose |
-| --- | --- | --- |
-| Seat booking | Two people, one seat | Linearizable, via the leader |
-| Payment status | Double charge or lost payment | Linearizable for the write, read-your-writes for the page |
-| "My tickets" page | Confused customer, support ticket | Read-your-writes plus monotonic reads |
-| Event comments | Odd ordering | Causal or consistent prefix |
-| Viewers right now | Nothing | Eventual |
-| Search index of shows | Brief missing listing | Eventual |
+- **Seat booking** (wrong answer costs: Two people, one seat; choose: Linearizable, via the leader)
+- **Payment status** (wrong answer costs: Double charge or lost payment; choose: Linearizable for the write, read-your-writes for the page)
+- **"My tickets" page** (wrong answer costs: Confused customer, support ticket; choose: Read-your-writes plus monotonic reads)
+- **Event comments** (wrong answer costs: Odd ordering; choose: Causal or consistent prefix)
+- **Viewers right now** (wrong answer costs: Nothing; choose: Eventual)
+- **Search index of shows** (wrong answer costs: Brief missing listing; choose: Eventual)
 
 Notice the booking service might use three levels at once. The write path goes to the leader. The confirmation page reads from the leader for a few seconds. The browse pages read from any replica.
 

@@ -70,12 +70,10 @@ What you should see:
 
 ## Choosing
 
-| If your workload is | Lean toward |
-| --- | --- |
-| Range scans and ordered reads dominate | Range, with a key that spreads writes |
-| Point lookups by id, huge write volume | Hash |
-| Few big tenants, special placement rules | Directory |
-| Mixed: lookups by id plus "recent for this id" | Hash on id, sorted within |
+- **Range scans and ordered reads dominate**: Range, with a key that spreads writes
+- **Point lookups by id, huge write volume**: Hash
+- **Few big tenants, special placement rules**: Directory
+- **Mixed: lookups by id plus "recent for this id"**: Hash on id, sorted within
 
 Before picking, ask three things: What are my top three queries? Which key do they all share? Does that key spread traffic evenly today, and will it in a year? A key that is right for the query but skewed in traffic (city, in Gatepass's case) calls for either a finer key (city plus show id) or a different strategy.
 
