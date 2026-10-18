@@ -1,36 +1,96 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Wirebox
 
-## Getting Started
+**Learn system design by building it. Free, forever.**
 
-First, run the development server:
+Wirebox is a visual, hands-on system design course. Every concept is taught with an
+interactive diagram first, then you use it to design a real product in a lab, load-test
+your design in a simulator, and fix what breaks.
+
+- **Learn** — 19 modules across three parts (Foundations, Distributed systems, Under the
+  hood), following one app, *Gatepass*, from one server to many regions.
+- **Labs** — design products like a URL shortener from requirements → API → schema →
+  architecture canvas, then run load tests with traffic spikes, scrapers, cache restarts,
+  dead servers and failed databases.
+- **No paywall.** Accounts are optional and only sync progress across devices.
+
+## Stack
+
+| | |
+|---|---|
+| App | Next.js 16 (App Router, Cache Components, Turbopack), React 19, TypeScript |
+| Styling | Tailwind CSS v4, Geist, dark-neutral + light themes |
+| Data fetching | TanStack Query |
+| Content | MDX lessons with a server-rendered SVG diagram kit and interactive visuals |
+| Labs | React Flow canvas, Zustand, an analytical simulator in `src/sim` (Vitest-calibrated) |
+| Auth | Better Auth (email/password, optional Google & GitHub) |
+| Database | Postgres 17 (Docker) + Drizzle ORM |
+| Analytics | PostHog via a `/ingest` reverse proxy; server-side sign-up events |
+| AI debriefs | Anthropic API (optional) for "why did my design fail?" |
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+cp .env.example .env          # set BETTER_AUTH_SECRET: openssl rand -base64 32
+pnpm db:up                    # Postgres on localhost:5433
+pnpm db:migrate
+pnpm dev                      # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Run everything in containers instead:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+docker compose --profile app up --build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Environment
 
-## Learn More
+| Variable | Needed for |
+|---|---|
+| `DATABASE_URL` | Postgres (defaults to the Docker database) |
+| `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` | Sessions |
+| `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET` | Optional OAuth buttons (hidden when unset) |
+| `ADMIN_EMAILS` | Comma-separated emails allowed to open `/admin` |
+| `NEXT_PUBLIC_POSTHOG_KEY` | Analytics (disabled when unset) |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | AI lab debriefs (falls back to built-in feedback) |
 
-To learn more about Next.js, take a look at the following resources:
+OAuth callback URLs: `<BETTER_AUTH_URL>/api/auth/callback/google` and `/callback/github`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Who sees what
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Learners** see only their own progress (`/me`).
+- **Admins** (`ADMIN_EMAILS`) see `/admin`: total users, sign-ups per day, active learners,
+  lesson and lab completion, load-test pass rates.
+- **PostHog dashboards** (behaviour, funnels, session replays) live in your PostHog project
+  and are visible only to its members.
 
-## Deploy on Vercel
+## Scripts
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| | |
+|---|---|
+| `pnpm dev` / `pnpm build` / `pnpm start` | Next.js |
+| `pnpm test` | Simulator calibration tests (Vitest) |
+| `pnpm lint`, `pnpm typecheck` | Checks |
+| `pnpm db:generate` / `pnpm db:migrate` / `pnpm db:studio` | Drizzle |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Project layout
+
+```
+src/
+  app/(site)/        landing, /learn, /labs index, /sign-in, /me, /admin
+  app/labs/[slug]/   full-screen lab player
+  app/api/           auth, progress, lab progress & runs, postmortem
+  components/        diagram kit, lesson blocks, visuals, lab engine, site chrome
+  content/           course outline, MDX lessons, lab definitions
+  lib/               auth, db (Drizzle schema), analytics, progress
+  sim/               load-test simulator + tests
+```
+
+## Adding content
+
+- **A lesson:** add `src/content/lessons/<slug>.mdx` for a slug in `src/content/course.ts`.
+  It goes live automatically. Diagram kit and lesson blocks are available without imports.
+- **A lab:** add a definition in `src/content/labs/`, register it in `src/content/labs/index.ts`
+  and add calibration tests in `src/sim` so the reference design passes and naive ones fail.
+
+Labs are modeled on well-known products for teaching; Wirebox isn't affiliated with them.
