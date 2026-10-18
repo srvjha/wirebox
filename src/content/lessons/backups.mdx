@@ -1,0 +1,115 @@
+On a Tuesday afternoon, a developer runs a cleanup script against what they believe is staging. It was production. By 3:14 pm, the `orders` table is empty, and the replicas, faithful as always, emptied themselves a few milliseconds later. Failover can't help and neither can replicas. The only thing between Gatepass and a very bad week is the backup, if one exists and if it works.
+
+## What replicas and failover don't protect against
+
+Everything so far protects against a machine dying. None of it protects against the data being wrong:
+
+- a bad `DELETE` or `UPDATE`, or a migration that drops a column;
+- a bug that quietly corrupts rows for three days;
+- ransomware or a compromised credential;
+- an entire region or cloud account being lost;
+- someone deleting the database instance.
+
+Replication copies the mistake. A backup is a separate, older copy that mistakes can't reach. They solve different problems, and you need both.
+
+## Two kinds of backup
+
+**Snapshots (full backups).** A copy of the whole database as of one moment. A nightly snapshot of a 200 GB database is easy to store and easy to restore. The weakness is the gap: restore last night's snapshot and every order since then is lost.
+
+**Continuous log archiving.** The database already writes every change to a log (the write-ahead log in Postgres). Ship those log segments to storage as they're produced, typically every minute or so. Now you hold a base snapshot plus an unbroken stream of changes after it.
+
+Together they give you **point-in-time recovery (PITR)**: restore the snapshot, then replay the log up to any chosen moment, such as 3:13:59 pm, one second before the script ran.
+
+<Diagram w={700} h={210} caption="A base snapshot plus the archived change log lets you rebuild the database as it was at any moment you choose.">
+  <Box x={20} y={20} w={150} h={48} label="Primary" sub="writes WAL" icon="db" tone="accent" />
+  <Box x={270} y={20} w={170} h={48} label="Object storage" sub="other region" icon="storage" tone="info" />
+  <Box x={520} y={20} w={160} h={48} label="Restored DB" sub="state at 3:13:59" icon="db" tone="ok" />
+  <Wire points={[[170, 44], [270, 44]]} tone="accent" label="snapshot + log" labelAt={[220, 30]} />
+  <Wire points={[[440, 44], [520, 44]]} tone="ok" label="replay to a time" labelAt={[480, 30]} />
+  <Packet points={[[170, 44], [270, 44]]} dur={2} tone="req" />
+  <Packet points={[[440, 44], [520, 44]]} dur={2} delay={1} tone="res" />
+  <Wire points={[[20, 150], [680, 150]]} tone="muted" arrow={false} />
+  <Tag x={90} y={168} tone="info">02:00 snapshot</Tag>
+  <Tag x={400} y={168} tone="err">15:14 bad script</Tag>
+  <Tag x={560} y={168} tone="ok">restore to 15:13:59</Tag>
+</Diagram>
+
+## RPO and RTO
+
+Two numbers define what you need. Agree on them with the business before choosing tools.
+
+- **RPO (recovery point objective)**: how much data you can afford to lose, measured in time. A nightly snapshot has an RPO of up to 24 hours. Log archiving every minute gives about 1 minute. Synchronous replication to another region gives close to zero.
+- **RTO (recovery time objective)**: how long you can be down. Restoring 200 GB and replaying a day of logs may take 30 to 90 minutes. A warm standby takes seconds.
+
+Tighter targets cost more. For Gatepass, orders and payments might need RPO under a minute and RTO under an hour. The marketing database can take RPO of a day and RTO of a day.
+
+<KeyIdea>The backup you haven't restored isn't a backup. It's a hope.</KeyIdea>
+
+## The 3-2-1 idea
+
+A classic rule: keep **3** copies of the data, on **2** different kinds of storage, with **1** offsite. For a cloud database translate it as:
+
+- the live database plus its replicas (copy one);
+- automated snapshots and log archive in object storage (copy two);
+- a copy in another region and, ideally, another account, with delete protection or object lock so a compromised credential cannot erase it (copy three).
+
+Also **encrypt** backups and control who can read them. A backup holds all the data the database does, and it often has weaker access controls.
+
+## Testing restores
+
+Backups fail silently. Real incidents involve backups that were never configured on the new database, that ran but were empty, that were encrypted with a lost key, or that took 14 hours to restore when the business had four.
+
+Make restores routine:
+
+1. **Restore automatically every week** into a scratch instance, run a few sanity queries (row counts, the latest order timestamp) and alert if they fail.
+2. **Time it.** The measured restore time is your real RTO, whatever the plan says.
+3. **Practise the human parts.** Who decides? Where are the runbook and the credentials? Run a game day once or twice a year where the team restores to a chosen point without help.
+4. **Monitor the backup itself.** Alert if the newest snapshot or log segment is older than your RPO.
+
+<Callout tone="warn" title="Restoring over production">
+When you recover from a bad delete, restore into a **new** instance first, then copy back only the damaged tables or rows. Restoring over the live database throws away the legitimate writes made since the mistake, and you can't undo it.
+</Callout>
+
+## Recovering from the bad script
+
+For the 3:14 pm incident, the plan reads:
+
+1. Stop the damage: revoke the script's access, put the app in read-only or maintenance mode.
+2. Pick the target time, 3:13:59 pm, from the audit log.
+3. Restore the last snapshot and replay logs to that time on a fresh instance. About 40 minutes.
+4. Compare: export the lost `orders` rows from the restored instance and load them into production, then reconcile against payment-provider records for the orders placed in the gap.
+5. Afterwards, fix the cause: separate credentials for staging and production, a confirmation on destructive scripts, and read-only access by default.
+
+<Quiz
+  id="backup-pitr"
+  question="Gatepass takes a snapshot at 02:00 and archives its change log every minute. At 15:14 a script deletes the orders table. What's the best recovery?"
+  options={[
+    "Fail over to a replica",
+    "Restore the 02:00 snapshot and accept losing the day's orders",
+    "Restore the snapshot into a new instance and replay the log up to 15:13:59",
+    "Restore the snapshot over the live database",
+  ]}
+  answer={2}
+  explain={<>Replicas already replayed the delete, so failing over doesn't help. The snapshot alone loses 13 hours of orders. Snapshot plus log replay gives point-in-time recovery to just before the mistake, and using a new instance keeps the live database untouched while you check the result.</>}
+/>
+
+<YourTurn
+  id="backup-plan"
+  prompt="Write the backup plan for Gatepass's orders database: the RPO and RTO you'd choose, what you'd run, where copies live, and how you'd know it works."
+  fields={4}
+  minAnswers={3}
+>
+- **Targets**: RPO of about 1 minute and RTO of 1 hour for orders and payments. A looser target for analytics.
+- **Method**: daily snapshot plus continuous log archiving for point-in-time recovery, retained for 30 days. Replicas for failover are separate from this.
+- **Copies**: object storage in a second region and a separate account, with object lock so no single credential can delete them. Encrypted, with the key stored separately.
+- **Verification**: an automated weekly restore to a scratch instance with sanity queries, an alert when the newest log segment is more than 5 minutes old, and a twice-yearly game day to measure real restore time.
+- **Access**: people have read-only credentials by default, and destructive scripts require a confirmation naming the environment.
+</YourTurn>
+
+## Key takeaways
+
+- Replicas and failover protect against hardware failure. Only backups protect against bad data, bugs and attackers.
+- Snapshots plus archived logs give point-in-time recovery to any moment, such as just before a bad script.
+- Choose RPO (data you can lose) and RTO (time you can be down) first. Tighter targets cost more.
+- Keep copies in another region and account, encrypted and protected from deletion.
+- Restore regularly and time it. An untested backup is only a hope.
