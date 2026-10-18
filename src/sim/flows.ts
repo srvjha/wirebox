@@ -310,7 +310,6 @@ export function evaluateFlows(input: FlowEvalInput): FlowResult {
   const capOf = (n: SimNode) => cfg[n.kind]?.cap ?? nodeCap(n);
   const hitRateOf = (n: SimNode) => n.hitRate ?? kv.values.hitRate ?? cfg[n.kind]?.hitRate ?? DEFAULT_HIT;
   const terminal = (k: Kind) => ALLOWED_TARGETS[k].length === 0;
-  const wsNodes = nodes.filter((n) => n.kind === "ws");
   const pubsubWired =
     nodes.some((n) => n.kind === "pubsub" && !down.has(n.id)) &&
     edges.some((e) => byId.get(e.from)?.kind === "ws" && byId.get(e.to)?.kind === "pubsub") &&
