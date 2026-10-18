@@ -1,0 +1,99 @@
+Gatepass autoscales to 40 API servers for the sale, each configured to keep up to 100 database connections open. The arithmetic takes a second: 4,000 connections, against a database that comfortably handles a couple of hundred. Postgres starts refusing connections with "too many clients already" and checkout dies, even though the database's CPU is at 20%.
+
+## Why connections are expensive
+
+A database connection is not a cheap thing. To open one, the client and server do a TCP handshake, usually TLS, authentication, and set up session state. That's 20 to 100 ms. On the server side, Postgres starts a dedicated **process** for each connection and reserves memory for it, commonly several megabytes.
+
+So a database has a practical connection ceiling. Postgres defaults to `max_connections = 100`. Tuned servers go to a few hundred, and past that performance gets worse, because hundreds of processes compete for the same CPU cores and cache. A database with 8 cores does not run 4,000 queries in parallel. It runs about 8 at a time, and the rest wait.
+
+<Diagram w={700} h={220} caption="Without pooling, every app server holds its own set of connections. With a pool in the middle, thousands of clients share a few dozen real connections.">
+  <Group x={10} y={8} w={330} h={204} label="Without a pool" tone="muted" />
+  <Box x={30} y={40} w={110} h={40} label="API ×40" icon="server" tone="info" />
+  <Box x={210} y={78} w={110} h={52} label="Postgres" sub="4,000 conns ✕" icon="db" tone="err" />
+  <Wire points={[[140, 60], [210, 90]]} tone="err" label="100 each" labelAt={[176, 62]} />
+  <Group x={360} y={8} w={330} h={204} label="With a pool" tone="muted" />
+  <Box x={375} y={40} w={96} h={40} label="API ×40" icon="server" tone="info" />
+  <Box x={500} y={60} w={80} h={44} label="Pooler" icon="service" tone="accent" />
+  <Box x={600} y={78} w={80} h={52} label="Postgres" sub="40 conns" icon="db" tone="ok" />
+  <Wire points={[[471, 60], [500, 80]]} tone="req" />
+  <Wire points={[[580, 82], [600, 100]]} tone="ok" />
+  <Packet points={[[471, 60], [500, 80]]} dur={1.5} tone="req" />
+  <Packet points={[[580, 82], [600, 100]]} dur={1.5} delay={0.7} tone="req" />
+</Diagram>
+
+## What a pool does
+
+A **connection pool** opens a fixed set of connections once and lends them out. A request borrows a connection, runs its queries, and returns it. Nobody pays the connection setup cost again, and the number of real connections stays at a number you chose.
+
+When all connections are in use, new requests **wait in a queue** for one to come back, up to a timeout. That's the important behaviour: waiting in an orderly line is far better for the database than a stampede.
+
+Pools live in two places:
+
+1. **In the application** (a library pool). Each server process has its own, say 10 connections. Simple, and enough for a handful of servers.
+2. **In a separate proxy** (PgBouncer, Odyssey, RDS Proxy, ProxySQL). All app servers connect to the proxy, which multiplexes them onto a small set of real database connections. This is what you want once you have dozens of servers, serverless functions, or autoscaling, since the total no longer grows with the server count.
+
+Per-server pools add up. Forty servers times a pool of 10 is 400 connections, and autoscaling to 100 servers makes that 1,000 without anybody touching the config.
+
+## How big should a pool be?
+
+Smaller than you think. Connections beyond what the database can run in parallel only add queueing and context switching. A well-known starting rule is:
+
+*pool size ≈ (CPU cores × 2) + number of disks*
+
+For an 8-core database that's about 17 connections in total, shared by *all* servers. A request spends most of its time outside the database (calling a payment provider, rendering JSON), so 17 busy connections can serve hundreds of requests per second.
+
+Use arithmetic to find the real limit. If a query takes 5 ms on average and you have 20 connections, you can run 20 ÷ 0.005 = 4,000 queries per second. If each request makes 4 queries, that's about 1,000 requests per second from 20 connections. If queries average 50 ms because of a missing index, the same pool does a tenth of that, and no pool size fixes slow queries.
+
+<Callout tone="warn" title="Never hold a connection while waiting on something slow">
+If a request opens a transaction, calls the payment provider (2 seconds), then commits, it holds a connection for 2 seconds doing nothing. Twenty such requests drain a pool of 20, and everything else queues. Do slow external calls outside the transaction, and keep transactions short.
+</Callout>
+
+## Pool modes in a proxy
+
+A proxy like PgBouncer can lend connections at different granularity:
+
+- **Session pooling**: a client keeps the same connection until it disconnects. Safe, but saves little, since idle clients still hold connections.
+- **Transaction pooling**: a connection is lent for one transaction, then goes back. This gives the best multiplexing, and thousands of clients can share dozens of connections. The catch: anything that depends on session state, such as `SET` commands, advisory locks, or some prepared statements, can misbehave, because the next transaction may run on a different connection.
+- **Statement pooling**: per statement. Rarely used, as it breaks multi-statement transactions.
+
+Most systems with many app servers choose transaction pooling and avoid session-level features.
+
+## Failure modes
+
+- **Pool exhaustion.** All connections busy, requests wait, the queue fills, timeouts fire. The symptom is latency, not database CPU. Watch "connections in use", "requests waiting" and wait time.
+- **Connection storms.** After a restart or failover (see the previous lesson), every server reconnects at the same moment. Use backoff with jitter, and a proxy that absorbs the herd.
+- **Leaks.** Code that borrows a connection and forgets to return it on an error path. The pool slowly drains until the app hangs. Always return connections in a `finally` block or use a helper that does.
+- **Stale connections.** A firewall silently closes idle connections and the pool hands out a dead one. Use a validation query or a maximum connection lifetime.
+
+<Quiz
+  id="pool-math"
+  question="Gatepass autoscales from 10 to 60 API servers. Each has a library pool of 20 connections. The database allows 300 connections. What happens at 60 servers, and what's the best fix?"
+  options={[
+    "Nothing; 20 per server is fine",
+    "1,200 connections are attempted and the database refuses many; put a pooling proxy in front and use a small total",
+    "The database gets faster because there are more connections",
+    "Raise max_connections to 2,000",
+  ]}
+  answer={1}
+  explain={<>60 × 20 is 1,200, four times the limit. Raising max_connections to 2,000 only makes the database spend its time on context switching. A pooling proxy keeps the real total fixed (for instance 50) no matter how many servers exist, and lets extra requests wait their turn.</>}
+/>
+
+<YourTurn
+  id="pool-plan"
+  prompt="Size the database connections for Gatepass: 8-core Postgres, up to 60 API servers during the sale, queries averaging 8 ms with about 3 queries per request. Where does the pool live and how big is it?"
+  fields={3}
+  minAnswers={2}
+>
+- **Where**: a pooling proxy (PgBouncer in transaction mode) between the servers and Postgres, so server count no longer decides the connection count. Small local pools of 3 to 5 per server are fine on the client side.
+- **Size**: about 20 real connections to Postgres (8 cores × 2 + a few). Each request needs about 24 ms of connection time, so 20 connections can sustain 20 ÷ 0.024 ≈ 830 requests per second.
+- **If that isn't enough**: fix slow queries first, add read replicas for reads, and give each replica its own pool.
+- **Safety**: a pool wait timeout of about 2 seconds, so overload is a fast error rather than a hung page, plus an alert on waiting requests.
+</YourTurn>
+
+## Key takeaways
+
+- Connections are costly to open and costly to hold. Databases work best with tens, not thousands.
+- A pool reuses a small set of connections and makes extra requests wait in line instead of overwhelming the database.
+- Per-server pools multiply with autoscaling. A proxy in transaction mode keeps the total fixed.
+- Keep pools small, keep transactions short, and never hold a connection during a slow external call.
+- Watch for exhaustion, reconnect storms and leaks. Pools fix connection costs, not slow queries.
