@@ -1,0 +1,100 @@
+Two fans try to grab the last front-row seat for a stand-up show. Each request lands on a different booking server, and each server stamps its write with the current time. The later timestamp wins. It sounds airtight, and it can hand the seat to the person who clicked second. The problem isn't the code. It's that every machine has its own clock, and they disagree.
+
+## Two clocks on every machine
+
+Each computer actually gives you two different clocks, and mixing them up causes real bugs:
+
+- The **wall clock** (time of day) answers "what time is it?", like `2026-10-18T10:00:00.012Z`. It's what you put in a database column. It's kept roughly right by synchronising with time servers over the network, which means it can be **adjusted**: nudged faster or slower, or even jumped backwards.
+- The **monotonic clock** answers "how much time has passed since some arbitrary point?". It never goes backwards, and its absolute value means nothing. It's what you should use to measure durations: timeouts, latencies, lease lengths.
+
+<Callout tone="warn" title="Don't time things with the wall clock">
+`elapsed = Date.now() - start` can come out negative, or ten seconds too long, if the wall clock is adjusted in between. Use the monotonic clock (`performance.now()` in JavaScript, `time.monotonic()` in Python, `System.nanoTime()` in Java) for anything you measure.
+</Callout>
+
+## Clocks drift and jump
+
+A machine's clock is a quartz crystal counting oscillations. Crystals aren't perfect: a typical one drifts by around 20 to 50 parts per million, depending on temperature. That sounds tiny, but 50 ppm is about 4 seconds a day.
+
+To correct this, machines sync with time servers using **NTP**. NTP is good, but not exact. Its accuracy is limited by network delay, which it can only estimate. Inside one data centre, clocks typically agree within a few milliseconds. Across regions, or with a congested network, tens of milliseconds is normal, and a misconfigured server can be off by seconds or minutes without anyone noticing.
+
+Worse, clocks don't just drift smoothly:
+
+- When NTP finds a clock far off, it may **step** it, jumping instantly forwards or backwards.
+- A virtual machine can be **paused** for live migration and resumed, and its clock leaps forward by the pause.
+- **Leap seconds** have historically produced a minute with 61 seconds, which broke plenty of systems that assumed time only ticks forward evenly.
+
+So when two machines each say "10:00:00.100", the honest reading is "10:00:00.100, give or take some milliseconds that I can't see".
+
+## Ordering by timestamp breaks
+
+Back to the last seat. Server A's clock is accurate. Server B's clock runs 80 ms behind.
+
+<Diagram w={640} h={260} caption="Fan 1 really booked first, but server A's accurate clock gives her the later timestamp. Last write wins hands the seat to fan 2.">
+  <Text x={60} y={30} size={11} tone="muted" mono>REAL TIME →</Text>
+  <Wire points={[[60, 42], [600, 42]]} tone="muted" />
+  <Box x={20} y={70} w={130} h={46} label="Server A" sub="clock accurate" icon="server" />
+  <Box x={20} y={170} w={130} h={46} label="Server B" sub="80 ms behind" icon="server" tone="warn" />
+  <Wire points={[[170, 93], [600, 93]]} tone="muted" arrow={false} />
+  <Wire points={[[170, 193], [600, 193]]} tone="muted" arrow={false} />
+  <Box x={250} y={74} w={150} h={38} label="Fan 2 · ts .130" tone="req" />
+  <Text x={325} y={132} size={11} tone="muted">real time 10:00:00.130</Text>
+  <Box x={210} y={174} w={150} h={38} label="Fan 1 · ts .020" tone="ok" />
+  <Text x={285} y={236} size={11} tone="muted">real time 10:00:00.100</Text>
+  <Box x={460} y={124} w={150} h={46} label="LWW keeps .130" sub="seat → fan 2" tone="err" />
+  <Wire points={[[400, 93], [460, 135]]} tone="err" />
+  <Wire points={[[360, 193], [460, 160]]} tone="muted" dashed />
+</Diagram>
+
+Fan 1 clicked at real time .100, on server B, which stamps it .020. Fan 2 clicked 30 ms later on server A, which stamps it .130. "Latest timestamp wins" (often called **last write wins**, or LWW) keeps fan 2's write and silently discards fan 1's. Nobody sees an error. Fan 1 gets a confirmation screen if you're unlucky, and no seat.
+
+The same mistake shows up in other forms:
+
+- Sorting log lines from many servers by timestamp, and concluding that an effect happened before its cause.
+- Expiring a cache entry or a token on one machine based on a time written by another.
+- Deciding "which update is newer" when syncing data between regions.
+
+<KeyIdea>Timestamps from different machines can't tell you which event happened first. They're only as good as the clocks, and the clocks disagree.</KeyIdea>
+
+## Logical clocks: order without time
+
+Often you don't need to know *when* something happened, only *what came before what*. For that, you can drop physical time entirely and use a **logical clock**.
+
+The simplest is a **Lamport clock**. Every node keeps a counter:
+
+1. Before each event, the node adds one to its counter.
+2. When it sends a message, it includes its counter.
+3. When it receives a message, it sets its counter to `max(mine, received) + 1`.
+
+That's all. The guarantee: if event X could have caused event Y (because a message chain links them), X's number is smaller than Y's. Effects never get a smaller number than their causes, no matter what the wall clocks say.
+
+What Lamport clocks can't tell you is whether two events were **concurrent**, meaning neither knew about the other. Fan 1's and fan 2's bookings were concurrent: neither server had heard of the other's write. A Lamport clock will still put one before the other, arbitrarily. To *detect* concurrency, so you can flag a conflict instead of silently dropping a write, you need **version vectors**, which you'll meet in the conflict resolution lesson.
+
+## When you really need one order
+
+For the last seat, you don't need a better clock. You need **one place that decides**:
+
+- Send all writes for a seat to the **same leader**, and let that leader's order be the order. A database row lock or a unique constraint does this for you: the second `INSERT` for seat C14 simply fails.
+- Use a **sequence** from one source (a database sequence, or a log like Kafka where each partition assigns offsets) instead of timestamps from many.
+
+Some systems do need real-time ordering across the globe. Google's Spanner uses GPS receivers and atomic clocks in every data centre to keep clock uncertainty to a few milliseconds, and then makes each transaction **wait out the uncertainty** before committing, so timestamps are guaranteed to respect real order. That's a lot of hardware to make clocks trustworthy. Most systems, including Gatepass, are better off not depending on them.
+
+<Quiz
+  id="clock-ordering"
+  question="Two booking servers update the same seat within a few milliseconds of each other. Which approach reliably prevents both fans from getting it?"
+  options={[
+    "Compare the servers' timestamps and keep the later write",
+    "Sync both servers' clocks with NTP more often",
+    "Route both writes through one place that decides, such as a unique constraint on (show, seat) in the database",
+    "Use the monotonic clock instead of the wall clock",
+  ]}
+  answer={2}
+  explain={<>Timestamps from different machines can be off by more than the gap between the writes, even with good NTP. Monotonic clocks are only meaningful on one machine. Letting a single authority, like the database enforcing uniqueness, decide the order makes the second write fail cleanly.</>}
+/>
+
+## Key takeaways
+
+- Use the wall clock for "what time is it", and the monotonic clock for measuring durations.
+- Clocks drift, get stepped by NTP, and jump after VM pauses. Across machines, expect milliseconds of disagreement, sometimes far more.
+- Never decide which of two writes on different machines came first by comparing their timestamps. Last write wins silently loses data.
+- Lamport clocks give an order that respects cause and effect, without physical time. Version vectors can also detect concurrent writes.
+- When order really matters, let one place decide: a leader, a lock, a unique constraint or a single sequence.
