@@ -1,0 +1,134 @@
+import { BloomFilterLab } from "@/components/visuals/bloom-filter-lab"
+
+Gatepass has 40 million accounts. Every time someone types a username on the sign-up screen, the app asks "is this taken?", and every keystroke used to be a database query. A Bloom filter answers most of those questions from memory, in a few bytes per name, and is never wrong when it says no.
+
+In this lesson you will fill a real Bloom filter, cause a false positive on purpose, and learn the one formula that tells you how big to make it.
+
+## A set that can only say "no" for sure
+
+A Bloom filter is a summary of a set. You can add items to it and ask whether an item is in it. It can give two answers:
+
+- **"Definitely not."** The item was never added. This answer is always correct.
+- **"Probably yes."** The item was probably added, but it might be a coincidence. This is a **false positive**.
+
+It never gives a false negative. That asymmetry is the whole point. If most of your questions have the answer "no", a Bloom filter lets you skip the expensive check for nearly all of them and only pay for the few that come back "probably".
+
+For the username screen, most names people try are free. The filter says "definitely not taken" in under a microsecond, and only the "probably taken" cases go to the database to confirm.
+
+## How it works: m bits and k hashes
+
+The filter is an array of **m** bits, all starting at 0, and **k** hash functions that each map an item to one bit position.
+
+- **Add** an item: compute its k positions and set all of them to 1.
+- **Check** an item: compute its k positions. If *any* of them is 0, the item was never added, because adding it would have set that bit. If *all* of them are 1, it was probably added.
+
+<Diagram w={660} h={230} caption="asha and rohan set five bits. nikhil hits a 0 at bit 9, so it is definitely absent. meera lands only on bits other names set, so the filter wrongly says “probably”.">
+  <Text x={143} y={22} size={13} weight={600} tone="accent">add “asha”</Text>
+  <Text x={483} y={22} size={13} weight={600} tone="accent">add “rohan”</Text>
+  <Wire points={[[143, 30], [143, 86]]} tone="accent" />
+  <Wire points={[[143, 30], [313, 86]]} tone="accent" />
+  <Wire points={[[143, 30], [483, 86]]} tone="accent" />
+  <Wire points={[[483, 30], [211, 86]]} tone="accent" dashed />
+  <Wire points={[[483, 30], [313, 86]]} tone="accent" dashed />
+  <Wire points={[[483, 30], [551, 86]]} tone="accent" dashed />
+  <rect x={58} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <rect x={92} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <rect x={126} y={90} width={34} height={34} rx={4} fill="var(--accent)" fillOpacity={0.75} stroke="var(--border-strong)" />
+  <rect x={160} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <rect x={194} y={90} width={34} height={34} rx={4} fill="var(--accent)" fillOpacity={0.75} stroke="var(--border-strong)" />
+  <rect x={228} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <rect x={262} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <rect x={296} y={90} width={34} height={34} rx={4} fill="var(--accent)" fillOpacity={0.75} stroke="var(--border-strong)" />
+  <rect x={330} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <rect x={364} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--err)" strokeWidth={2} />
+  <rect x={398} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <rect x={432} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <rect x={466} y={90} width={34} height={34} rx={4} fill="var(--accent)" fillOpacity={0.75} stroke="var(--border-strong)" />
+  <rect x={500} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <rect x={534} y={90} width={34} height={34} rx={4} fill="var(--accent)" fillOpacity={0.75} stroke="var(--border-strong)" />
+  <rect x={568} y={90} width={34} height={34} rx={4} fill="var(--bg)" stroke="var(--border-strong)" />
+  <Text x={75} y={140} mono size={10} tone="muted">0</Text>
+  <Text x={381} y={140} mono size={10} tone="err">9</Text>
+  <Text x={585} y={140} mono size={10} tone="muted">15</Text>
+  <Wire points={[[211, 128], [140, 184]]} tone="ok" arrow={false} />
+  <Wire points={[[381, 128], [140, 184]]} tone="err" arrow={false} />
+  <Wire points={[[551, 128], [140, 184]]} tone="ok" arrow={false} />
+  <Text x={140} y={202} size={13} weight={600} tone="ok">check “nikhil”</Text>
+  <Text x={140} y={220} size={11} tone="muted">bit 9 is 0 → definitely not</Text>
+  <Wire points={[[143, 128], [480, 184]]} tone="info" arrow={false} />
+  <Wire points={[[483, 128], [480, 184]]} tone="info" arrow={false} />
+  <Wire points={[[551, 128], [480, 184]]} tone="info" arrow={false} />
+  <Text x={480} y={202} size={13} weight={600} tone="info">check “meera”</Text>
+  <Text x={480} y={220} size={11} tone="muted">all 1s → probably (false positive)</Text>
+</Diagram>
+
+Notice what is *not* stored: the names themselves. The filter holds only bits, so it cannot list its members, and it cannot delete one. Clearing asha's bits might also clear a bit that rohan needs, which would create a false negative.
+
+## Run it
+
+This filter is real: names are hashed with FNV-1a, and the k positions come from two hashes combined as `h1 + i × h2`, a standard trick that behaves like k independent hash functions. The measured false-positive rate comes from checking 2,000 names that were never inserted.
+
+<BloomFilterLab />
+
+Things to try:
+
+- **Type names into "Check a name"** until you find a false positive. With 6 names in 64 bits it takes a while.
+- **Press "+10 users" a few times.** The grid turns orange, and the measured dot climbs the curve. Past about half the bits set, false positives arrive quickly.
+- **Set k to 1, then 8,** with 30 or so names. Too few hashes and each name is easy to impersonate. Too many and the array fills up fast. The best k sits in between.
+- **Change m.** Doubling the bits does far more than halving the error.
+
+## The formula that sizes it
+
+After inserting n items into m bits with k hashes, the chance that a given bit is still 0 is about e<sup>−kn/m</sup>. A false positive needs all k bits to be 1, so:
+
+<KeyIdea>False-positive rate ≈ (1 − e^(−kn/m))^k, and it is lowest when k ≈ (m/n) × ln 2.</KeyIdea>
+
+At that best k, the rule of thumb is simple: **about 10 bits per item gives 1% false positives, and every extra 4.8 bits per item cuts it by another factor of 10.**
+
+Work it through for Gatepass. 40 million usernames at 1% needs about 9.6 bits each, so 384 million bits, which is **48 MB**, with k = 7. The usernames themselves average 12 bytes, so storing the real set in a hash table costs well over 1 GB. The filter is roughly 25 times smaller and fits in every app server's memory.
+
+What does 1% mean in practice? Of every 100 free names people try, one is wrongly flagged "probably taken" and costs one database query to clear up. The other 99 never touch the database.
+
+<Quiz
+  id="bf-negative"
+  question="The Gatepass Bloom filter says “definitely not” for the username “priya_k”. What can you conclude?"
+  options={[
+    "The name is free, guaranteed",
+    "The name is free with about 99% probability",
+    "The name might be taken; check the database to be sure",
+    "Nothing, until you check the other k hashes",
+  ]}
+  answer={0}
+  explain={<>A “no” is always right, as long as every inserted name went into the filter. Adding a name sets all k bits, so a 0 in any of them proves it was never added. Only the “probably yes” answer carries uncertainty.</>}
+/>
+
+## Where they hide in real systems
+
+Bloom filters are everywhere a cheap "no" saves an expensive lookup:
+
+- **LSM-tree databases** (Cassandra, RocksDB, HBase, Bigtable) keep a Bloom filter per data file. A read for a missing key skips every file whose filter says no, instead of reading each one from disk. You will see this in the next lesson.
+- **Web browsers** have used them to check URLs against a list of malicious sites locally, asking the server only on a "probably".
+- **CDNs** use them to avoid caching "one-hit wonders": an object is cached only on its second request, which the filter detects cheaply.
+- **Redis** offers them as a module command, `BF.ADD` and `BF.EXISTS`.
+
+## How it breaks
+
+- **Overfilling.** A filter sized for 1 million items holding 5 million no longer has a 1% error rate; it is above 50%. You cannot resize a Bloom filter without the original items. Plan for growth, or use a *scalable* Bloom filter that adds new layers as it fills.
+- **Deletes.** Plain filters cannot remove items. A *counting* Bloom filter stores a small counter per position instead of one bit, at 3–4× the memory. Cuckoo filters also support deletion and are often smaller at low error rates.
+- **Trusting "probably".** A false positive must lead to a real check, not a decision. A filter that says "probably a fraudster" must not block anyone by itself.
+
+<Quiz
+  id="bf-sizing"
+  question="You need a Bloom filter for 10 million items at about a 1% false-positive rate. Roughly how much memory?"
+  options={["About 1.2 MB", "About 12 MB", "About 120 MB", "About 1.2 GB"]}
+  answer={1}
+  explain={<>About 10 bits per item at the best k: 10 million × 9.6 bits ≈ 96 million bits ≈ 12 MB. The size depends on the item count and error rate, not on how long each item is.</>}
+/>
+
+## Key takeaways
+
+- A Bloom filter answers "definitely not" or "probably yes". It has false positives but never false negatives.
+- It stores m bits and k hash functions, not the items, so it is tiny and cannot list or (normally) delete members.
+- False-positive rate ≈ (1 − e^(−kn/m))^k. About 10 bits per item at the right k gives 1%.
+- Use it in front of an expensive lookup where most answers are "no": disk reads in LSM trees, database checks, network calls.
+- Size it for future growth. An overfilled filter quietly turns into one that says "probably" to everything.

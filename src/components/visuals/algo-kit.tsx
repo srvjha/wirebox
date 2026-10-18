@@ -161,9 +161,11 @@ export function SimButton({
   primary,
   className,
   title,
+  type = "button",
 }: {
   children: ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
+  type?: "button" | "submit";
   disabled?: boolean;
   primary?: boolean;
   className?: string;
@@ -171,7 +173,7 @@ export function SimButton({
 }) {
   return (
     <button
-      type="button"
+      type={type}
       onClick={onClick}
       disabled={disabled}
       title={title}
