@@ -1,0 +1,100 @@
+import { ReplicationModesExplorer } from "@/components/visuals/replication-modes-explorer"
+
+In Part 1 you added read replicas and a failover plan. Then one night the network between data centres hiccuped, two database nodes both decided they were the leader, and a booking showed up on one refresh and disappeared on the next. Keeping copies is easy. Keeping copies that agree, while machines and networks fail, is the hard part. It starts with one question: who is allowed to accept a write?
+
+## Why keep copies at all
+
+Replication means keeping the same data on several machines. You do it for three reasons, and they pull in different directions:
+
+- **Availability.** If one machine dies, another has the data and can keep serving.
+- **Read scale.** Many copies can answer reads in parallel.
+- **Latency.** A copy near the user, in Mumbai for Mumbai fans, answers faster than one 40 ms away.
+
+If data never changed, replication would be trivial: copy it once. All the difficulty is in **changes**. Every write has to reach every copy, and while it's on its way, copies disagree. The three main replication designs differ in where writes go, and therefore in what kinds of disagreement they allow.
+
+<ReplicationModesExplorer />
+
+## Leader-follower
+
+One node is the **leader**. All writes go to it. It applies each write locally and appends it to a **replication log**. **Followers** read that log and apply the same changes in the same order. Reads can go to the leader or to any follower.
+
+This is what Postgres, MySQL, MongoDB and most databases you'll meet do by default, and it's what Gatepass uses. Its big strength: since one node orders all writes, there are **no write conflicts**. Two fans grabbing C14 at the same time both hit the same leader, which serialises them, and the second one fails cleanly.
+
+The interesting decision is when the leader says "OK":
+
+<Diagram w={640} h={220} caption="Synchronous replication waits for a follower before confirming. Asynchronous confirms immediately and ships the change afterwards.">
+  <Text x={160} y={24} size={12} tone="accent" mono>SYNCHRONOUS</Text>
+  <Box x={20} y={50} w={90} h={40} label="App" />
+  <Box x={140} y={50} w={110} h={40} label="Leader" tone="accent" />
+  <Box x={140} y={150} w={110} h={40} label="Follower" />
+  <Wire points={[[110, 64], [140, 64]]} tone="req" />
+  <Wire points={[[180, 90], [180, 150]]} tone="info" label="1. ship" labelAt={[180, 112]} />
+  <Wire points={[[214, 150], [214, 90]]} tone="res" label="2. ack" labelAt={[214, 130]} />
+  <Wire points={[[140, 78], [110, 78]]} tone="res" />
+  <Text x={160} y={212} size={11}>OK only after the follower has it</Text>
+  <Text x={480} y={24} size={12} tone="accent" mono>ASYNCHRONOUS</Text>
+  <Box x={340} y={50} w={90} h={40} label="App" />
+  <Box x={460} y={50} w={110} h={40} label="Leader" tone="accent" />
+  <Box x={460} y={150} w={110} h={40} label="Follower" />
+  <Wire points={[[430, 64], [460, 64]]} tone="req" />
+  <Wire points={[[460, 78], [430, 78]]} tone="res" label="1. OK" labelAt={[445, 104]} />
+  <Wire points={[[515, 90], [515, 150]]} tone="info" dashed label="2. later" labelAt={[515, 120]} />
+  <Text x={480} y={212} size={11}>OK at once; the follower catches up</Text>
+</Diagram>
+
+- **Synchronous**: the leader waits until a follower confirms it has the write. If the leader then dies, that follower has everything. The cost: every write waits for a network round trip, and if the follower is slow or down, writes stall.
+- **Asynchronous**: the leader confirms immediately and ships the change afterwards. Writes are fast and never blocked by followers. The cost: if the leader dies, the last few hundred milliseconds of confirmed writes may exist nowhere else. They're gone.
+- **Semi-synchronous**: a common middle ground. Wait for **one** follower synchronously, the rest asynchronously. You never lose a confirmed write unless two machines die together, and one slow follower can be swapped out for another.
+
+The failure modes are the ones you met in Part 1, now with sharper edges: **replication lag** makes reads from followers stale, **failover can lose writes** that hadn't been shipped, and if the old leader comes back believing it still leads, you have **split brain**: two leaders accepting conflicting writes. Preventing split brain needs the nodes to agree on who leads, with a majority vote and terms. That's leader election, two lessons from now.
+
+## Multi-leader
+
+With one leader in Mumbai, a fan in Delhi pays a round trip to Mumbai on every write, and if the link between regions breaks, Delhi can't write at all. **Multi-leader** replication puts a leader in each region. Each one accepts writes locally and replicates them to the other leaders asynchronously.
+
+You get fast local writes and regions that keep working when cut off from each other. Multi-leader also appears in places you might not call a database: a mobile app that works offline is a leader for its own copy, and a collaborative editor where everyone types at once is many leaders.
+
+The price is **write conflicts**. Step through the multi-leader mode: fans in Mumbai and Delhi both book C14 within the same 50 ms. Each local leader says yes. When the leaders exchange changes, they discover two confirmed, incompatible writes. Somebody has to lose, after you've already told them they won.
+
+That's why, for anything with a "only one can have it" rule, like seats, multi-leader is usually the wrong tool. Gatepass can still go multi-region, by giving each show a **home region**: all writes for that show's seats go to one leader, while reads are served everywhere. You'll see how to resolve conflicts where they're acceptable, like profile edits or wishlists, in the conflict resolution lesson.
+
+<Callout tone="warn" title="Conflicts aren't rare">
+It's tempting to think two people editing the same thing in the same 50 ms is unlikely. On a big on-sale, thousands of fans fight over the same few hundred seats in the same second. The rare case is the main case.
+</Callout>
+
+## Leaderless
+
+Leaderless replication, popularised by Amazon's Dynamo and used by Cassandra and similar stores, drops the leader entirely. The client, or a coordinator node acting for it, sends each write to **several replicas in parallel** and considers it done when enough of them acknowledge.
+
+Step through leaderless mode. With three replicas (N = 3) and writes needing two acknowledgements (W = 2), a write succeeds even with one replica down. Reads also ask several replicas (R = 2) and take the newest version they see. Because R + W is more than N, every read overlaps every successful write on at least one replica. Replicas that missed writes are fixed by **read repair**, when a read notices them, and by **anti-entropy**, a background process that compares replicas.
+
+There's no failover, because there's no leader to fail. A dead node just means fewer acknowledgements, as long as enough remain. The cost: concurrent writes to the same key can still conflict, since no one node orders them, and "R + W > N" guarantees less than it sounds like. The next lesson takes quorums apart.
+
+## Choosing
+
+- **Leader-follower** when you need a clear order of writes and constraints like "a seat sells once". It's the default for good reason. Accept lag on followers and plan failover carefully.
+- **Multi-leader** when you need local writes in several regions or offline clients, and the data can tolerate merging: carts, profiles, documents.
+- **Leaderless** when you need writes to keep working through node failures and high write volume, and you can live with eventual consistency and conflicts on the same key: event logs, sensor data, activity feeds.
+
+You can mix them. Gatepass keeps bookings in leader-follower Postgres, puts the "people viewing this show" counters in a leaderless store, and syncs the offline ticket wallet on phones in a multi-leader style.
+
+<Quiz
+  id="async-failover"
+  question="Gatepass uses asynchronous leader-follower replication. The leader confirms a booking, then crashes 100 ms later, and a follower is promoted. What can happen to that booking?"
+  options={[
+    "Nothing; confirmed writes are always on every replica",
+    "It may be lost, because the follower may not have received it before the crash",
+    "It will be duplicated on the new leader",
+    "The new leader will reject all writes until the old one returns",
+  ]}
+  answer={1}
+  explain={<>With asynchronous replication, the leader says OK before any follower has the write. If it dies before shipping it, the promoted follower never saw the booking. That's why many systems use semi-synchronous replication: wait for at least one follower before confirming.</>}
+/>
+
+## Key takeaways
+
+- The core question of replication is who accepts writes, because all the difficulty is in changes.
+- Leader-follower: one node orders all writes, so no conflicts. Async is fast but can lose recent writes on failover; semi-sync is a good middle ground.
+- Multi-leader: fast local writes in each region and offline support, at the price of write conflicts you must resolve.
+- Leaderless: write to several replicas, wait for W acks, read from R and take the newest. No failover, but weaker guarantees than it seems.
+- For "only one can have it" data like seats, keep a single leader per item, even in a multi-region system.
