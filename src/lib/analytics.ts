@@ -46,7 +46,7 @@ export type AnalyticsEvents = {
   };
   postmortem_requested: { lab: string; step: number };
 
-  sign_in_started: { method: "google" | "github" | "email" };
+  sign_in_started: { method: "google" | "github" | "email" | "guest" };
   sign_up_started: { method: "email" };
   signed_out: Record<string, never>;
   progress_synced: { items: number };
