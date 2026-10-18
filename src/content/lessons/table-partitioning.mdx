@@ -1,0 +1,95 @@
+import { PartitionPruning } from "@/components/visuals/partition-pruning"
+
+The bookings table is huge, and almost every question Gatepass asks about it has a date in it: this week, this month, last quarter. If the database could skip everything outside that range without even looking, queries would stay fast as the table keeps growing. That is what partitioning does.
+
+## One logical table, many physical pieces
+
+**Partitioning** splits one table into several smaller physical tables, called partitions, while your application still sees a single table. You choose a **partition key** and a rule for dividing rows. Gatepass partitions `bookings` by `created_at`, one partition per month:
+
+```sql
+CREATE TABLE bookings (
+  id          bigint,
+  user_id     bigint,
+  event_id    bigint,
+  created_at  timestamptz NOT NULL,
+  ...
+) PARTITION BY RANGE (created_at);
+
+CREATE TABLE bookings_2025_03 PARTITION OF bookings
+  FOR VALUES FROM ('2025-03-01') TO ('2025-04-01');
+```
+
+Inserts go to the right partition automatically. Each partition has its own, much smaller, indexes. The database is still **one machine**; you have changed how data is laid out on its disk, not how many servers hold it. That distinction matters in the next lesson.
+
+<Diagram w={640} h={220} caption="The app talks to one table name. Underneath, rows land in per-month partitions.">
+  <Box x={20} y={84} w={120} label="App" sub="INSERT bookings" icon="service" tone="req" />
+  <Group x={230} y={14} w={390} h={192} label="bookings (partitioned by created_at)" />
+  <Box x={250} y={46} w={160} h={40} label="bookings_2025_01" sub="25M rows" icon="db" dim />
+  <Box x={250} y={104} w={160} h={40} label="bookings_2025_02" sub="25M rows" icon="db" dim />
+  <Box x={250} y={162} w={160} h={34} label="bookings_2025_03" sub="current" icon="db" tone="accent" />
+  <Box x={440} y={104} w={160} h={40} label="bookings_2025_04" sub="empty, pre-created" icon="db" dashed dim />
+  <Wire points={[[142, 108], [196, 108], [196, 179], [248, 179]]} tone="req" flow />
+</Diagram>
+
+## Partition pruning: the payoff
+
+When a query's `WHERE` clause constrains the partition key, the planner works out which partitions can possibly contain matching rows and ignores the rest. This is **partition pruning**. A query for March reads one partition of 25 million rows rather than a table of 300 million, and uses a March-sized index that likely fits in memory.
+
+Try it. Switch between queries and watch which partitions light up.
+
+<PartitionPruning />
+
+Notice the last query. Looking up one fan's bookings by `user_id` doesn't mention the date, so every partition has to be searched. Partitioning only helps queries that **filter on the partition key**. Choose a key from how the table is actually queried, not from how it looks.
+
+## The second payoff: cheap deletion
+
+Remember the archiving lesson, where deleting 400 million rows was a slow, lock-heavy job? With monthly partitions, retiring old data is two statements:
+
+```sql
+ALTER TABLE bookings DETACH PARTITION bookings_2022_03;
+-- dump it to object storage, then:
+DROP TABLE bookings_2022_03;
+```
+
+It takes milliseconds because the database discards a file instead of marking 25 million rows as deleted one by one. No bloat, no long vacuum, no replica lag. For time-ordered data such as bookings, logs, events and audit trails, this is often the best reason to partition.
+
+## Choosing the key and the size
+
+Good partition keys are:
+
+- **In most queries' filters.** Otherwise pruning never happens.
+- **Evenly spread.** Monthly partitions of 25 million rows each are balanced. A partition per *city* would be lopsided: Mumbai might hold 40% of the rows.
+- **Stable.** A row shouldn't move partitions after insert. `created_at` never changes. `status` does, so partitioning by status would shuffle rows around constantly.
+
+For size, aim for partitions that are comfortable to maintain: tens of millions of rows or a few tens of gigabytes, not thousands of tiny partitions. Every partition adds planning overhead, and a query that touches 3,000 of them spends more time planning than reading. Weekly partitions for a table that gets 1 million rows a week are too fine. Yearly ones for a table that gets 300 million a year are too coarse.
+
+Other schemes exist: **list** partitioning (a value such as region), **hash** partitioning (key hash modulo N, for spreading write load). Range by time is by far the most common.
+
+## The costs
+
+Partitioning is not free:
+
+- **Primary and unique keys must include the partition key.** In PostgreSQL, a unique constraint on `id` alone can't be enforced across partitions, so the key becomes `(id, created_at)`. Foreign keys *to* a partitioned table get awkward.
+- **Someone must create future partitions.** If tonight's job forgets to make April, April's inserts fail. Automate it, create several months ahead, and alert when the next partition doesn't exist. A default partition catches strays but grows silently.
+- **Queries without the key get slower.** They plan and scan N pieces instead of one.
+- **Cross-partition work is heavier.** A global `ORDER BY` with `LIMIT` merges results from many partitions.
+
+<Callout tone="tip" title="Partitioning is not scaling out">
+Partitions live on the same server, sharing its CPU, memory and disk. They make queries cheaper and maintenance easier, but a table that is write-bound on one machine stays write-bound. When one machine truly can't cope, you need sharding.
+</Callout>
+
+<Quiz
+  id="partition-key-choice"
+  question="Gatepass's reports always filter by event_date, and old events are removed after two years. The most useful partition key for the events_log table is:"
+  options={["user_id, because fans are the main entity", "event_date, by month", "status, because open and closed rows differ", "A random UUID, for even spread"]}
+  answer={1}
+  explain={<>Queries filter by <strong>event_date</strong> (so pruning works), the value never changes, the spread is even, and expiring a month means dropping one partition.</>}
+/>
+
+## Key takeaways
+
+- Partitioning splits one logical table into physical pieces on the same server, chosen by a partition key.
+- Its main payoff is pruning: queries that filter on the key read only the matching partitions.
+- For time-ordered data, dropping an old partition replaces a giant, slow `DELETE`.
+- Pick a key that appears in most filters, spreads evenly and never changes. Keep partition counts reasonable.
+- Costs: keys must include the partition key, you must create partitions ahead of time, and queries without the key touch every piece.
