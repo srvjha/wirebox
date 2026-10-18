@@ -1,0 +1,105 @@
+The Gatepass app used to talk to one hostname, `api.gatepass.in`. Now there are four services, each running between three and forty copies, and the copies come and go every few minutes as autoscaling reacts to traffic. The app should not have to know any of that. Something has to stand at the front door, and something has to keep track of where everyone lives.
+
+## One front door
+
+Imagine the app called each service directly: `events.gatepass.in`, `booking.gatepass.in`, `payments.gatepass.in`. Every phone in the wild would then hard-code your internal structure. Merge two services, split one, rename one, and you'd break every app version still installed, some of which won't update for a year.
+
+An **API gateway** is a single entry point that sits between clients and services. The app keeps calling `api.gatepass.in`, and the gateway routes by path:
+
+- `GET /events/...` goes to the events service
+- `POST /bookings` goes to booking
+- `POST /payments/webhook` goes to payments
+
+<Diagram w={640} h={290} caption="Clients see one hostname. The gateway routes each path to a service, and looks up where that service's healthy instances are.">
+  <Box x={20} y={50} w={110} h={46} label="App" icon="phone" />
+  <Box x={20} y={120} w={110} h={46} label="Web" icon="client" />
+  <Box x={20} y={190} w={110} h={46} label="Partners" icon="user" />
+  <Box x={190} y={110} w={130} h={66} label="Gateway" sub="auth · limits" icon="lb" tone="accent" />
+  <Wire points={[[130, 73], [190, 130]]} tone="req" />
+  <Wire points={[[130, 143], [190, 143]]} tone="req" />
+  <Wire points={[[130, 213], [190, 156]]} tone="req" />
+  <Box x={400} y={20} w={130} h={42} label="Events ×6" icon="service" />
+  <Box x={400} y={80} w={130} h={42} label="Booking ×12" icon="service" />
+  <Box x={400} y={140} w={130} h={42} label="Payments ×4" icon="service" />
+  <Box x={400} y={200} w={130} h={42} label="Notify ×3" icon="service" dim />
+  <Wire points={[[320, 125], [400, 41]]} label="/events" labelAt={[352, 76]} />
+  <Wire points={[[320, 137], [400, 101]]} />
+  <Wire points={[[320, 150], [400, 161]]} />
+  <Box x={560} y={110} w={70} h={66} label="Registry" />
+  <Wire points={[[255, 176], [255, 262], [595, 262], [595, 176]]} tone="info" dashed label="where is booking?" labelAt={[425, 262]} />
+  <Packet points={[[130, 143], [190, 143], [320, 137], [400, 101]]} dur={2.2} />
+</Diagram>
+
+Notifications is dimmed for a reason: it has no public routes. It only listens to events. Not every service needs a door.
+
+## What belongs in the gateway
+
+The gateway is the one place every request passes, so it's the natural home for work that's the same for all of them:
+
+- **TLS termination.** Decrypt HTTPS once, at the edge.
+- **Authentication.** Check the session or token, then pass a trusted `user_id` header inward. Services don't each re-implement login.
+- **Rate limiting.** The limits you built in module 8 live here, before a scalper's traffic reaches any service.
+- **Request IDs.** Stamp every request with a unique ID so logs and traces across services can be joined. You'll lean on this in the next lesson.
+- **Routing and versioning.** Send `/v2/bookings` to the new code while `/v1` keeps working for old apps.
+
+Some teams also let the gateway **aggregate**: the app's "show page" needs the event, the seat map and the user's existing bookings, so one gateway endpoint calls three services and stitches a single response. That saves the phone three round trips over a slow mobile network. When each kind of client (app, web, partner API) gets its own aggregating layer, it's called a **backend for frontend**.
+
+## What doesn't belong there
+
+The gateway's danger is that it is convenient. Every team can add "just one rule" to it, and in a year it holds pricing logic, seat validation and a discount engine. Now every change needs the gateway team, and you've rebuilt the monolith at the front door.
+
+Keep a simple rule: **the gateway knows about requests, not about tickets**. Headers, tokens, paths and rates are fine. Anything that needs to know what a seat or a refund is belongs in a service.
+
+<Callout tone="warn" title="The gateway is now on every request's path">
+If the gateway is down, everything is down. Run several copies behind a load balancer, keep its work light, and give it generous timeouts towards services, not tight ones that turn one slow service into errors for every route. It must be the most boring, most reliable thing you run.
+</Callout>
+
+## Services move: service discovery
+
+Behind the gateway, booking runs twelve copies today. At 10:00, before a big on-sale, autoscaling adds twenty more, each with a fresh IP address. One crashes and is replaced. At 11:00 most of them are removed. How does the gateway, or booking calling payments, know where to send a request right now?
+
+You can't write IPs in a config file. You need **service discovery**: a live list of healthy instances per service.
+
+It has three parts:
+
+1. **Registration.** When an instance starts and passes its health check, it's added to a **registry** under its service name. Often the platform does this for you: Kubernetes knows every pod it started.
+2. **Health.** The registry keeps checking. An instance that stops answering is removed within seconds, so nobody keeps sending it traffic.
+3. **Lookup.** Callers ask "where is booking?" and get the current list.
+
+There are two styles of lookup:
+
+- **Server-side discovery.** The caller sends to a stable name, like `booking.internal`, and a load balancer or DNS behind that name picks a healthy instance. Callers stay simple. This is how a Kubernetes Service works.
+- **Client-side discovery.** The caller fetches the instance list from the registry, caches it, and picks one itself. One fewer hop, and the caller can be smarter, for example preferring instances in its own zone. The cost is that every service needs a discovery library in its language.
+
+<Callout tone="note" title="Why not just DNS?">
+DNS is discovery, and it's often good enough. Its weakness is caching: clients and operating systems may hold an old answer for longer than the TTL says, so a dead instance keeps getting traffic for a while. Registries with push updates, or a load balancer in front, react faster.
+</Callout>
+
+## The service mesh, briefly
+
+Once you have discovery, every service also wants timeouts, retries, mutual TLS between services and per-call metrics. Writing that in every service, in every language, is a lot of repeated code.
+
+A **service mesh** moves it out of your code. A small proxy (a **sidecar**) runs next to each instance, and all traffic in and out goes through it. The proxies get the instance lists and rules from a central control plane. Your booking code calls `http://payments/charge` and the sidecar handles discovery, encryption, retries and metrics.
+
+It's powerful and it isn't free: one more process per instance, an extra hop on every call, and a complex system to operate. Gatepass at four services doesn't need one. At forty services in three languages, it starts to pay for itself.
+
+<Quiz
+  id="gateway-logic"
+  question="The booking team wants the gateway to reject bookings for shows that have already started, because 'every booking passes through it anyway'. What should you say?"
+  options={[
+    "Yes, the gateway is the cheapest place to check",
+    "No, that's a business rule about shows and bookings, so it belongs in the booking service",
+    "Yes, but only if the gateway caches the show times",
+    "No, because gateways can't read request bodies",
+  ]}
+  answer={1}
+  explain={<>Whether a show has started is domain knowledge. Put it in the gateway and the gateway team becomes part of every booking change, which is exactly the coupling you split services to avoid. The gateway checks things that are true of any request: who's calling, how often, and where it should go.</>}
+/>
+
+## Key takeaways
+
+- An API gateway gives clients one stable entry point and hides how services are split, so you can reorganise without breaking installed apps.
+- Put cross-cutting work there: TLS, authentication, rate limits, request IDs and routing. Keep business rules out.
+- The gateway is on every request's path, so run it redundantly and keep it simple.
+- Service discovery keeps a live list of healthy instances. Server-side discovery keeps callers simple; client-side saves a hop.
+- A service mesh moves discovery, retries and encryption into sidecar proxies. Worth it at many services and languages, not at four.

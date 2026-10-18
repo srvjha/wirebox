@@ -1,0 +1,101 @@
+Gatepass split bookings across eight partitions and moved a partition to a new node during a rebalance. Ten seconds later, some booking requests were still going to the old node, which answered "I don't have that seat". The data had moved, but the knowledge of where it lives had not. Partitioning is only half a design. The other half is making sure every request finds the right partition, even while the map is changing.
+
+## The routing problem
+
+A client wants to read booking `B-81204`. The data is on one of many nodes. Something has to know which. This is the **request routing** problem, sometimes called service discovery for data. There are three standard answers, depending on who holds the map.
+
+<Diagram w={680} h={260} caption="Three places to put the routing logic: any node forwards, a routing tier decides, or the client knows.">
+  <Text x={110} y={20} size={11} tone="accent" mono>1. ANY NODE</Text>
+  <Box x={20} y={34} w={90} h={36} label="Client" icon="client" />
+  <Box x={20} y={110} w={90} h={36} label="Node A" />
+  <Box x={20} y={190} w={90} h={36} label="Node B" tone="accent" sub="owns key" />
+  <Wire points={[[65, 70], [65, 110]]} tone="req" />
+  <Wire points={[[65, 146], [65, 190]]} tone="req" label="forward" labelAt={[95, 168]} />
+  <Text x={340} y={20} size={11} tone="accent" mono>2. ROUTING TIER</Text>
+  <Box x={250} y={34} w={90} h={36} label="Client" icon="client" />
+  <Box x={250} y={110} w={90} h={36} label="Router" icon="lb" tone="info" />
+  <Box x={210} y={190} w={80} h={36} label="Node A" />
+  <Box x={310} y={190} w={80} h={36} label="Node B" tone="accent" />
+  <Wire points={[[295, 70], [295, 110]]} tone="req" />
+  <Wire points={[[280, 146], [250, 190]]} tone="muted" dashed />
+  <Wire points={[[310, 146], [350, 190]]} tone="req" />
+  <Text x={580} y={20} size={11} tone="accent" mono>3. SMART CLIENT</Text>
+  <Box x={480} y={34} w={110} h={36} label="Client + map" icon="client" tone="info" />
+  <Box x={480} y={190} w={80} h={36} label="Node A" />
+  <Box x={580} y={190} w={80} h={36} label="Node B" tone="accent" />
+  <Wire points={[[535, 70], [535, 120], [620, 120], [620, 190]]} tone="req" />
+  <Text x={580} y={146} size={10} tone="info" mono>cached partition map</Text>
+</Diagram>
+
+### 1. Contact any node
+
+The client connects to any node, often through a plain load balancer. If that node owns the key, it answers. If not, it **forwards** the request to the one that does, or replies with a redirect naming the right node. Cassandra's coordinator node and Redis Cluster's `MOVED` replies work like this.
+
+The client stays simple and needs no map. The cost is an extra hop for a share of requests: in an 8-node cluster, 7 out of 8 requests land on the wrong node first, and every node must carry the whole map.
+
+### 2. A routing tier
+
+A layer of stateless **routers** (proxies) sits between clients and nodes. Clients speak to the routers like a single database. MongoDB's `mongos` and Vitess's `vtgate` are examples. Routers hold the partition map, look up the key, and forward.
+
+This keeps clients dumb and lets you change topology without touching them. It also adds a hop and a component to scale and keep alive. Because routers are stateless and interchangeable, that is usually easy.
+
+### 3. Smart clients
+
+The client library fetches the partition map and **talks directly to the right node**. No extra hop, no proxy to run. Kafka producers and consumers, and many Redis and Cassandra drivers, work this way.
+
+It's the fastest option. It also pushes complexity into every client library in every language you use, and a stale map in a client causes misrouted requests until it refreshes.
+
+## Where the map comes from
+
+Whichever design you choose, the partition map has to be stored and kept correct somewhere. Two patterns dominate.
+
+**A coordination service.** A small, strongly consistent cluster, such as ZooKeeper, etcd or Consul, holds the authoritative map. These systems run a consensus protocol like the one in the Raft lesson, so they never return two different maps. Nodes register themselves there, and routers or clients **watch** the map and get notified when it changes. Kafka historically used ZooKeeper, and HBase and many others still do.
+
+**Gossip.** Nodes pass the map to each other peer to peer, a few times per second, and the cluster converges within moments. No separate service to run, and no single point of failure, but for a short window different nodes hold different versions. Cassandra and Dynamo take this route.
+
+Neither is free. A coordination service is a dependency you must keep healthy, but you get a precise answer. Gossip is simple to operate but only eventually consistent, so you need a rule for what happens during disagreement.
+
+## When the map is wrong
+
+Maps go stale. A partition moves, a node dies, a router has cached an old copy. What happens to a request sent to the wrong place? There are a few things you should design for explicitly:
+
+- **Reject and redirect.** The node that no longer owns the key replies "not mine, try node X". The client updates its cached map and retries. This is the safest behaviour, and the reason `MOVED` exists.
+- **Version the map.** Stamp each map with an epoch number. A node receiving a request carrying an older epoch than its own knows the sender is stale, and says so.
+- **Retry with backoff.** After a failure, refetch the map and retry a bounded number of times. Do not retry in a tight loop. See the retries lesson for why.
+- **Handle the mid-move window.** While a partition is migrating, the old owner may forward requests to the new one, or serve reads while the new owner takes writes, until the switch completes. This is where most routing bugs live.
+- **Never silently accept the wrong write.** A node that isn't the owner should refuse, not store the data "just in case". Otherwise you get two copies of a key on different nodes, diverging.
+
+<Callout tone="warn" title="Cache the map, but expect it to be wrong">
+Fetching the map on every request defeats the point, but caching it forever is a bug. Cache it, tag it with a version, refresh on redirects, and also on a timer.
+</Callout>
+
+## Choosing for Gatepass
+
+Gatepass keeps routing out of its services. Booking, events and payments all talk to the database through a pooler that acts as a routing tier: it holds the shard map, which lives in etcd, and the services just see one endpoint. The in-memory seat cache uses a smart client with a map refreshed on `MOVED` errors. The activity feed store uses any-node-forwards, because it's managed and the vendor handles it.
+
+A rough guide:
+
+- Few clients, one language, performance matters most: smart client.
+- Many clients or languages, or you need to change topology often: routing tier.
+- A managed store with its own coordinator: contact any node and let it forward.
+
+<Quiz
+  id="routing-stale"
+  question="A smart client has a cached partition map from five minutes ago. A rebalance moved the partition holding its key. What should happen?"
+  options={[
+    "The old node stores the write anyway to be helpful",
+    "The old node refuses and redirects; the client refreshes its map and retries",
+    "The client keeps retrying the old node until it succeeds",
+    "The request is lost and the client must restart",
+  ]}
+  answer={1}
+  explain={<>A node that no longer owns the key must refuse, ideally telling the client where to go. The client then refreshes its map, with a bounded retry. Accepting the write would put the same key on two nodes, and blind retries would just hammer a node that will never serve it.</>}
+/>
+
+## Key takeaways
+
+- Routing answers "which node holds this key" and must keep working while partitions move.
+- Three options: any node forwards, a routing tier decides, or a smart client talks directly. They trade an extra hop against client complexity.
+- The authoritative map lives in a coordination service (strong, precise) or spreads by gossip (simple, eventually consistent).
+- Stale maps are normal. Nodes should refuse non-owned keys and redirect, with versioned maps and bounded, backed-off retries.
+- Pick the design based on how many clients you have and how often topology changes.

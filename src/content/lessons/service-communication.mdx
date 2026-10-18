@@ -1,0 +1,111 @@
+import { CallChainAvailability } from "@/components/visuals/call-chain-availability"
+
+Inside the monolith, booking a ticket called `chargeCard()`, `sendTicket()` and `recordSale()` one after another, and each call was a function jump that never failed on its own. Now each of those lives in another service, behind a network. How booking talks to each one decides how slow a booking is and how often it fails.
+
+## One question for every pair
+
+For every pair of services that talk, ask one question: **does the caller need the answer before it can reply to the user?**
+
+- Booking needs to know the card was charged before it says "you're in". It needs the answer **now**.
+- Booking does not need to know the email was sent. The fan is happy to get it ten seconds later. It only needs the work to **eventually happen**.
+
+The first kind is a **synchronous call**: send a request, wait for the response. The second is better as an **asynchronous event**: announce what happened, and let whoever cares react in their own time. You met this split in Part 1 with background jobs; here it decides how services, not just tasks, depend on each other.
+
+## Synchronous calls: REST and gRPC
+
+When booking does need an answer now, it makes a request and waits. Two styles dominate.
+
+**REST over HTTP with JSON** is what you designed in Part 1: `POST /payments` with a JSON body, a status code back. Everything speaks it, you can debug it with `curl`, and browsers can call it directly. The costs are text parsing and loose contracts: nothing stops payments from renaming `amount` to `amount_paise` and breaking booking at runtime.
+
+**gRPC** sends binary messages (Protocol Buffers) over HTTP/2. Both sides share a `.proto` file that defines every method and field, and code is generated from it, so a renamed field breaks the *build*, not production. Messages are smaller and faster to parse, and one connection carries many calls at once. The costs: you can't easily poke it from a terminal, browsers need a proxy, and every team must share and version the schema files.
+
+A common split: REST at the edge where apps and partners call you, gRPC between internal services where both sides are yours. Either way, the shape is the same. The caller is blocked until the answer arrives or a timeout fires, and that's where the trouble starts.
+
+## Availability multiplies, latency adds
+
+When booking synchronously calls four other services, a booking succeeds only if **all five** are up at that moment. If each is up 99.9% of the time, independently, the chance that all five are up is:
+
+`0.999 × 0.999 × 0.999 × 0.999 × 0.999 ≈ 0.995`
+
+That's 99.5%. Each service on its own misses about 43 minutes a month. The chain misses about 3.6 hours. You built five good services and got one mediocre product.
+
+Latency stacks the same way. If booking waits for events (20 ms), then payments (250 ms), then notifications (400 ms, because the SMS provider is slow), the fan waits for the sum, about 700 ms, and the slowest dependency sets the pace.
+
+<CallChainAvailability />
+
+Play with it. Notice three things:
+
+1. In the sync chain, the end-to-end number is always **worse than the worst service**. Every service you add to the chain makes it lower.
+2. Switching notifications and analytics to events removes them from the booking's path. They can be down for an hour and nobody fails to buy a ticket.
+3. Latency drops by the time of the slowest optional hop, which here is the SMS provider.
+
+<KeyIdea>Every synchronous dependency adds its downtime to yours. Only wait for what you can't answer without.</KeyIdea>
+
+## Asynchronous events
+
+With events, booking writes the booking, then publishes a message like this to a **message broker**:
+
+```json
+{ "type": "booking.confirmed", "booking_id": "bk_9f2", "user_id": "u_417", "show_id": "sh_88", "seats": ["C14", "C15"] }
+```
+
+Then it returns to the user. Notifications and analytics each **subscribe** to `booking.confirmed`. The broker stores the message until each one reads it. If notifications is down, its messages wait. When it comes back, it works through the backlog.
+
+<Diagram w={640} h={250} caption="Booking waits only for events and payments. Notifications and analytics hear about the booking through the broker.">
+  <Box x={20} y={100} w={110} h={50} label="Fan" icon="phone" />
+  <Box x={180} y={100} w={130} h={50} label="Booking" icon="service" tone="accent" />
+  <Wire points={[[130, 125], [180, 125]]} tone="req" />
+  <Box x={380} y={20} w={120} h={46} label="Events" icon="service" />
+  <Box x={380} y={84} w={120} h={46} label="Payments" icon="service" />
+  <Wire points={[[310, 112], [345, 112], [345, 43], [380, 43]]} tone="req" label="sync" labelAt={[345, 70]} />
+  <Wire points={[[310, 112], [380, 107]]} tone="req" />
+  <Box x={330} y={180} w={120} h={46} label="Broker" icon="queue" tone="info" />
+  <Wire points={[[245, 150], [245, 203], [330, 203]]} tone="info" dashed label="publish" labelAt={[275, 203]} />
+  <Box x={500} y={150} w={130} h={42} label="Notifications" icon="service" />
+  <Box x={500} y={200} w={130} h={42} label="Analytics" icon="service" />
+  <Wire points={[[450, 196], [500, 171]]} tone="info" dashed />
+  <Wire points={[[450, 210], [500, 221]]} tone="info" dashed />
+  <Packet points={[[245, 150], [245, 203], [330, 203]]} tone="info" dur={2.4} />
+</Diagram>
+
+Events buy you more than availability:
+
+- **Time decoupling.** The producer and consumer don't have to be up at the same moment.
+- **Load smoothing.** At 10:00:00, 20,000 bookings land in a minute. Notifications drains them at its own pace instead of falling over.
+- **Easy additions.** When the fraud team wants to see every booking, they subscribe. Booking doesn't change.
+
+And they cost you something real:
+
+- **Eventual, not immediate.** For a few seconds the booking exists and the email doesn't. Your product has to be fine with that.
+- **No answer to act on.** If the SMS provider rejects a phone number, booking won't know. Failures surface somewhere else, so you need monitoring on consumers and a dead-letter queue.
+- **Duplicates and ordering.** Most brokers deliver at least once, so consumers must be idempotent. Module 15 covers this in depth.
+- **Harder to follow.** "What happens when someone books?" is no longer one function you can read. You need tracing, which is lesson 11.4.
+
+<Callout tone="warn" title="Events don't fix a call you need the answer to">
+Some teams try to make booking "async" by publishing `charge.requested` and waiting for `charge.completed` on another topic. That's a synchronous call wearing a costume: the user still waits, and now there are two hops and a broker in the path. If you need the answer now, make a call, with a timeout and a plan for when it fails.
+</Callout>
+
+## Choosing per pair
+
+There is no "we are a REST shop" or "we are event-driven" answer. You choose for each edge. For Gatepass:
+
+- **Booking → events: sync.** Booking must know the seat is on sale and the price. Booking also keeps a cached copy of show details, so a slow events service only hurts cache misses.
+- **Booking → payments: sync.** The fan is waiting on the charge. Use a timeout and an idempotency key, because the call can fail in confusing ways (next module).
+- **Booking → notifications: async event.** Nobody waits for email.
+- **Booking → analytics: async event.** Same.
+- **Payments → booking, for refunds: async event.** When a bank reverses a charge days later, payments publishes `payment.refunded`, and booking cancels the ticket.
+
+<Quiz
+  id="chain-availability"
+  question="A request passes synchronously through a gateway and three services, each 99.9% available and failing independently. Roughly how available is the request?"
+  options={["99.9%", "99.6%", "99.0%", "96%"]}
+  answer={1}
+  explain={<>Four links at 0.999 each give 0.999⁴ ≈ 0.996, or 99.6%. That's about 2.9 hours of failed requests a month instead of 43 minutes. Each extra synchronous hop costs you roughly another 0.1%.</>}
+/>
+
+## Key takeaways
+
+- For each pair of services, ask whether the caller needs the answer before replying to the user. If yes, call. If no, publish an event.
+- REST with JSON is universal and easy to debug; gRPC is faster and has strict, generated contracts. Many teams use REST at the edge and gRPC inside.
+- In a synchronous chain, availability multiplies and latency adds. The chain is always worse than its worst link.
+- Events take optional work off the critical path, smooth bursts and let new consumers join without changes, at the cost of eventual consistency and harder debugging.

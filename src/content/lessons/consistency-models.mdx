@@ -1,0 +1,86 @@
+A fan buys a ticket and the confirmation page says "Booked". She opens "My tickets" and it is empty. She buys again. Now she owns two. Nothing crashed. The system simply gave two different answers to two reasonable questions, and nobody had written down which answers were allowed. A consistency model is that written promise.
+
+## What a model promises
+
+When data lives on several machines, reads and writes happen at different places and different times. A **consistency model** is a contract about which results a read may return, given the writes that came before it. Stronger contracts are easier to program against and cost more in latency and availability. Weaker ones are cheap and fast and push the surprises onto you.
+
+Think of it as a ladder. Each rung rules out more strange behaviour than the one below.
+
+<Diagram w={680} h={250} caption="From the strongest guarantee at the top to the weakest at the bottom. Cost and difficulty go up with strength.">
+  <Box x={200} y={14} w={280} h={40} label="Linearizable" sub="behaves like one copy, in real-time order" tone="accent" />
+  <Box x={200} y={66} w={280} h={40} label="Sequential" sub="one global order, may lag real time" />
+  <Box x={200} y={118} w={280} h={40} label="Causal" sub="effects never appear before their causes" />
+  <Box x={200} y={170} w={280} h={40} label="Session guarantees" sub="read-your-writes, monotonic reads" />
+  <Box x={200} y={222} w={280} h={22} label="Eventual" tone="muted" />
+  <Wire points={[[170, 230], [170, 24]]} tone="info" />
+  <Text x={150} y={130} size={10} anchor="end" tone="info" mono>stronger</Text>
+  <Text x={150} y={142} size={10} anchor="end" tone="info" mono>slower</Text>
+</Diagram>
+
+## Strong consistency (linearizability)
+
+Under **linearizability**, the system behaves as if there were a single copy of the data and every operation took effect at one instant between its start and its end. Once any client has seen a write, every later read, from any client, sees it too.
+
+For Gatepass this is the rule for seat bookings. If Asha's request for C14 returned "confirmed" at 20:00:00.100, then Ravi asking at 20:00:00.101 must see C14 taken, no matter which server he hits. To provide that, a system routes every operation through a leader or runs a consensus protocol, and waits for a majority before answering.
+
+The cost is real. Every operation pays at least one network round trip to the leader or a majority. If the leader is cut off, or a majority is unreachable, the system must refuse requests rather than answer wrongly. This is the CAP trade-off from earlier: during a partition you pick between a correct answer and an answer.
+
+## Eventual consistency
+
+At the other end, **eventual consistency** promises only this: if writes stop, all replicas will converge to the same value. It says nothing about how long that takes, or what you read in the meantime.
+
+Writes are accepted anywhere, replicated in the background, and reads hit the nearest copy. It is fast and keeps working through failures. It is also the model behind the page that showed an empty ticket list: the booking went to one replica, the read hit another that hadn't heard yet.
+
+Eventual consistency is fine for like counters, view counts, search indexes and recommendation lists, where being seconds behind is invisible. It is a poor fit for money, inventory and anything with a uniqueness rule.
+
+## The useful middle
+
+Most real products need something between the two. The best-known guarantees sit in this middle, and each one fixes a specific user-facing bug.
+
+**Read-your-writes.** After you write, your own later reads see that write. This is the one that fixes the empty "My tickets" page. It can be implemented cheaply: for a few seconds after a write, route that user's reads to the leader, or pass the write's version number and have a replica wait until it has caught up.
+
+**Monotonic reads.** Once you have seen a value, you never see an older one. Without it, refreshing twice can show the ticket list, then the empty list, as your requests bounce between a fresh replica and a stale one. Pinning a user to one replica (by hashing their id) gives you this.
+
+**Consistent prefix.** You see writes in the order they happened. Without it, a reader could see a reply to a message before the message itself. This matters when different partitions apply writes independently.
+
+**Causal consistency.** If one operation could have influenced another, everyone sees them in that order. Unrelated operations may be seen in any order. A comment never appears before the post it answers, but two unrelated comments can swap. Causal consistency is the strongest model that remains available during a partition, so it is attractive for collaborative apps and geo-replicated stores.
+
+<Callout tone="tip" title="Session guarantees are cheap">
+Read-your-writes and monotonic reads only constrain what <em>one user</em> sees. You can get them by pinning a user to a replica or tracking a version in a cookie, with no coordination between replicas at all.
+</Callout>
+
+## Picking per feature, not per database
+
+The common mistake is choosing one level for the whole system. Pick it per feature, based on what a wrong answer costs.
+
+- **Seat booking** (wrong answer costs: Two people, one seat; choose: Linearizable, via the leader)
+- **Payment status** (wrong answer costs: Double charge or lost payment; choose: Linearizable for the write, read-your-writes for the page)
+- **"My tickets" page** (wrong answer costs: Confused customer, support ticket; choose: Read-your-writes plus monotonic reads)
+- **Event comments** (wrong answer costs: Odd ordering; choose: Causal or consistent prefix)
+- **Viewers right now** (wrong answer costs: Nothing; choose: Eventual)
+- **Search index of shows** (wrong answer costs: Brief missing listing; choose: Eventual)
+
+Notice the booking service might use three levels at once. The write path goes to the leader. The confirmation page reads from the leader for a few seconds. The browse pages read from any replica.
+
+You also pay for strength in latency. A linearizable read across regions can cost 100 ms or more. An eventual read from the local replica costs one. A rule of thumb: start with the weakest model whose anomalies a user would never notice, and strengthen only where you can name the bug.
+
+<Quiz
+  id="consistency-pick"
+  question="After paying, a user lands on an order page served by a lagging replica and sees 'No order found'. Refreshing sometimes fixes it. Which guarantee is missing, and what is the cheapest fix?"
+  options={[
+    "Linearizability; move every read to a consensus cluster",
+    "Read-your-writes; send the user's reads to the leader for a few seconds after paying",
+    "Eventual consistency; wait longer for replicas to converge",
+    "Causal consistency; add vector clocks to every request",
+  ]}
+  answer={1}
+  explain={<>The user's own write is invisible to her own read. Read-your-writes fixes exactly that, and routing her reads to the leader briefly (or waiting for a replica to reach her write's version) costs far less than making the whole system linearizable.</>}
+/>
+
+## Key takeaways
+
+- A consistency model is a contract about which values a read may return after writes.
+- Linearizability makes a replicated system act like one copy. It costs round trips and availability during partitions.
+- Eventual consistency only promises convergence, with no bound on staleness.
+- Read-your-writes, monotonic reads, consistent prefix and causal consistency are the useful middle, and most fix one concrete user-visible bug.
+- Choose a level per feature by asking what a wrong answer costs, not once per database.

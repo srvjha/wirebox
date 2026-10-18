@@ -1,0 +1,97 @@
+import { RaftElectionSim } from "@/components/visuals/raft-election-sim"
+
+On the busiest on-sale night of the year, the database leader's disk stalled for eight seconds. A health check noticed, promoted a follower, and everything looked fine, until the old leader woke up and kept accepting bookings for another three seconds. Two nodes, both certain they were in charge. The fix is not a better health check. It is a protocol in which a node can only lead if a majority says so. Raft is the most readable one.
+
+## Why "who's the leader" is hard
+
+You can't ask a dead machine whether it's dead. A follower that hasn't heard from the leader cannot tell the difference between:
+
+- the leader crashed,
+- the leader is alive but slow (a GC pause, a stalled disk),
+- the network between them dropped packets.
+
+If followers promote someone every time the leader goes quiet, they will sometimes promote while the old leader is still working. Two leaders then accept conflicting writes: **split brain**. You need a rule that makes this impossible even when the failure detector is wrong.
+
+The rule is **majority**. With N nodes, a leader needs votes from more than N/2. Two different nodes can't both collect a majority in the same round, because any two majorities share at least one voter, and each voter votes once. This is the same overlap idea as quorums.
+
+## Raft in one page
+
+Raft splits the problem into roles and terms.
+
+- Every node is a **follower**, a **candidate** or the **leader**.
+- Time is divided into **terms**, numbered 1, 2, 3 and so on. A term has at most one leader. Terms act as a logical clock: a message from an older term is stale and ignored.
+- The leader sends **heartbeats** to every follower, a few times per second. As long as heartbeats arrive, followers stay followers.
+- Each follower has an **election timeout**, typically 150 to 300 ms, picked at random. If it passes without a heartbeat, that follower becomes a candidate.
+
+<Diagram w={680} h={190} caption="Raft roles. A follower that hears nothing becomes a candidate. A candidate with a majority leads. Seeing a higher term sends anyone back to follower.">
+  <Box x={20} y={70} w={130} h={50} label="Follower" sub="votes once per term" />
+  <Box x={270} y={70} w={130} h={50} label="Candidate" sub="asks for votes" tone="info" />
+  <Box x={520} y={70} w={130} h={50} label="Leader" sub="sends heartbeats" tone="accent" />
+  <Wire points={[[150, 88], [270, 88]]} tone="warn" label="timeout" labelAt={[210, 78]} />
+  <Wire points={[[400, 88], [520, 88]]} tone="ok" label="majority" labelAt={[460, 78]} />
+  <Wire points={[[335, 120], [335, 160], [85, 160], [85, 120]]} tone="muted" dashed label="higher term seen / lost" labelAt={[210, 176]} />
+  <Wire points={[[585, 120], [585, 168], [335, 168]]} tone="muted" dashed />
+  <Wire points={[[335, 70], [335, 40], [370, 40], [370, 70]]} tone="info" dashed label="split vote: new term" labelAt={[335, 28]} />
+</Diagram>
+
+## Anatomy of an election
+
+Say Gatepass runs its bookings metadata on a five-node Raft cluster, S1 to S5, and S1 is leader of term 1.
+
+1. S1 crashes. Heartbeats stop.
+2. S3's random timeout expires first, at 190 ms. It increments its term to 2, votes for itself, and sends **RequestVote** to everyone.
+3. Each node grants its vote if it hasn't already voted in term 2, and if the candidate's log is at least as up to date as its own. That last check matters: it stops a node that missed committed writes from becoming leader and erasing them.
+4. S3 collects its own vote plus S2 and S4: three of five. It becomes leader and sends heartbeats right away, which tells everyone else to stand down.
+
+The cost to clients is a short outage, usually a few hundred milliseconds to a couple of seconds, during which writes are refused. The cost of *not* having this is much worse.
+
+Try it. Crash the leader, run an election, then click the dead node to bring it back and see it rejoin as a follower.
+
+<RaftElectionSim />
+
+## When votes split
+
+Randomised timeouts make a tie unlikely, not impossible. If two followers time out within a few milliseconds of each other, both become candidates in the same term. Each wins some votes. With four live nodes, two candidates can get two votes each and nobody reaches three.
+
+Raft's answer is dull and effective: nothing happens. Both candidates wait out a fresh random timeout, and whoever's expires first starts a new, higher term and usually wins cleanly. Turn on "split vote" in the simulator, run an election, then run another with the toggle off.
+
+The randomness is the whole trick. If every node used the same timeout, they would collide on every round forever.
+
+## Why the old leader can't hurt anyone
+
+Back to the eight-second stall. In Raft, when the old leader wakes up it still believes it leads term 1. Two things protect the data:
+
+- To **commit** a write, the leader needs acknowledgements from a majority. The old leader is outvoted: followers already moved to term 3 and reject its term-1 requests. The write never commits and the client gets an error.
+- The first message it receives with a higher term makes it step down to follower and discard uncommitted entries.
+
+For a short moment two nodes *think* they lead. Only one can *commit* anything. This is exactly the difference between the fencing tokens in the locks lesson and a naive health check: a term number is a fencing token.
+
+## What you give up
+
+- **Availability below a majority.** A 5-node cluster tolerates 2 failures. With 3 down, it stops accepting writes entirely, by design. If a majority is reachable on neither side of a partition, both sides stop.
+- **Odd sizes.** 3 nodes tolerate 1 failure. 4 nodes also tolerate only 1, since the majority is 3. That is why clusters are 3, 5 or 7 nodes. Past 7, the voting cost isn't worth it.
+- **Latency.** Every write waits for a majority to acknowledge, one network round trip. Spreading nodes across regions makes that round trip 50 ms or more.
+- **A throughput ceiling.** One leader orders all writes. To scale writes, you partition data across many Raft groups.
+
+You rarely write Raft yourself. etcd, Consul, CockroachDB and many managed databases use it (or Paxos variants). Gatepass uses etcd for leader election of its job scheduler, and managed Postgres runs its own election behind the failover button.
+
+<Quiz
+  id="raft-majority"
+  question="A Raft cluster has 5 nodes. A partition splits it into groups of 2 and 3. What happens?"
+  options={[
+    "Both groups elect a leader and keep accepting writes",
+    "The group of 3 can elect a leader and keep serving; the group of 2 cannot",
+    "Neither group can elect a leader",
+    "The group of 2 wins because it has the older leader",
+  ]}
+  answer={1}
+  explain={<>Only the group with 3 nodes can gather a majority (3 of 5). The group of 2 can start elections, but no candidate ever collects 3 votes, so it cannot commit writes. That is how Raft avoids split brain.</>}
+/>
+
+## Key takeaways
+
+- A node can't tell a dead leader from a slow one, so promotion needs agreement, not just a timeout.
+- Raft requires a majority of votes, and each node votes once per term, so two leaders can't win the same term.
+- Random election timeouts make split votes rare, and a split is resolved by simply trying again in a new term.
+- A stale leader is harmless: it cannot get a majority to commit, and it steps down on seeing a higher term.
+- The price is unavailability without a majority, a round trip per write, and a single leader per group.

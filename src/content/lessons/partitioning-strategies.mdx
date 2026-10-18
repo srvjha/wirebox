@@ -1,0 +1,99 @@
+import { PartitionStrategyLab } from "@/components/visuals/partition-strategy-lab"
+
+Gatepass sharded its bookings by city, and it worked until Mumbai grew to ten times the size of every other city. One shard sat at 90% CPU while the rest idled. Sharding by city was a decision about where rows live, and it turned out to be the wrong one. This lesson compares the three basic ways to make that decision and what each one makes easy or painful.
+
+## Partitioning, briefly
+
+**Partitioning** (often called sharding) splits one big dataset into pieces, each stored on a different node. Every row lives in exactly one partition. You do it when the data no longer fits on one machine, or one machine can't keep up with the write load.
+
+The job of a partitioning scheme is to answer two questions fast:
+
+1. Given a key, which partition holds the row?
+2. Given a query, which partitions must I ask?
+
+A good scheme spreads data and traffic **evenly**, so no node is the bottleneck, and keeps related queries on **few** partitions, so a request doesn't have to fan out to everyone. Those two goals pull against each other, and the strategies below make different trades.
+
+<Diagram w={680} h={190} caption="A router maps each key to a partition. The strategy is the rule inside the router.">
+  <Box x={20} y={72} w={110} h={46} label="Booking service" icon="service" />
+  <Box x={190} y={72} w={130} h={46} label="Partition rule" sub="key → partition" tone="accent" />
+  <Wire points={[[130, 95], [190, 95]]} tone="req" />
+  <Box x={420} y={14} w={110} h={42} label="Partition 1" icon="db" />
+  <Box x={420} y={74} w={110} h={42} label="Partition 2" icon="db" />
+  <Box x={420} y={134} w={110} h={42} label="Partition 3" icon="db" />
+  <Wire points={[[320, 95], [370, 95], [370, 35], [420, 35]]} tone="req" />
+  <Wire points={[[370, 95], [420, 95]]} tone="req" />
+  <Wire points={[[370, 95], [370, 155], [420, 155]]} tone="req" />
+</Diagram>
+
+## Range partitioning
+
+Sort the keys and cut the sorted order into contiguous ranges. Partition 1 holds show ids 0 to 29, partition 2 holds 30 to 59, and so on. A shop catalogue might split by name: A to F on one node, G to M on the next.
+
+**Strengths.** Range scans are cheap. "All shows between 40 and 59" is served by one partition. Order is preserved, so "next 20 results" is simple. Locating a key is a binary search over a small table of boundaries.
+
+**Weakness: skew.** Ranges are even in key space, not in traffic. If keys are timestamps or auto-increment ids, every new write goes to the last partition while the old ones go cold. A time-series table partitioned by day has this problem built in: today's partition takes all the writes.
+
+Fixes exist. Lead the key with something well spread (a prefix like `city_id` or a bucket number) so writes spread, at the price of scans needing to ask each prefix. Or split ranges dynamically when they grow, which is what HBase and Spanner do.
+
+## Hash partitioning
+
+Run the key through a hash function and take the result modulo the number of partitions. Keys that look similar end up far apart, so load spreads very evenly regardless of key patterns. Sequential ids, which crush range partitioning, are no problem.
+
+**Strengths.** Even distribution without effort. Point lookups ("get show 57") touch exactly one partition.
+
+**Weaknesses.** You lose order. A range query like "shows 40 to 59" scatters across every partition, so it must fan out to all of them and merge. Cassandra and DynamoDB accept this: you query by partition key, and only the data *within* a partition is kept sorted. The second problem is that plain `hash mod N` reshuffles almost everything when N changes. That is the subject of the rebalancing lesson.
+
+A useful middle: a **compound key**. Hash the first part to choose the partition, and sort by the second part inside it. Partition by `show_id`, sort by `booking_time`, and "all bookings for this show, newest first" is a single-partition range scan.
+
+## Directory partitioning
+
+Keep an explicit **lookup table**: key (or key group) to partition. The service consults the directory, then goes to the right node.
+
+**Strengths.** Total freedom. You can put a giant tenant on its own node, move one customer without moving anyone else, group data by region for legal reasons, or place related entities together. Rebalancing is just copying data and updating a table row.
+
+**Weaknesses.** The directory is a new system with its own needs. It must be fast (cached at every router), highly available (every request depends on it), and consistent (two routers disagreeing about where a key lives is data corruption). It also grows with the number of entries, which is why directories usually map *groups* of keys rather than each one.
+
+Gatepass's multi-tenant admin tool uses this: each organiser account maps to a partition, and a very large organiser can be moved to a dedicated one.
+
+## Try the three side by side
+
+Switch strategies and watch the load bars. Then turn on the hot key and slide the scan window.
+
+<PartitionStrategyLab />
+
+What you should see:
+
+- **Range** gives the cheapest scans (one partition) but the lopsided load, because newer shows are busier.
+- **Hash** evens the load across partitions but a scan touches all of them.
+- **Directory** balances load best, by placing heavy keys deliberately, but its scans land wherever the table put the keys.
+- With the **hot key** on, all three fail the same way. One show carries most of the traffic, and a single key can only live on one partition. No placement rule fixes that. The next lesson does.
+
+## Choosing
+
+- **Range scans and ordered reads dominate**: Range, with a key that spreads writes
+- **Point lookups by id, huge write volume**: Hash
+- **Few big tenants, special placement rules**: Directory
+- **Mixed: lookups by id plus "recent for this id"**: Hash on id, sorted within
+
+Before picking, ask three things: What are my top three queries? Which key do they all share? Does that key spread traffic evenly today, and will it in a year? A key that is right for the query but skewed in traffic (city, in Gatepass's case) calls for either a finer key (city plus show id) or a different strategy.
+
+<Quiz
+  id="partition-pick"
+  question="Gatepass stores one row per booking and wants to show 'the last 50 bookings for this event' quickly, while spreading millions of bookings evenly. Which design fits best?"
+  options={[
+    "Range partition by booking time",
+    "Hash partition by booking id",
+    "Hash partition by event id, sorted by booking time within the partition",
+    "A directory with one entry per booking",
+  ]}
+  answer={2}
+  explain={<>Hashing the event id spreads events across partitions and keeps all of one event's bookings together, in time order, so the last 50 is a single-partition read. Range by time would pile all new writes on one node, hash by booking id would scatter an event's bookings across every partition, and a per-booking directory is enormous.</>}
+/>
+
+## Key takeaways
+
+- A partitioning scheme answers two questions: which partition holds this key, and which partitions does this query need.
+- Range keeps order and makes scans cheap, but sequential keys create hot partitions.
+- Hash spreads load evenly and makes point lookups cheap, but destroys order and fans out range queries.
+- A directory allows any placement, at the cost of running a highly available lookup service.
+- No scheme can split a single hot key. That needs a different technique.

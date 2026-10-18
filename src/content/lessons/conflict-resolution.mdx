@@ -1,0 +1,102 @@
+Asha edits her profile on her phone while her laptop is offline: she changes her city to Pune. Ten minutes later, on the laptop, she changes her phone number. Both devices sync. If the server keeps only whichever profile arrived last, one of her edits vanishes. This is a write conflict, and any system that accepts writes in more than one place has to decide what to do about it.
+
+## Where conflicts come from
+
+A conflict happens when two writes touch the same data and neither knew about the other. That needs three ingredients: more than one place accepting writes (multi-leader, leaderless, offline clients), asynchronous replication, and the same item edited concurrently.
+
+The word that matters is **concurrent**. It doesn't mean "at the same instant". It means neither write had seen the other when it was made. Two edits an hour apart are concurrent if the second device hadn't synced in between.
+
+You have three broad options:
+
+1. **Avoid conflicts**: route all writes for an item through one place, such as a home region per show.
+2. **Pick a winner**: a rule discards one of the writes.
+3. **Merge**: combine both writes so nothing is lost.
+
+Avoiding is the cheapest and should be your first choice. The rest of this lesson is for when you can't.
+
+## Last write wins
+
+**Last write wins (LWW)** attaches a timestamp to every write and keeps the highest one. It is simple, needs no coordination, and always converges: every replica ends up with the same winner.
+
+It is also lossy in a way that surprises people. In the profile example, both edits wrote the whole profile object. The laptop's write, with the later timestamp, replaces everything, including the old city, and Pune is gone. One edit is silently deleted, and nothing tells Asha.
+
+Worse, "last" comes from clocks. If the phone's clock runs 30 seconds ahead, its older write beats the laptop's newer one. You met this in the clocks lesson.
+
+LWW can be acceptable when:
+
+- Every write replaces the full value and losing one is harmless, like a "last seen online" timestamp.
+- The data is rewritten frequently so a lost write is healed soon.
+- You use a **hybrid logical clock** to tame skew, and you accept the loss.
+
+<Callout tone="warn" title="Silent loss is the real cost">
+LWW doesn't fail loudly. A dropped write produces no error and no log line, so you find out from a customer, weeks later.
+</Callout>
+
+A small improvement is to resolve at a finer grain: store each field with its own timestamp. Then the city (from the phone) and the phone number (from the laptop) both survive, and LWW only kicks in when the very same field was edited twice.
+
+## Detecting concurrency with version vectors
+
+Before you can merge, you need to know whether two versions are *concurrent* or whether one simply replaced the other. A **version vector** gives each replica a counter, and each version carries the full set of counters it has seen.
+
+<Diagram w={680} h={230} caption="Each version carries counters per replica. [P:2, L:1] has seen everything [P:1, L:1] has, so it replaces it. [P:2, L:0] and [P:1, L:1] each saw something the other didn't: concurrent.">
+  <Box x={20} y={90} w={110} h={46} label="Phone" sub="edit city" />
+  <Box x={20} y={160} w={110} h={46} label="Laptop" sub="edit number" />
+  <Text x={310} y={40} size={11} tone="accent" mono>start: [P:1, L:0]</Text>
+  <Wire points={[[130, 112], [240, 112]]} tone="req" label="[P:2, L:0]" labelAt={[185, 102]} />
+  <Wire points={[[130, 182], [240, 182]]} tone="req" label="[P:1, L:1]" labelAt={[185, 172]} />
+  <Box x={240} y={110} w={150} h={50} label="Server" sub="neither dominates" tone="warn" />
+  <Wire points={[[390, 135], [470, 135]]} tone="warn" />
+  <Box x={470} y={100} w={190} h={70} label="Conflict: keep both" sub="siblings → merge → [P:2, L:1]" tone="info" />
+</Diagram>
+
+The comparison rule: version A **dominates** B if every counter in A is greater than or equal to B's. Then B is obsolete and can be dropped safely. If neither dominates, they are concurrent, and the system keeps both as **siblings** and hands them to a merge step. Riak and Dynamo-style stores work this way. No clocks involved, so no skew problems.
+
+The merge step is where you decide the meaning. For a shopping cart, merge by taking the union of items. For the profile, take the changed field from each side.
+
+## CRDTs: data that merges itself
+
+A **conflict-free replicated data type (CRDT)** is a data structure designed so that any two replicas can merge in any order and always get the same result. Merges are commutative, associative and idempotent: applying the same update twice, or in a different order, changes nothing. That means no coordination and no conflicts to resolve by hand.
+
+Common building blocks:
+
+- **G-counter**: a counter that only grows. Each replica keeps its own count, and the value is the sum. Merge takes the max per replica. Perfect for "people who've viewed this show".
+- **PN-counter**: two G-counters, one for increments, one for decrements.
+- **G-set / OR-set**: sets where adds from different replicas union together. An observed-remove set tags each add so that a concurrent add and remove of the same item resolves to "added" (add wins).
+- **Sequence CRDTs**: lists where each character has a stable id, so two people typing in a shared document both keep their text. These power collaborative editors.
+
+CRDTs have costs. Metadata grows (tombstones for removed items, a counter per replica), the merge rules decide semantics for you (add wins might not be what you want), and they cannot enforce invariants like "stock never below zero" or "only one buyer per seat". For that, you need coordination.
+
+## Choosing a strategy
+
+- **Seat ownership**: Avoid: single leader per show
+- **Payment state**: Avoid: one writer, with a state machine
+- **Viewer counts**: CRDT counter
+- **Saved shows (wishlist)**: OR-set CRDT, or union merge of siblings
+- **Profile fields**: Per-field LWW with hybrid clocks
+- **Last seen**: Plain LWW
+
+The pattern: the more a lost update would hurt, the more you should avoid concurrency altogether, and the more harmless it is, the more you can let a merge rule settle it.
+
+<Callout tone="key" title="Make conflicts visible">
+Whichever rule you choose, log when a conflict was resolved and which write lost. It costs one line and turns a mystery bug into a metric.
+</Callout>
+
+<YourTurn
+  id="conflict-cart"
+  prompt="Asha adds 'Comedy Night' to her wishlist on her phone, while on her laptop she removes 'Indie Fest'. Neither device has synced. List what a plain last-write-wins on the whole wishlist would do, and how you would merge it instead."
+  fields={3}
+  minAnswers={2}
+  hint="Think about what each device's full list looks like and what's lost if one list replaces the other."
+>
+With whole-object LWW, whichever device syncs last replaces the other's list entirely. If the laptop wins, "Comedy Night" disappears; if the phone wins, "Indie Fest" comes back. Either way one intent is lost without warning.
+
+Better: treat the wishlist as a set and track operations, not snapshots. Keep both versions as siblings (detected via version vectors), then merge: apply the add of Comedy Night and the removal of Indie Fest. An observed-remove set CRDT does this automatically, since the remove only cancels the add it had seen.
+</YourTurn>
+
+## Key takeaways
+
+- Conflicts come from concurrent writes in more than one place. Avoid them by giving each item a single writer when you can.
+- Last write wins is simple and convergent, but it silently discards writes and trusts clocks. Use it only for data where loss is harmless, ideally per field.
+- Version vectors detect whether two versions are ordered or concurrent, without relying on wall-clock time.
+- Concurrent versions are kept as siblings and merged by rules that match your data.
+- CRDTs merge by construction and suit counters, sets and text, but they can't enforce invariants like uniqueness or non-negative stock.

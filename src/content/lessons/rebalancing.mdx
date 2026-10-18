@@ -1,0 +1,103 @@
+import { RebalanceCompare } from "@/components/visuals/rebalance-compare"
+
+Gatepass grew from four booking nodes to five. The team used `hash(key) mod N`, changed N from 4 to 5, and deployed. Ten minutes later the cluster was moving four out of every five rows between machines, the network was saturated, and booking latency tripled. The new node was supposed to take a fifth of the data. Instead, nearly everything moved. Rebalancing is the art of moving only what you must.
+
+## Why rebalancing happens
+
+Clusters change shape all the time:
+
+- **Growth**: data or traffic outgrows the nodes, so you add some.
+- **Failure**: a node dies and its partitions need new homes.
+- **Hotspots**: one partition got too big or too busy and needs to be split or moved.
+- **Shrinking**: after a season ends, you retire nodes to save money.
+
+In each case you want three things. The data ends up **evenly spread** again. Only a **minimal amount of data moves**, because moving data costs network, disk and time. And the system keeps **serving reads and writes** while it happens.
+
+## The trap: hash mod N
+
+With `node = hash(key) mod N`, the owner of a key depends on N itself. When N goes from 4 to 5, a key keeps its owner only if `hash mod 4` happens to equal `hash mod 5`. That is true for about one key in five, so roughly 80% of your keys move. Going from 9 to 10 nodes moves about 90%.
+
+The theoretical minimum for adding one node to N is 1/(N+1) of the data: the new node needs its fair share and nobody else needs to change. Plain modulo moves four to nine times that. Scale-out becomes a major event instead of a routine one.
+
+<Diagram w={680} h={210} caption="Adding a fifth node. With mod N, almost every key changes owner. With fixed partitions or consistent hashing, only the new node's share moves, and it moves only to the new node.">
+  <Text x={170} y={22} size={12} tone="err" mono>hash mod N</Text>
+  <Box x={20} y={40} w={70} h={36} label="N1" />
+  <Box x={100} y={40} w={70} h={36} label="N2" />
+  <Box x={180} y={40} w={70} h={36} label="N3" />
+  <Box x={260} y={40} w={70} h={36} label="N4" />
+  <Box x={140} y={140} w={70} h={36} label="N5 new" tone="accent" />
+  <Wire points={[[55, 76], [160, 140]]} tone="err" dashed />
+  <Wire points={[[135, 76], [170, 140]]} tone="err" dashed />
+  <Wire points={[[215, 76], [180, 140]]} tone="err" dashed />
+  <Wire points={[[295, 76], [190, 140]]} tone="err" dashed />
+  <Wire points={[[55, 76], [135, 76]]} tone="err" arrow={false} dashed />
+  <Text x={170} y={200} size={11}>~80% of keys move, many between old nodes</Text>
+  <Text x={510} y={22} size={12} tone="ok" mono>fixed partitions / ring</Text>
+  <Box x={360} y={40} w={70} h={36} label="N1" />
+  <Box x={440} y={40} w={70} h={36} label="N2" />
+  <Box x={520} y={40} w={70} h={36} label="N3" />
+  <Box x={600} y={40} w={70} h={36} label="N4" />
+  <Box x={480} y={140} w={70} h={36} label="N5 new" tone="accent" />
+  <Wire points={[[395, 76], [500, 140]]} tone="ok" />
+  <Wire points={[[475, 76], [510, 140]]} tone="ok" />
+  <Wire points={[[555, 76], [520, 140]]} tone="ok" />
+  <Wire points={[[635, 76], [530, 140]]} tone="ok" />
+  <Text x={510} y={200} size={11}>~20% move, only into the new node</Text>
+</Diagram>
+
+## Fixed partitions
+
+The simplest fix: decouple *keys to partitions* from *partitions to nodes*. Create far more partitions than you have nodes, say 1,000 for a 10-node cluster, and fix that number for the life of the system. Keys map to partitions with a stable function (`hash mod 1000`) that never changes.
+
+A separate **assignment table** says which node owns which partition. When you add a node, it steals a handful of whole partitions from each existing node until things are even. Moving a partition is a bulk file copy, not a row-by-row reshuffle. When a node dies, its partitions are spread across the survivors.
+
+Elasticsearch, Kafka, Couchbase and Riak all work in this family. The decision you have to live with is the partition count. Too few and you can't scale beyond that many nodes, and each partition is huge. Too many and metadata and overhead grow. A common rule: pick a number so each partition is a few gigabytes at your expected scale, and leave headroom for 10x growth.
+
+The weakness is that partitions themselves can become uneven or too large. Some systems fix this with **dynamic splitting**: when a partition passes a size limit (HBase, Spanner and MongoDB do this), it splits in two, and the halves can move independently.
+
+## Consistent hashing
+
+**Consistent hashing** places both nodes and keys on a circular hash space. Each key belongs to the first node clockwise from its position. Because the owner is decided by neighbours on the ring and not by N, adding a node only claims the slice of the ring just before its position. Everything else stays put.
+
+A single point per node gives uneven slices, so each real node gets many **virtual nodes** (tokens) scattered around the ring, 100 to 256 in real systems. This makes load smoother, and when a node joins it takes a bit from many neighbours instead of a big chunk from one. When a node leaves, its load spreads across many survivors rather than doubling the load on one unlucky next-door node.
+
+Dynamo, Cassandra and many CDN and cache layers use this. It suits systems where nodes come and go often, and where you don't want a central assignment table.
+
+Try all three. Switch schemes and see how many squares have a white ring.
+
+<RebalanceCompare />
+
+## Rebalancing without an outage
+
+Choosing the scheme is half the work. Executing the move safely is the other half.
+
+1. **Copy, then switch.** The new owner receives a copy of the data while the old owner keeps serving. Only after the copy catches up does routing flip.
+2. **Handle writes during the move.** Dual-write to old and new owner, or stream the change log to the new one until it has caught up, then cut over.
+3. **Throttle.** A rebalance that uses 100% of the disk and network starves real traffic. Cap the transfer rate and run it at off-peak hours when you can.
+4. **Make it observable and reversible.** Show progress, and keep the old copy until the new one is verified.
+5. **Avoid automatic rebalancing triggered by failure detection alone.** A node that is only slow, and is declared dead, can set off a huge data movement exactly when the cluster is already struggling. Many systems wait several minutes, or ask a human, before moving data after a failure.
+
+<Callout tone="warn" title="Rebalancing is load too">
+A cluster that is near its limit can be tipped over by the very rebalance meant to relieve it. Add capacity before you need it.
+</Callout>
+
+<Quiz
+  id="rebalance-pick"
+  question="A cluster of 10 nodes uses hash mod N and grows to 11. Roughly what fraction of keys move, and what is the minimum possible?"
+  options={[
+    "About 9%, and the minimum is 9%",
+    "About 50%, and the minimum is 9%",
+    "About 90%, and the minimum is 9%",
+    "About 90%, and the minimum is 90%",
+  ]}
+  answer={2}
+  explain={<>A key stays only if hash mod 10 equals hash mod 11, which happens for about 1 in 11 keys, so roughly 90% move. The minimum is the new node's fair share, 1/11, or about 9%. Fixed partitions and consistent hashing both get close to that minimum.</>}
+/>
+
+## Key takeaways
+
+- Rebalancing should move only enough data to fill the new node, and only into it.
+- `hash mod N` ties the owner of every key to N, so changing N moves most of the data.
+- Fixed partitions add a layer: many partitions, stably mapped from keys, assigned to nodes. Pick the count with growth in mind.
+- Consistent hashing with virtual nodes makes the owner depend on ring neighbours, so joins and leaves are local.
+- Move data by copy-then-switch, throttled and observable, and be wary of rebalancing triggered automatically by failure suspicion.
