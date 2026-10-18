@@ -1,5 +1,5 @@
 import "server-only";
-import { count, countDistinct, desc, gte, sql } from "drizzle-orm";
+import { and, count, countDistinct, desc, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { account, labProgress, lessonProgress, loadTestRun, postmortem, user } from "@/lib/db/schema";
 
@@ -24,10 +24,12 @@ export async function getAdminStats() {
   ] = await Promise.all([
     db
       .select({
-        total: count(),
-        d1: sql<number>`count(*) filter (where ${user.createdAt} >= now() - interval '1 day')`.mapWith(Number),
-        d7: sql<number>`count(*) filter (where ${user.createdAt} >= now() - interval '7 days')`.mapWith(Number),
-        d30: sql<number>`count(*) filter (where ${user.createdAt} >= now() - interval '30 days')`.mapWith(Number),
+        // Guest accounts are counted separately so they don't inflate real sign-ups.
+        total: sql<number>`count(*) filter (where ${user.isAnonymous} is not true)`.mapWith(Number),
+        guests: sql<number>`count(*) filter (where ${user.isAnonymous})`.mapWith(Number),
+        d1: sql<number>`count(*) filter (where ${user.isAnonymous} is not true and ${user.createdAt} >= now() - interval '1 day')`.mapWith(Number),
+        d7: sql<number>`count(*) filter (where ${user.isAnonymous} is not true and ${user.createdAt} >= now() - interval '7 days')`.mapWith(Number),
+        d30: sql<number>`count(*) filter (where ${user.isAnonymous} is not true and ${user.createdAt} >= now() - interval '30 days')`.mapWith(Number),
       })
       .from(user),
     db
@@ -36,7 +38,7 @@ export async function getAdminStats() {
         n: count(),
       })
       .from(user)
-      .where(gte(user.createdAt, since30))
+      .where(and(gte(user.createdAt, since30), sql`${user.isAnonymous} is not true`))
       .groupBy(sql`1`)
       .orderBy(sql`1`),
     db

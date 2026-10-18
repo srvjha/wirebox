@@ -79,7 +79,7 @@ function Dashboard({ s }: { s: AdminStats }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Total users" value={s.users.total} />
+        <Kpi label="Total users" value={s.users.total} sub={`+ ${s.users.guests} guest sessions`} />
         <Kpi label="New, last 24h" value={s.users.d1} sub={`${s.users.d7} in 7d · ${s.users.d30} in 30d`} />
         <Kpi label="Active learners, 7d" value={s.activeLearners7d} sub="lesson, lab or load test" />
         <Kpi label="AI postmortems" value={s.postmortems.n} sub={`${s.postmortems.users} learners`} />
