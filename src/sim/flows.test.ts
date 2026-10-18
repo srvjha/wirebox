@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   evaluateFlows,
+  runFlowTimeline,
   resolveKnobs,
   type Flow,
   type FlowEvalInput,
@@ -221,5 +222,110 @@ describe("flows: queues and workers", () => {
     const r = evalFlows(bad, [sms]);
     expect(r.flows[0].asyncOnTime).toBe(0);
     expect(r.issues.join(" ")).toMatch(/Third-party API/);
+  });
+});
+
+describe("flows: timeline incidents", () => {
+  const retryKnob = (v: "immediate" | "backoff") =>
+    resolveKnobs(
+      [
+        {
+          id: "retries",
+          label: "Retries",
+          help: "",
+          default: "immediate",
+          options: [
+            { v: "immediate", label: "", desc: "" },
+            { v: "backoff", label: "", desc: "" },
+          ],
+        },
+      ],
+      { retries: v },
+    );
+
+  const orders: Flow = {
+    id: "orders",
+    label: "Orders",
+    rps: 200,
+    workMs: 20,
+    slaSeconds: 30,
+    route: [{ kind: "server" }, { kind: "queue" }, { kind: "worker" }, { kind: "db" }],
+  };
+  const orderGraph = graph(
+    [["s", "server", { size: "xl" }], ["q", "queue"], ["w", "worker"], ["d", "db"]],
+    ["client>s", "s>q", "q>w", "w>d"],
+  );
+
+  it("a queue absorbs a spike while workers drain: lag grows, then shrinks", () => {
+    const tl = runFlowTimeline({
+      ...orderGraph,
+      flows: [orders],
+      incident: { type: "spike", multiplier: 4, seconds: 5 },
+    });
+    const lag = tl.frames.map((f) => f.queueLag);
+    expect(lag[4]).toBe(0);
+    expect(Math.max(...lag)).toBeGreaterThan(3);
+    const peak = lag.indexOf(Math.max(...lag));
+    expect(lag[peak + 4]).toBeLessThan(lag[peak]);
+    expect(lag[lag.length - 1]).toBe(0);
+    // The app never slowed down: only the background work waited.
+    expect(tl.overall).toBeGreaterThan(0.99);
+    expect(tl.recovery).not.toBeNull();
+  });
+
+  it("without a queue the same spike hits the database and drops requests", () => {
+    const direct: Flow = { ...orders, route: [{ kind: "server" }, { kind: "db" }], write: true };
+    const g = graph([["s", "server", { size: "xl" }], ["d", "db"]], ["client>s", "s>d"]);
+    const tl = runFlowTimeline({ ...g, flows: [direct], incident: { type: "spike", multiplier: 60, seconds: 5 } });
+    expect(tl.worst).toBeLessThan(0.7);
+  });
+
+  it("a slow third party sinks synchronous calls, but a queue keeps the app answering", () => {
+    const incident = { type: "slow", kind: "external", ms: 800, failRate: 0.6 } as const;
+    const inline: Flow = { id: "sms", label: "SMS", rps: 100, route: [{ kind: "server" }, { kind: "external" }] };
+    const g1 = graph([["s", "server"], ["x", "external"]], ["client>s", "s>x"]);
+    const sync = runFlowTimeline({ ...g1, flows: [inline], incident });
+    expect(sync.worst).toBeLessThan(0.6);
+
+    const queued: Flow = {
+      id: "sms",
+      label: "SMS",
+      rps: 100,
+      workMs: 100,
+      slaSeconds: 5,
+      route: [{ kind: "server" }, { kind: "queue" }, { kind: "worker" }, { kind: "external" }],
+    };
+    const workers = Array.from({ length: 20 }, (_, i): N => [`w${i}`, "worker"]);
+    const g2 = graph(
+      [["s", "server"], ["q", "queue"], ["x", "external"], ...workers],
+      ["client>s", "s>q", ...workers.map(([id]) => `q>${id}`), ...workers.map(([id]) => `${id}>x`)],
+    );
+    const withBackoff = runFlowTimeline({ ...g2, flows: [queued], incident, knobs: retryKnob("backoff") });
+    const hammer = runFlowTimeline({ ...g2, flows: [queued], incident, knobs: retryKnob("immediate") });
+    expect(withBackoff.worst).toBeGreaterThan(0.99);
+    expect(hammer.worst).toBeGreaterThan(0.99);
+    const onTime = (t: typeof withBackoff) => t.flowTotals.sms.asyncOnTime / t.flowTotals.sms.asyncOffered;
+    expect(onTime(withBackoff)).toBeGreaterThan(onTime(hammer) + 0.1);
+    expect(withBackoff.worstQueueLag).toBeLessThan(hammer.worstQueueLag);
+  });
+
+  it("immediate retries hammer a struggling dependency harder than backoff", () => {
+    const g = graph([["s", "server"], ["x", "external"]], ["client>s", "s>x"]);
+    const f: Flow = { id: "pay", label: "Pay", rps: 1800, route: [{ kind: "server" }, { kind: "external" }] };
+    const incident = { type: "slow", kind: "external", ms: 100, failRate: 0.5 } as const;
+    const fast = runFlowTimeline({ ...g, flows: [f], incident, knobs: retryKnob("immediate") });
+    const calm = runFlowTimeline({ ...g, flows: [f], incident, knobs: retryKnob("backoff") });
+    const extLoad = (t: typeof fast) => t.frames[12].result.nodes.x.load;
+    expect(extLoad(fast)).toBeGreaterThan(extLoad(calm));
+  });
+
+  it("a dead node takes its share down; lb health checks hide it after detection", () => {
+    const g = graph([["lb", "lb"], ["s1", "server"], ["s2", "server"], ["d", "db"]], ["client>lb", "lb>s1", "lb>s2", "s1>d", "s2>d"]);
+    const blind = runFlowTimeline({ ...g, flows: [web], incident: { type: "down", kind: "server" } });
+    expect(blind.victim).toBe("s1");
+    expect(blind.recovery).toBeNull();
+    const checked = runFlowTimeline({ ...g, flows: [web], incident: { type: "down", kind: "server" }, healthChecks: true });
+    expect(checked.worst).toBeLessThan(0.9);
+    expect(checked.recovery).toBeLessThanOrEqual(4);
   });
 });
