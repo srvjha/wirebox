@@ -1,0 +1,94 @@
+Gatepass wants to show “2,341 people are looking at this show” on hot events, and a green dot next to friends who are browsing the same gig. That's **presence**: knowing who is here right now. It sounds like a counter. It's really a question about how you notice that someone has left, when leaving usually makes no sound at all.
+
+## Leaving is silent
+
+Joining is easy to detect: the phone opens a connection, so the server knows. Leaving rarely announces itself. A fan who closes the app properly sends a goodbye. A fan whose battery dies, who walks into a basement, or whose phone OS freezes the app in the background sends nothing. Their TCP connection may look open on the server for minutes.
+
+So presence can't rely on “disconnect” events. It has to work the other way round: **someone is present only while they keep proving it.**
+
+## Heartbeats and timeouts
+
+Each phone sends a small heartbeat every few seconds while the seat map is open. The server records “user 81 was last seen on event 42 at 10:00:07”. A user counts as present if their last heartbeat is recent enough. If no heartbeat arrives within the timeout, they're gone, whatever the socket says.
+
+<Diagram w={640} h={240} caption="Presence is a last-seen time per user. Missing heartbeats, not disconnects, mark someone as gone.">
+  <Box x={20} y={20} w={130} label="Phone (Asha)" sub="beat every 10 s" icon="phone" />
+  <Box x={20} y={100} w={130} label="Phone (Ravi)" sub="battery died" icon="phone" tone="err" dashed />
+  <Box x={250} y={60} w={140} label="WS server" icon="server" />
+  <Box x={470} y={30} w={150} h={46} label="Redis" sub="last seen" icon="cache" tone="info" />
+  <Group x={470} y={84} w={150} h={52} tone="info" />
+  <Text x={545} y={105} mono size={10.5}>asha  10:00:07</Text>
+  <Text x={545} y={124} mono size={10.5} tone="err">ravi  09:59:31</Text>
+  <Wire points={[[152, 46], [248, 80]]} tone="req" flow label="beat" />
+  <Wire points={[[152, 126], [248, 100]]} tone="muted" dashed arrow={false} />
+  <Wire points={[[392, 76], [468, 56]]} tone="info" />
+  <Box x={250} y={170} w={370} h={50} label="At 10:00:10 with a 30 s timeout" sub="Asha present · Ravi gone (36 s since last beat)" tone="accent" />
+</Diagram>
+
+The two numbers you pick are a tradeoff you can state precisely:
+
+- **Heartbeat interval** sets the cost. 100,000 viewers beating every 10 seconds is 10,000 writes a second.
+- **Timeout** sets how wrong you can be. With a 30-second timeout, a fan who left is still shown as present for up to 30 seconds. A timeout shorter than two or three heartbeat intervals marks people as gone because of one late packet on a shaky network, and their dot flickers.
+
+A common choice is a heartbeat every 10–15 seconds and a timeout of 30–45 seconds, so a single lost heartbeat never removes anyone.
+
+<KeyIdea>Presence is a lease, not a fact. Someone is “here” only until their last heartbeat expires.</KeyIdea>
+
+## Where presence lives
+
+Presence data is hot, small, short-lived and fine to lose. That's exactly what an in-memory store is for. Don't write heartbeats to Postgres: 10,000 updates a second of data nobody needs tomorrow would crowd out the bookings that matter.
+
+Two common shapes in Redis:
+
+- **One key per user with a TTL.** `SET presence:event42:asha 1 EX 30` on every heartbeat. Redis expires the key for you when the beats stop. Checking one friend is a single `EXISTS`. Counting everyone means scanning keys, which is slow.
+- **One sorted set per event, scored by last-seen time.** `ZADD presence:event42 <now> asha` on every heartbeat. Counting viewers is `ZCOUNT presence:event42 <now-30s> +inf`, and a background job trims old entries with `ZREMRANGEBYSCORE`.
+
+Gatepass uses the sorted set for “people looking at this show” and per-user keys for friends' green dots.
+
+## Counting at scale: approximate is fine
+
+The headline number has a different shape from the green dot. Nobody can tell 2,341 viewers from 2,358, so don't pay for exactness:
+
+- **Round it.** Show “2.3k people are looking” and update it every 5–10 seconds, not on every heartbeat.
+- **Compute it once.** One job counts each event every 5 seconds and publishes the number through the same pub/sub channel as seat updates. One hundred thousand phones read a broadcast, rather than each server counting.
+- **Estimate huge sets.** For unique viewers across a day, a HyperLogLog counts millions of users in about 12 KB with roughly 1% error. Module 19 shows how.
+
+<Callout tone="warn" title="Fan-out is the hidden cost">
+Showing friends' status means every status change has to reach every friend who's watching. A user with 500 friends who opens and closes the app ten times a day generates thousands of messages. Large chat apps limit presence to friends you're actively viewing, or only send presence for the screen that's open, for exactly this reason.
+</Callout>
+
+## Presence and privacy
+
+“Online now” is personal data. A fan might not want their friends to see they're browsing a particular comedy night at 2 a.m. Make it opt-in, show it only to accepted friends, and show coarse states (“active recently”) rather than exact timestamps. A system design decision here is also a product and trust decision.
+
+<Quiz
+  id="presence-timeout"
+  question="Gatepass sends a heartbeat every 10 seconds. Ops sets the presence timeout to 8 seconds to make the viewer count “more accurate”. What happens?"
+  options={[
+    "The count becomes more accurate with no downside",
+    "Every user is counted as gone for part of each interval, so dots flicker and the count drops sharply",
+    "Redis runs out of memory",
+    "Heartbeats are sent more often automatically",
+  ]}
+  answer={1}
+  explain={<>With a timeout shorter than the heartbeat interval, every user expires 8 seconds after each beat and stays “gone” for 2 seconds until the next one. The timeout must be <strong>longer</strong> than the interval, usually 2–3 times, to absorb late or lost heartbeats.</>}
+/>
+
+<YourTurn
+  id="presence-design"
+  prompt="Design the “2.3k people are looking at this show” badge for an on-sale with 200,000 viewers across 12 WebSocket servers. What data, which writes, and how does the number reach the phones?"
+  fields={3}
+  hint="Separate the per-user heartbeat path from the per-event count you broadcast."
+>
+- **Heartbeats:** phones already send a heartbeat on the WebSocket every 15 s. Each server keeps its own in-memory last-seen map for its connections. That's ~13,000 beats a second total, but nothing leaves the server per beat.
+- **Counting:** every 5 s, each server counts its viewers per event (last seen within 45 s) and writes one number per event to Redis: `HSET viewers:event42 server-7 18210`. That's 12 small writes per event every 5 s, not 13,000 a second.
+- **Broadcast:** a small job sums the hash every 5 s, rounds it (“200k”), and publishes it on the event's pub/sub channel. Every phone already listens there for seat updates.
+- **Failure:** if a server dies, its hash field goes stale, so store a timestamp next to each count and ignore fields older than 15 s.
+</YourTurn>
+
+## Key takeaways
+
+- Leaving is usually silent, so presence must be proven with heartbeats and expired with timeouts.
+- The heartbeat interval sets the cost; the timeout sets how long a departed user still looks present. Keep the timeout at 2–3 times the interval.
+- Store presence in memory (Redis keys with TTLs or a sorted set by last-seen time), never in your main database.
+- Viewer counts can be rounded, computed once per event, and broadcast, instead of computed per request.
+- Presence fan-out to friends grows quickly, and “online now” is private data. Limit both.
