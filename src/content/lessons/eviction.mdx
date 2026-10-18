@@ -1,0 +1,109 @@
+import { EvictionPlayground } from "@/components/visuals/eviction-playground"
+
+Gatepass's Redis has 4 GB of memory. During the band's sale, cache-aside keeps adding keys: every event page, every city list, every user's ticket list. At some point the cache is full and a new key arrives. Something has to leave. Which one you pick decides whether the cache keeps working under pressure or quietly turns into an expensive way to reach the database.
+
+## When the cache is full
+
+TTLs remove keys over time, but they don't promise the cache will fit in memory. If you write faster than keys expire, memory fills. The cache then has three options:
+
+- **Refuse new writes** and return errors. Safe for a cache that holds important data, useless for a performance cache.
+- **Crash or swap to disk.** Never acceptable.
+- **Evict**: delete an existing key to make room. This is what you want for a cache, and the rule for choosing the victim is the **eviction policy**.
+
+Redis makes you choose. Its default, `noeviction`, does the first thing: it starts returning errors on writes once full. For a cache-aside cache you almost always want to switch to `allkeys-lru` or `allkeys-lfu`. It's one config line, and forgetting it is a classic production surprise.
+
+<Callout tone="warn" title="Check the default">
+A fresh Redis with `maxmemory` set and the policy left at `noeviction` will fill up, and then every `SET` fails. In cache-aside your code probably ignores the failed `SET`, so nothing crashes. The hit rate just slides toward zero, and the database takes the load.
+</Callout>
+
+## The goal: keep what will be asked for next
+
+An ideal policy would evict the key that won't be needed for the longest time. That needs knowledge of the future, so real policies guess from the past. The three classic guesses:
+
+- **LRU (least recently used)**: evict the key that was touched longest ago. Bet: what was used recently will be used again soon.
+- **LFU (least frequently used)**: evict the key used the fewest times. Bet: what was popular stays popular.
+- **FIFO (first in, first out)**: evict the oldest key, however busy it is. Bet: none really; it's just simple.
+
+There's also **random** eviction, which sounds silly but works surprisingly well when traffic is very skewed, because hot keys get re-added the moment they're evicted. And **TTL-based** eviction (Redis's `volatile-ttl`), which evicts the key closest to expiring anyway.
+
+<Diagram w={700} h={200} caption="LRU keeps keys in order of last use. A hit moves the key to the front; a new key pushes the last one out.">
+  <Text x={22} y={30} anchor="start" mono size={11} tone="muted">MOST RECENT</Text>
+  <Text x={678} y={30} anchor="end" mono size={11} tone="muted">LEAST RECENT</Text>
+  <Box x={20} y={48} w={120} label="jazz" sub="just read" tone="ok" />
+  <Box x={160} y={48} w={120} label="band" sub="2 reads ago" />
+  <Box x={300} y={48} w={120} label="comedy" sub="5 reads ago" />
+  <Box x={440} y={48} w={120} label="fest" sub="9 reads ago" tone="err" />
+  <Box x={580} y={48} w={100} label="expo" sub="new key" tone="accent" dashed />
+  <Wire points={[[630, 112], [630, 150], [80, 150], [80, 112]]} tone="accent" label="miss: insert at front" labelAt={[355, 150]} />
+  <Wire points={[[500, 100], [500, 186]]} tone="err" />
+  <Text x={512} y={182} anchor="start" size={11} tone="err">evicted</Text>
+</Diagram>
+
+## Play with them
+
+The cache below holds just four event pages, so evictions happen quickly. Click events yourself, then play both traffic patterns under each policy and write down the hit rates.
+
+<EvictionPlayground />
+
+What you should see:
+
+- **Hot keys + one-off scan.** A crawler (or a "browse all events" page, or a report) reads five pages once each. Under LRU and FIFO, those one-off reads push the two hot events out, so both miss again afterwards: about 40% hits. LFU knows `band` and `comedy` were read three times each and keeps them: about 53%.
+- **Popularity shifts.** Yesterday's favourites stop being read. LRU and FIFO forget them quickly and settle into all hits on the new favourites: 75%. LFU's old counts make `band` and `comedy` look valuable forever, so the three new hot events fight over two slots and **every** read misses: 30%.
+
+Neither policy wins. Each fails on the pattern the other handles.
+
+<KeyIdea>LRU forgets too fast when a one-off scan comes through. LFU remembers too long when tastes change.</KeyIdea>
+
+## What real systems do
+
+Real caches blend the two ideas so they fail less badly on both patterns:
+
+- **LFU with decay.** Redis's LFU counts are approximate and shrink over time, so a key that was hot last week slowly loses its advantage. That fixes the "popularity shifts" failure.
+- **Approximate LRU.** Redis doesn't keep a perfect list; it samples a handful of random keys and evicts the least recently used of those. It's nearly as good and much cheaper in memory.
+- **Segmented LRU** (used by Memcached, and by many CPU caches): a key enters a "probation" area and only moves to the protected area on its second hit. A one-off scan fills probation and never touches the protected keys.
+- **Admission policies** (like TinyLFU in the Caffeine library): before letting a new key in, compare its estimated frequency with the victim's. A one-off key isn't allowed to push out a popular one.
+
+For Gatepass, the honest answer is: start with `allkeys-lru`, measure the hit rate, and try `allkeys-lfu` if you see scans or batch jobs hurting it. The difference between policies is usually a few points of hit rate, and lesson 3.1 showed how much a few points can matter to the database.
+
+<Quiz
+  id="eviction-scan"
+  question="Every night a job reads all 5,000 event pages to rebuild the sitemap, using the same cache. Next morning the hit rate is terrible for an hour. What's going on, and what's the best fix?"
+  options={[
+    "The cache is too small; double the memory",
+    "Under LRU the scan evicted the hot pages; have the job skip the cache or switch to LFU",
+    "TTLs are too long; shorten them",
+    "The database is slow in the morning",
+  ]}
+  answer={1}
+  explain={<>A full scan touches every key once, which makes each one "recently used" and pushes the genuinely hot keys out under LRU. The cleanest fix is for batch jobs to read the database (or a replica) directly, so they never pollute the cache. LFU, or an admission policy, also protects against it.</>}
+/>
+
+## Sizing so eviction is rare
+
+Eviction is a safety valve, not a strategy. If the cache is evicting hot keys all day, it's too small, and the fix is memory, not a clever policy. Signs to watch in your metrics:
+
+- **Evicted keys per second** climbing during normal traffic.
+- **Hit rate falling** while traffic stays the same.
+- Keys evicted long before their TTL would have expired them.
+
+Lesson 3.1's curve tells you how much memory you need for a target hit rate. Add headroom for spikes: on announcement night, new keys (sessions, per-user ticket lists) appear much faster than usual.
+
+<YourTurn
+  id="eviction-policy-choice"
+  prompt="Gatepass uses one Redis for three things: cached event pages, user sessions and rate-limit counters. Which of these must never be evicted, and how would you set this up?"
+  fields={3}
+  minAnswers={2}
+  hint="What happens to a user if each kind of key silently disappears?"
+>
+- **Event pages** are safe to evict: a missing one is just a miss and a database query.
+- **Sessions** evicted means users get logged out mid-checkout. **Rate-limit counters** evicted means a scraper's count resets and it gets a fresh allowance.
+- Best setup: **separate instances**. A cache Redis with `allkeys-lru` (or LFU) for pages, and a second Redis with `noeviction`, sized properly and monitored, for sessions and counters. If you must share one instance, `volatile-lru` evicts only keys that have a TTL, so give cached pages TTLs and leave sessions without one. That's fragile, though: one session key written with a TTL by mistake becomes evictable.
+</YourTurn>
+
+## Key takeaways
+
+- When memory is full the cache must evict. Set an eviction policy on purpose; Redis's default refuses writes.
+- LRU evicts the least recently used key and is hurt by one-off scans. LFU evicts the least frequently used and is hurt when popularity shifts.
+- Real systems blend them: LFU with decay, sampled LRU, segmented LRU, admission filters.
+- Keep data you can't afford to lose (sessions, counters) away from an evicting cache.
+- Constant eviction of hot keys means the cache is too small. Buy memory before tuning policies.
