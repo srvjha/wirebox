@@ -1,0 +1,105 @@
+At 14:05 on a Tuesday, an engineer runs a cleanup script against the wrong database and deletes the `bookings` table in production. Replicas faithfully delete it too, within a second. Multi-region didn't help, because every region copied the mistake. The only thing between Gatepass and a very bad month is a plan for recovering, and whether anybody has ever tried it.
+
+## Disasters are more than earthquakes
+
+High availability handles the expected failures: a dead server, a lost zone. **Disaster recovery** (DR) handles the ones that take out a whole system or its data. The list is wider than fires and floods:
+
+- A region or provider outage lasting hours.
+- Human error: the wrong `DROP TABLE`, a bad migration, a deleted cloud account.
+- A bad deploy that corrupts data quietly for days.
+- Ransomware or a malicious insider.
+- A bug in your own replication that spreads damage to every copy.
+
+The last three matter because **replication is not backup**. A replica mirrors your mistakes instantly. A backup is a separate copy, from a point in time, that a mistake can't reach. You need both: replication for availability, backups for recovery.
+
+## Two numbers: RPO and RTO
+
+Every DR plan is described by two numbers, and each one is a business decision, not a technical one.
+
+**RPO**, the **recovery point objective**, is how much data you can afford to lose, measured in time. An RPO of 15 minutes means that after recovery you may be missing the last 15 minutes of bookings. It is set by how often you copy data: nightly backups mean an RPO of up to 24 hours; async replication means seconds; synchronous replication to a second site means zero.
+
+**RTO**, the **recovery time objective**, is how long you can afford to be down. An RTO of 1 hour means the service must be back within 60 minutes of the disaster. It's set by how much work recovery takes: restoring a 2 TB database from storage takes hours, while flipping traffic to a warm standby takes minutes.
+
+<Diagram w={680} h={190} caption="RPO looks backwards from the disaster to the last good copy. RTO looks forward to the moment service is back.">
+  <Wire points={[[30, 100], [650, 100]]} tone="muted" arrow={false} />
+  <Box x={50} y={66} w={110} h={68} label="Last backup" sub="12:00" icon="storage" tone="info" />
+  <Box x={290} y={66} w={110} h={68} label="Disaster" sub="14:05" icon="server" tone="err" />
+  <Box x={530} y={66} w={110} h={68} label="Back online" sub="15:20" icon="client" tone="res" />
+  <Text x={225} y={52} size={12} anchor="middle" tone="warn" mono>RPO: 2h05 of data lost</Text>
+  <Text x={465} y={52} size={12} anchor="middle" tone="warn" mono>RTO: 1h15 of downtime</Text>
+  <Wire points={[[160, 150], [290, 150]]} tone="warn" />
+  <Wire points={[[400, 150], [530, 150]]} tone="warn" />
+</Diagram>
+
+Smaller numbers cost more. Think of it as a ladder, from cheapest and slowest to most expensive and fastest.
+
+1. **Backup and restore.** Periodic backups to another region. RPO of hours, RTO of hours to a day. Cheap: you only pay for storage.
+2. **Pilot light.** A minimal copy of the system (the database replicating, everything else switched off) that you scale up on demand. RPO of minutes, RTO of tens of minutes.
+3. **Warm standby.** A scaled-down but running copy in another region. RPO of seconds, RTO of minutes.
+4. **Active-active.** Multiple live regions. RPO near zero, RTO near zero, and the highest cost and complexity, as the previous lesson showed.
+
+Choose per service, not per company. Gatepass can lose the last 10 minutes of "recently viewed shows" with a shrug. It can't lose a paid booking, so the bookings database needs an RPO of seconds, while the recommendation service is fine with a nightly rebuild.
+
+<KeyIdea>RPO is how much you lose, RTO is how long you're down. Set both from what the business can bear, then pay for exactly that.</KeyIdea>
+
+## Backups that actually work
+
+A backup strategy has a few moving parts that are easy to get wrong.
+
+- **Full plus incremental.** Take a full snapshot weekly and keep a continuous stream of changes (the write-ahead log) between them. This gives **point-in-time recovery**: restore the snapshot, replay the log up to 14:04:59, one second before the bad script ran. That is what turns an RPO of a day into an RPO of seconds.
+- **Keep copies somewhere else.** Same account, same region and same credentials are one failure domain. Store copies in another region and, for the worst threats, under another account, with write-once settings so a compromised admin or ransomware cannot delete them.
+- **Retention.** Corruption can go unnoticed for weeks, so keep daily backups for 30 days and monthly ones for a year, not only last night's.
+- **Encrypt, and protect the keys.** A backup you cannot decrypt is no backup. Don't store the only copy of the key in the system the backup is meant to recover.
+- **Restore time grows with data.** Copying 5 TB over a network at 200 MB/s takes about 7 hours. Your RTO is a calculation you can do before the disaster.
+
+## An untested backup is a hope
+
+The classic story is a team that dutifully backs up for years, loses the database, and discovers the backups were empty, or incomplete, or encrypted with a key nobody has. A backup job that reports "success" tells you the job ran, not that the data is usable.
+
+So you rehearse. Mature teams run restore tests on a schedule, and some automate them: every night, restore last night's backup to a scratch environment, run row counts and a few known queries, and alert if they do not match. Beyond restores come **game days**: scheduled drills where the team simulates the disaster. Fail over the standby region. Kill the primary database. Make the team find and use the runbook, with a stopwatch.
+
+A drill should answer these questions with numbers:
+
+- How long did it take, really? That's your measured RTO, which is nearly always worse than the planned one.
+- How much data was missing? That's your measured RPO.
+- Which steps were manual, undocumented or dependent on one person who was on holiday?
+- What did we forget? Typical answers: DNS TTLs, third-party allow-lists that only know the old IPs, secrets stored only in the dead region, and the fact that the monitoring system lived in the failed region too.
+
+Write the runbook for the person at 3 a.m. who didn't build the system: numbered steps, exact commands, who to call, how to confirm each step worked, and how to fall back. Then fix what the drill showed, and run it again.
+
+## Deciding what to protect first
+
+You can't recover everything at once. Rank services by what they cost per hour of downtime and by their dependencies, then recover in order. Bookings need the database and the auth service before they can work; email can wait. Document the order, because under stress people recover whatever they know best.
+
+Also decide the human side in advance: who declares a disaster, who talks to customers, and when. A status page update every 30 minutes is part of recovery, since fans and organisers tolerate an outage better than silence.
+
+<Quiz
+  id="dr-rpo-rto"
+  question="Gatepass takes a full backup nightly at 02:00 and ships database logs to another region every 5 minutes. The primary database is lost at 16:00 and restoring takes 3 hours. Roughly what are the RPO and RTO?"
+  options={[
+    "RPO 14 hours, RTO 3 hours",
+    "RPO about 5 minutes, RTO about 3 hours",
+    "RPO 3 hours, RTO 5 minutes",
+    "RPO 0, RTO 3 hours"
+  ]}
+  answer={1}
+  explain={<>The shipped logs bound the loss to the unshipped tail, up to about 5 minutes of writes. The 3-hour restore is the downtime. The nightly snapshot alone would have given a 14-hour RPO, but snapshot plus logs replays almost up to the disaster.</>}
+/>
+
+<YourTurn
+  id="dr-drill-plan"
+  prompt="Plan a one-hour DR drill for Gatepass's bookings database. What do you simulate, what do you measure, and what would count as a failure of the drill?"
+  fields={3}
+>
+- **Simulate:** restore the latest backup plus logs into a scratch environment in the standby region, while a second person follows only the written runbook to point a staging copy of the app at it. Stretch goal: delete the scratch primary and promote the replica.
+- **Measure:** the time from "declare disaster" to a successful test booking (RTO); the timestamp of the newest booking present versus the newest in production (RPO); how many steps needed a person who wasn't in the room.
+- **Failure means:** missing the stated RPO or RTO, any step the runbook did not cover, a credential or key that could not be found, or data that restores but fails a row-count and checksum comparison. A failed drill is a success if it's found before the real thing.
+</YourTurn>
+
+## Key takeaways
+
+- Disaster recovery covers what high availability can't: regional loss, human error, corruption and attack. Replication copies mistakes, so you need separate backups.
+- RPO is how much data you can lose; RTO is how long you can be down. Both are business decisions and each step down in either costs more.
+- Choose a strategy on the ladder (backup and restore, pilot light, warm standby, active-active) per service, based on its value.
+- Use point-in-time recovery, store copies in another region and account, and keep several generations of backups.
+- Practise: restore tests and game days produce the real RPO and RTO and find the gaps in your runbook.
