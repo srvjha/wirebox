@@ -1,0 +1,121 @@
+Ask a senior engineer almost any design question and the first words out of their mouth will be "it depends". That isn't a dodge. Every choice in a system buys you something and costs you something, and the right answer depends on which costs you can afford.
+
+## There are no free boxes
+
+Picture adding a cache in front of Gatepass's database. What do you get? Faster event pages and a quieter database. What does it cost?
+
+- **Freshness.** The cache might show "12 passes left" when there are 3.
+- **Complexity.** One more thing to deploy, monitor and reason about.
+- **New failure modes.** If the cache dies, does the database survive the sudden flood?
+- **Money.** A cache server isn't free.
+
+None of those costs make the cache a bad idea. They make it a *decision*. You add it when the benefit is worth the cost, and you can say so out loud.
+
+<KeyIdea>A tradeoff isn't a compromise you settle for. It's the price tag on a benefit, read before you buy.</KeyIdea>
+
+## The tradeoffs you'll meet again and again
+
+A handful of tradeoffs show up in nearly every system. Learn their names now; each gets a module of its own later.
+
+<Diagram w={680} h={260} caption="Five recurring tradeoffs. Moving towards one side always costs something on the other.">
+  <Text x={20} y={40} anchor="start" size={13} weight={600}>Latency</Text>
+  <Text x={660} y={40} anchor="end" size={13} weight={600}>Consistency</Text>
+  <Wire points={[[110, 36], [570, 36]]} tone="muted" arrow={false} dashed />
+  <Text x={340} y={56} size={11} tone="muted">serve from a nearby copy, or check the source of truth</Text>
+  <Text x={20} y={92} anchor="start" size={13} weight={600}>Simplicity</Text>
+  <Text x={660} y={92} anchor="end" size={13} weight={600}>Scalability</Text>
+  <Wire points={[[110, 88], [570, 88]]} tone="muted" arrow={false} dashed />
+  <Text x={340} y={108} size={11} tone="muted">one server you understand, or many you must coordinate</Text>
+  <Text x={20} y={144} anchor="start" size={13} weight={600}>Cost</Text>
+  <Text x={660} y={144} anchor="end" size={13} weight={600}>Availability</Text>
+  <Wire points={[[110, 140], [570, 140]]} tone="muted" arrow={false} dashed />
+  <Text x={340} y={160} size={11} tone="muted">one of everything, or spares that sit idle until needed</Text>
+  <Text x={20} y={196} anchor="start" size={13} weight={600}>Reads</Text>
+  <Text x={660} y={196} anchor="end" size={13} weight={600}>Writes</Text>
+  <Wire points={[[110, 192], [570, 192]]} tone="muted" arrow={false} dashed />
+  <Text x={340} y={212} size={11} tone="muted">indexes and copies speed reads and slow down writes</Text>
+  <Text x={20} y={248} anchor="start" size={13} weight={600}>Build now</Text>
+  <Text x={660} y={248} anchor="end" size={13} weight={600}>Build for later</Text>
+  <Wire points={[[110, 244], [550, 244]]} tone="muted" arrow={false} dashed />
+  <circle cx={200} cy={36} r={6} fill="var(--accent)" />
+  <circle cx={170} cy={88} r={6} fill="var(--accent)" />
+  <circle cx={230} cy={140} r={6} fill="var(--accent)" />
+  <circle cx={210} cy={192} r={6} fill="var(--accent)" />
+  <circle cx={160} cy={244} r={6} fill="var(--accent)" />
+</Diagram>
+
+The orange dots show where Gatepass sits on day zero: close to the left on everything. That's the right place for a small app. The dots will drift right as the app grows, but only when a real problem pushes them.
+
+- **Latency vs consistency.** Reading from a nearby copy or a cache is fast but might be stale. Always reading the primary database is correct but slower and puts all the load in one place.
+- **Simplicity vs scalability.** One server is easy to understand and debug. Ten servers handle more traffic but bring load balancing, shared sessions and partial failures.
+- **Cost vs availability.** A spare server that takes over when the first dies doubles the bill for something that's idle most of the time.
+- **Reads vs writes.** Every index makes some reads fast and every write a bit slower. Every copy of the data speeds reads and adds work to each write.
+- **Build now vs build for later.** Designing for ten million users today costs months you could spend finding out whether anyone wants the app.
+
+## Same question, different answers
+
+Here's the same decision, made twice, for two versions of Gatepass.
+
+**"Should the event page show the exact number of passes left?"**
+
+*For the college fest* (2,000 passes, 25 requests a second at peak): yes, read it straight from the database every time. It's cheap at this size, and students love watching the count drop.
+
+*For a stadium concert* (60,000 seats, 20,000 requests a second when the sale opens): no. Twenty thousand database reads a second for one number is a waste. Show "selling fast" from a cache that refreshes every few seconds, and check the real count only at checkout, where it matters.
+
+Same feature, opposite designs. Neither is wrong; each fits its numbers. This is why requirements and estimates come before design.
+
+<Callout tone="tip" title="Where to be strict, where to relax">
+Most systems have a small core where correctness is non-negotiable (taking money, assigning seats) and a large surface where "close enough, fast" is better (counts, recommendations, feeds). Find the core and spend your strictness there.
+</Callout>
+
+## How to talk about a tradeoff
+
+When you make a choice, in a design doc or an interview, say three things:
+
+1. **What you chose.** "Event pages are served from a cache with a 5-second expiry."
+2. **What it buys.** "The database sees one read per event every 5 seconds instead of 20,000 a second."
+3. **What it costs, and why that's fine.** "The pass count can be up to 5 seconds stale. That's acceptable because checkout re-checks the real count before taking payment."
+
+That third sentence is the one people skip, and it's the one that shows you understand the design. It also tells the next engineer exactly when to revisit the choice: the moment 5 seconds of staleness stops being acceptable.
+
+<Quiz
+  id="tradeoffs-1"
+  question="You add a read replica so event pages read from a copy of the database. What's the most important new cost?"
+  options={[
+    "Event pages will be slower",
+    "Writes stop working while the replica copies data",
+    "A student might not see a booking they just made, because the copy lags behind",
+    "There is no real cost; replicas are free performance",
+  ]}
+  answer={2}
+  explain={<>Replicas copy changes after the fact, usually within milliseconds but sometimes seconds. A student who books and immediately reloads might read from a replica that hasn't caught up. You'll fix exactly this in the module on scaling databases.</>}
+/>
+
+## Reversible and irreversible choices
+
+One last lens. Some choices are cheap to undo: adding a cache, changing an expiry time, adding a server. Make them quickly, measure, and adjust.
+
+Other choices are expensive to undo: your database, your data model, your public API, how you split data across machines. Once real users and real data depend on them, changing them means migrations and late nights. Slow down for these, write down the alternatives you rejected, and say why.
+
+<YourTurn
+  id="tradeoffs-email"
+  prompt="Gatepass sends the ticket email inside the booking request, so a slow email provider makes booking slow. Moving the email to a background job fixes that. What does the move cost?"
+  fields={3}
+  minAnswers={2}
+  hint="Think about what the user sees, what can now go wrong silently, and what you have to run."
+>
+- **Delay:** the email arrives a few seconds later instead of before the confirmation screen.
+- **Silent failure:** if the job fails, the booking still succeeded, so you need retries and a way to notice jobs that keep failing.
+- **Duplicates:** a retried job might send the email twice unless the job is safe to repeat.
+- **Operations:** a queue and workers to deploy and monitor.
+
+Almost always worth it, which is why Module 7 is all about background jobs. But every one of these costs is real.
+</YourTurn>
+
+## Key takeaways
+
+- Every component and choice buys a benefit and costs something: freshness, complexity, money or a new way to fail.
+- The recurring tradeoffs are latency vs consistency, simplicity vs scale, cost vs availability, reads vs writes, and now vs later.
+- The same question has different right answers at different scales; let your numbers decide.
+- State every choice as: what you chose, what it buys, what it costs and why that's acceptable.
+- Move fast on reversible choices; slow down on data models, databases and public APIs.
