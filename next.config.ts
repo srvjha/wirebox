@@ -28,6 +28,7 @@ const nextConfig: NextConfig = {
   },
 };
 
-const withMDX = createMDX({});
+// Turbopack needs plugins referenced by package name.
+const withMDX = createMDX({ options: { remarkPlugins: [["remark-gfm", {}]] } });
 
 export default withMDX(nextConfig);
