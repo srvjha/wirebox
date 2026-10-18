@@ -1,15 +1,11 @@
 import type { MDXComponents } from "mdx/types";
+import Link from "next/link";
 import type { ComponentProps } from "react";
 import { Box, Diagram, Group, Packet, Tag, Text, Wire } from "@/components/diagram/kit";
+import { slugify } from "@/components/learn/slugify";
 import { Callout, KeyIdea, Quiz, Reveal, YourTurn } from "@/components/lesson";
 
-export function slugify(text: string) {
-  return text
-    .toLowerCase()
-    .replace(/[`*_]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
+export { slugify };
 
 function textOf(node: unknown): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -23,6 +19,15 @@ function textOf(node: unknown): string {
 const components: MDXComponents = {
   h2: (props: ComponentProps<"h2">) => <h2 id={slugify(textOf(props.children))} {...props} />,
   h3: (props: ComponentProps<"h3">) => <h3 id={slugify(textOf(props.children))} {...props} />,
+  // Internal links navigate client-side; external ones open in a new tab.
+  a: ({ href = "", ...props }: ComponentProps<"a">) =>
+    href.startsWith("/") ? (
+      <Link href={href} {...props} />
+    ) : href.startsWith("#") ? (
+      <a href={href} {...props} />
+    ) : (
+      <a href={href} target="_blank" rel="noreferrer" {...props} />
+    ),
   // Available in every lesson without importing.
   Diagram,
   Box,
