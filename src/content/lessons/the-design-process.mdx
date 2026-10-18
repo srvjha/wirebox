@@ -1,0 +1,115 @@
+"Build an app for the fest" is not something you can design. It's a wish. This lesson gives you a process that turns a wish into a design in three passes, each one sharper than the last, and you'll follow one Gatepass feature all the way through.
+
+## Three passes, coarse to fine
+
+Good designers don't start with database columns, and they don't stop at boxes and arrows. They zoom in gradually:
+
+<Diagram w={680} h={190} caption="Each pass narrows the questions. Loop back whenever a later pass breaks an earlier answer.">
+  <Box x={10} y={50} w={190} h={64} label="1. Requirements" sub="what + how well" tone="accent" />
+  <Box x={245} y={50} w={190} h={64} label="2. High-level design" sub="boxes, arrows, data flow" tone="info" />
+  <Box x={480} y={50} w={190} h={64} label="3. Low-level design" sub="API, schema, algorithms" tone="ok" />
+  <Wire points={[[200, 82], [245, 82]]} tone="accent" />
+  <Wire points={[[435, 82], [480, 82]]} tone="info" />
+  <Wire d="M575 114 C 575 170, 105 170, 105 118" tone="muted" dashed label="loop back" labelAt={[340, 158]} />
+  <Text x={105} y={34} size={11} mono tone="muted">~15% of the time</Text>
+  <Text x={340} y={34} size={11} mono tone="muted">~35%</Text>
+  <Text x={575} y={34} size={11} mono tone="muted">~50%</Text>
+</Diagram>
+
+1. **Requirements.** What must the system do, for whom, and how well? Out come a list of features and a handful of numbers.
+2. **High-level design.** Which big parts exist and how does data move between them? Out comes a diagram you could explain in two minutes.
+3. **Low-level design.** For the parts that matter, what exactly are the API endpoints, the tables, the algorithms? Out come things a developer could build from.
+
+The percentages are a rough guide for a design session, not a rule. The point is that requirements are short but come first, and that most of the real thinking happens once you get specific.
+
+## Pass one: requirements
+
+Requirements split into two kinds, and the next lesson covers them in depth. For now:
+
+- **Functional requirements** are verbs: *list events*, *buy a pass*, *scan a pass at the gate*.
+- **Non-functional requirements** are adjectives with numbers: *fast* (pages under 300 ms), *available* (up all of fest week), *correct* (never oversell).
+
+The most useful thing you can do in this pass is **say no**. Gatepass on day zero does not need refunds, seat maps, a waitlist or a friend-invite feature. Writing them down as "out of scope" is a decision, and it protects every later pass from creeping complexity.
+
+<Callout tone="note" title="Ask, don't assume">
+If someone else owns the product, ask them. "How many students?" and "What happens if the app is down for ten minutes during the sale?" are cheap questions with expensive answers.
+</Callout>
+
+## Pass two: high-level design
+
+Now draw the big parts. For Gatepass, a sensible first sketch is:
+
+<Diagram w={680} h={230} caption="High-level design: who talks to whom, and which way data flows.">
+  <Box x={10} y={30} label="Student app" sub="iOS / Android / web" icon="phone" />
+  <Box x={10} y={150} label="Gate scanner" sub="volunteer phone" icon="phone" />
+  <Box x={270} y={90} w={140} label="API server" sub="Node / Go / …" icon="server" tone="accent" />
+  <Box x={530} y={30} w={140} label="Database" sub="events, passes" icon="db" />
+  <Box x={530} y={150} w={140} label="Payment provider" sub="external" icon="service" dashed />
+  <Wire points={[[138, 56], [204, 56], [204, 108], [270, 108]]} tone="req" />
+  <Wire points={[[138, 176], [204, 176], [204, 124], [270, 124]]} tone="req" />
+  <Wire points={[[410, 106], [470, 106], [470, 56], [530, 56]]} />
+  <Wire points={[[410, 126], [470, 126], [470, 176], [530, 176]]} dashed />
+  <Packet points={[[138, 56], [204, 56], [204, 108], [270, 108]]} dur={2.2} />
+  <Packet points={[[410, 106], [470, 106], [470, 56], [530, 56]]} dur={2.2} delay={1.1} />
+</Diagram>
+
+At this level you're deciding things like: one server or many? Do clients talk to the payment provider directly or through us? Does the gate scanner need to work offline? You're *not* yet naming columns.
+
+A good high-level design lets you trace each functional requirement through the boxes. "Buy a pass" goes app → API → payment provider → API → database → app. If a requirement can't be traced, a box is missing.
+
+## Pass three: low-level design
+
+Pick the parts that carry the risk and get specific. For Gatepass, the risky part is buying a pass, so that's where the detail goes:
+
+- **API:** `POST /events/{id}/bookings` with the pass type and a payment token. Returns `201` with the booking, or `409` if sold out.
+- **Schema:** a `passes` table with a `remaining` count, and a `bookings` table that references it.
+- **Algorithm:** decrement `remaining` only if it's above zero, in the same transaction that inserts the booking. If the decrement touches zero rows, the event is sold out.
+
+That last line is the whole correctness story in one sentence. It's the kind of detail an interviewer or a reviewer wants to hear, and it's invisible in the high-level diagram.
+
+```sql
+UPDATE passes SET remaining = remaining - 1
+WHERE id = $1 AND remaining > 0;
+-- 0 rows updated means sold out: roll back and return 409
+```
+
+## Following one feature through
+
+Let's run "scan a pass at the gate" through all three passes, quickly.
+
+**Requirements.** A volunteer scans a QR code; the app says *valid* or *already used* within a second. The college Wi-Fi at the gate is famously bad.
+
+**High-level.** That Wi-Fi detail changes the design. If every scan needs the server, a dead connection stops the queue. So the scanner app downloads the list of valid pass IDs before the gates open and checks locally, then syncs scans to the server when it can.
+
+**Low-level.** The QR code holds the pass ID plus a signature so it can't be forged. The scanner keeps a local set of used IDs. With two gates, the same pass could be scanned at both before they sync, so you accept that risk (it's a college fest, not a bank) or give each gate its own range of passes.
+
+Notice how a requirement nobody would have put in a diagram (bad Wi-Fi) reshaped the whole feature. That's why requirements come first.
+
+<YourTurn
+  id="design-process-refund"
+  prompt="Next year the committee wants refunds up to 48 hours before the fest. Name the decisions this adds in each pass."
+  fields={3}
+  examples={["Requirements", "High-level", "Low-level"]}
+  minAnswers={2}
+  hint="Think about money going back through the payment provider, and the pass becoming sellable again."
+>
+**Requirements:** refund window (48 h before start), full or partial, who can trigger it, and whether a refunded pass goes back on sale.
+
+**High-level:** the API server now calls the payment provider's refund endpoint. Refunds can fail or be slow, so you might do them in the background and show "refund pending".
+
+**Low-level:** `POST /bookings/{id}/refund`, a `status` column on bookings (`paid`, `refund_pending`, `refunded`), and incrementing `remaining` in the same transaction that marks the booking refunded, so the seat is resellable exactly once.
+</YourTurn>
+
+## When to loop back
+
+The process is drawn as a line, but you'll walk it like a loop. Low-level detail often breaks a high-level choice: you discover the payment provider calls you back with a webhook, so you need an endpoint for it and a way to match it to a booking. Fine. Go back, add it, carry on.
+
+What you should avoid is the opposite: jumping into low-level detail before the requirements exist. That's how teams end up with a beautiful sharded database for an app with 200 users.
+
+## Key takeaways
+
+- Design in three passes: requirements, then high-level, then low-level.
+- Requirements come first because one detail (bad Wi-Fi at the gate) can reshape a feature.
+- High-level design should let you trace every functional requirement through the boxes.
+- Spend low-level detail where the risk is. For Gatepass that's never overselling.
+- Loop back freely; skipping ahead to detail is the mistake.
