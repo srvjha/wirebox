@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LogOut, User } from "lucide-react";
 import { buttonClass } from "@/components/ui/button";
 import { signOut, useSession } from "@/lib/auth-client";
@@ -12,6 +12,24 @@ export function UserMenu() {
   const { data, isPending } = useSession();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click or Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   if (isPending) return <div className="h-8 w-16 animate-pulse rounded-lg bg-surface-2" />;
   if (!data) {
@@ -23,9 +41,11 @@ export function UserMenu() {
   }
   const initial = (data.user.name || data.user.email).charAt(0).toUpperCase();
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <button
         type="button"
+        aria-expanded={open}
+        aria-haspopup="menu"
         onClick={() => setOpen((o) => !o)}
         className="grid size-8 place-items-center rounded-full border border-line bg-surface-2 text-[13px] font-semibold text-fg"
         aria-label="Account menu"
