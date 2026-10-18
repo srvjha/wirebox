@@ -9,9 +9,10 @@ export function SiteFooter() {
           <LogoMark className="size-5" />
           <span className="text-[13px]">Wirebox · free system design for everyone</span>
         </div>
-        <nav className="flex gap-5 text-[13px] text-subtle sm:ml-auto">
+        <nav className="flex flex-wrap gap-x-5 gap-y-2 text-[13px] text-subtle sm:ml-auto">
           <Link href="/learn" className="hover:text-fg">Learn</Link>
           <Link href="/labs" className="hover:text-fg">Labs</Link>
+          <Link href="/me" className="hover:text-fg">Your progress</Link>
           <Link href="/sign-in" className="hover:text-fg">Sign in</Link>
         </nav>
       </div>
