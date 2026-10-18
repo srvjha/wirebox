@@ -1,0 +1,133 @@
+import { WriteStrategiesCompare } from "@/components/visuals/write-strategies-compare"
+
+Cache-aside answers the read side: check the cache, fall back to the database. But data also gets written, and the moment you write, you have two copies to keep in step. There are three classic ways to do it, and they differ in one thing that matters a lot: what you lose if the cache dies at the wrong moment.
+
+## The question every write has to answer
+
+When the organiser changes the Gold tier price from ₹2,499 to ₹2,999, the write has to reach the database eventually, because that's the source of truth. The choices are about the cache:
+
+- Does the write go to the cache too, or only to the database?
+- Does the user wait for the database, or only for the cache?
+
+Mix those answers and you get three strategies. Their names sound alike, so anchor each to one sentence:
+
+- **Write-through**: write the cache *and* the database, then reply.
+- **Write-back** (or *write-behind*): write the cache, reply, and copy to the database later.
+- **Write-around**: write only the database. The cache picks it up on the next read.
+
+<Diagram w={700} h={250} caption="Where each write goes and when the user gets a reply. Orange is the write path before the reply; the dashed violet arrow happens later, in the background.">
+  <Group x={14} y={22} w={216} h={214} label="Write-through" tone="accent" />
+  <Group x={242} y={22} w={216} h={214} label="Write-back" tone="warn" />
+  <Group x={470} y={22} w={216} h={214} label="Write-around" tone="ok" />
+  <Box x={56} y={40} w={132} h={44} label="App" icon="server" />
+  <Box x={30} y={170} w={88} h={44} label="Cache" />
+  <Box x={128} y={170} w={88} h={44} label="DB" />
+  <Wire points={[[100, 84], [74, 170]]} tone="req" />
+  <Wire points={[[144, 84], [172, 170]]} tone="req" />
+  <Text x={122} y={130} size={10.5} mono tone="muted">both, then reply</Text>
+  <Box x={284} y={40} w={132} h={44} label="App" icon="server" />
+  <Box x={258} y={170} w={88} h={44} label="Cache" tone="warn" />
+  <Box x={356} y={170} w={88} h={44} label="DB" />
+  <Wire points={[[328, 84], [302, 170]]} tone="req" />
+  <Wire points={[[346, 192], [356, 192]]} tone="info" dashed />
+  <Text x={352} y={130} size={10.5} mono tone="muted">cache, reply,</Text>
+  <Text x={352} y={144} size={10.5} mono tone="info">DB later</Text>
+  <Box x={512} y={40} w={132} h={44} label="App" icon="server" />
+  <Box x={486} y={170} w={88} h={44} label="Cache" dim />
+  <Box x={584} y={170} w={88} h={44} label="DB" />
+  <Wire points={[[600, 84], [628, 170]]} tone="req" />
+  <Text x={560} y={130} size={10.5} mono tone="muted">DB only</Text>
+</Diagram>
+
+## Write-through: always in step
+
+The app writes the new value to the cache and to the database, and replies only when both have it. Reads right after the write hit the cache and see the new price.
+
+- **What you get:** the cache is never behind the database for data written this way. Nothing is lost if the cache dies, because the database already has every write.
+- **What you pay:** every write waits for both. You also cache every written value, including ones nobody will read soon, which wastes memory.
+- **The catch:** "write both" is two operations, not one. If the database write fails after the cache write succeeded, the cache holds a value that never happened. Write the database first and treat a failed cache write as "delete the key", and you're back to cache-aside with an update instead of a delete.
+
+Good fit: data that is read soon after it's written, like a user's profile after they edit it.
+
+## Write-back: fast, with a risk
+
+The app writes only to the cache and replies at once. A background process copies changed values to the database later, every few seconds or when enough changes pile up. Several writes to the same key collapse into one database write.
+
+- **What you get:** writes as fast as memory, and far fewer database writes. Ten thousand "+1 view" updates to one counter become one `UPDATE … SET views = views + 10000`.
+- **What you pay:** for a while, the only copy of the latest data is in the cache. If the cache crashes before flushing, those writes are **gone**, and the user was already told they succeeded.
+
+That makes write-back a poor fit for anything you promised a customer. A booked seat, a payment, a changed price: none of those can live only in RAM. It's a great fit for data where losing a few seconds is acceptable and volume is huge: view counters, "interested" clicks, analytics events, rate-limit counters.
+
+## Write-around: skip the cache
+
+The app writes only to the database and deletes (or ignores) the cached copy. The next read misses, loads the new value and caches it.
+
+- **What you get:** the cache only holds things someone actually read, and the write path is plain database code. This is exactly cache-aside with delete-on-write from lesson 3.3.
+- **What you pay:** the first read after every write is a miss. If data is usually read straight after being written, you're paying for that miss every time.
+
+Good fit: data written often but read rarely, or written once and read later, like a ticket PDF generated at booking and opened on the day of the show.
+
+## Try it
+
+Change the price a few times, read it, then crash the cache. Do it once with a flush before the crash, and once without.
+
+<WriteStrategiesCompare />
+
+<KeyIdea>Write-back is fast because it replies before the data is safe. Anything you'd hate to lose must not live only in the cache.</KeyIdea>
+
+Notice how each column behaves:
+
+- Write-through is the slowest write and loses nothing.
+- Write-back is the fastest write. With unflushed writes, a crash sends the database back to an older price, while the organiser's screen said the change was saved.
+- Write-around's first read after each write is a miss. After that it's indistinguishable from the others.
+
+<Quiz
+  id="write-strategy-pick"
+  question="Gatepass shows a live 'people interested' counter on each event, bumped thousands of times a second during an announcement. Which strategy suits it?"
+  options={[
+    "Write-through, so the database is always exact",
+    "Write-back, flushing totals every few seconds",
+    "Write-around, so the cache isn't polluted",
+    "No cache; write each click straight to the database",
+  ]}
+  answer={1}
+  explain={<>Thousands of single-row updates a second would hammer one hot row in the database. Write-back collapses them into one update every few seconds. If the cache dies you lose a few seconds of clicks on a vanity counter, which nobody will ever notice.</>}
+/>
+
+## Choosing, in practice
+
+Most applications end up mixing them by data type, and that's fine:
+
+<table>
+  <thead>
+    <tr><th>Gatepass data</th><th>Strategy</th><th>Why</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Bookings, payments, prices</td><td>Write-around (DB, then delete key)</td><td>Must never be lost; correctness first</td></tr>
+    <tr><td>User profile edits</td><td>Write-through</td><td>Read immediately after, on the next page</td></tr>
+    <tr><td>View and interest counters</td><td>Write-back</td><td>Huge volume, losing a few seconds is fine</td></tr>
+    <tr><td>Ticket PDFs</td><td>Write-around</td><td>Written once, read days later</td></tr>
+  </tbody>
+</table>
+
+<Callout tone="warn" title="Write-back needs a real flush plan">
+If you use write-back, decide: how often to flush, what happens if the database is down during a flush (retry, and don't drop the buffer), and what the cache's persistence settings are. Redis can save to disk every second (append-only file), which shrinks the loss window but doesn't remove it.
+</Callout>
+
+<YourTurn
+  id="write-strategies-justify"
+  prompt="A teammate proposes write-back for bookings 'so checkout feels instant during the band's sale'. Write the two strongest objections, and suggest what you'd do instead."
+  fields={3}
+  minAnswers={2}
+>
+- **Lost bookings.** A cache crash or failover before the flush loses bookings the fans were told succeeded. They paid and have no ticket.
+- **Double-selling.** Seat availability would live in the cache, not in a database transaction, so the "never sell the same seat twice" guarantee depends on a cache that wasn't built for it.
+- **Instead:** keep the booking a fast, small database transaction (an indexed `UPDATE` on one seat row takes milliseconds), and move the slow parts out of the request: PDF generation, email and SMS go to a background queue (module 7). Checkout feels instant because the user only waits for what must be durable.
+</YourTurn>
+
+## Key takeaways
+
+- Write-through writes both before replying: slower writes, nothing lost, cache always current.
+- Write-back writes the cache and flushes later: fastest writes and fewer database writes, but a crash loses unflushed data.
+- Write-around writes only the database: simple and safe, with a miss on the first read after each write. Paired with cache-aside, it's the default for most data.
+- Choose per data type. Anything you promised a customer goes to the database before you reply.
