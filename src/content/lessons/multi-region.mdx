@@ -1,0 +1,96 @@
+import { RegionRouting } from "@/components/visuals/region-routing"
+
+Gatepass started in Mumbai, and every request from a fan in Berlin crosses half the planet: 130 ms each way before your code even runs. One afternoon a cloud provider's whole Mumbai region has a network fault, and the entire product goes dark for 80 minutes. Running in more than one region fixes both problems, and creates a third: your data now lives in several places at once.
+
+## Why leave one region
+
+Three reasons push a team to run in more than one region, and it helps to know which one is yours.
+
+1. **Latency.** Light in fibre moves at roughly two thirds of the speed of light. Mumbai to Frankfurt is about 130 ms round trip at best, and a page that needs six sequential requests pays it six times. A region near the user removes most of that.
+2. **Availability.** Zones within a region survive a failed rack or building. They do not survive a regional control-plane outage, a bad config push by the provider or a flood. Only another region does.
+3. **Law.** Some countries and industries require that personal data of residents stays inside borders. Payment details, health data and, in the EU, personal data under GDPR all come with rules about where they may be stored.
+
+Each reason demands different things. Latency wants reads close to users. Availability wants a second copy that can take over. Law wants some data to stay put. Don't build global writes to fix a read latency problem.
+
+## Routing users to a region
+
+Before any of this works, a request has to reach the right place. Three layers do it.
+
+- **DNS-based routing** (geo-DNS or latency-based DNS) answers the question "where is `api.gatepass.example`?" with a different IP depending on where the resolver is. It's simple and cheap, but answers are cached for the TTL, so changes take minutes to apply.
+- **Anycast** advertises the same IP from every region; the internet's routing sends each packet to the nearest one. Failover is faster, because a region that stops advertising the address disappears in seconds. This is how CDNs and global load balancers work.
+- **A global load balancer** terminates connections near the user and forwards over the provider's private backbone to a healthy region. It also runs the health checks that decide who's healthy.
+
+Health checks need care. A region that fails its check should be removed from rotation, but not after one failed probe, or you will flap. Typical settings: probe every 10 seconds, three failures to pull a region, and several passes to restore it.
+
+## Active-passive
+
+In **active-passive**, one region (the primary) serves all traffic and takes all writes. A second region holds a copy of the data, kept current by replication, and runs a scaled-down copy of the stack, ready to be promoted. Mumbai is primary; Singapore is the standby.
+
+This is the simplest design to reason about. There's one source of truth, so no write conflicts. Its costs are plain:
+
+- **Idle capacity.** You pay for a standby that earns nothing until the day it's needed.
+- **Slow users stay slow.** Berlin still travels to Mumbai.
+- **Replication lag means data loss.** Replication across regions is almost always asynchronous, because waiting for a cross-region acknowledgement on every write adds 100 ms or more to each commit. If Mumbai dies with the last 2 seconds of writes unreplicated, those bookings exist only in a dead region. Promoting the standby accepts that loss. The next lesson names this number: the recovery point.
+- **Failover is a rare event.** Procedures that run once a year rot. Unless you practise them, the first real failover is also the first test.
+
+<Diagram w={680} h={210} caption="Active-passive: one primary takes the writes, async replication feeds a standby. After a failover, users reach the standby.">
+  <Box x={16} y={74} w={110} h={52} label="Users" icon="user" />
+  <Box x={190} y={74} w={120} h={52} label="Global LB" sub="health checks" icon="lb" tone="accent" />
+  <Wire points={[[126, 100], [190, 100]]} tone="req" />
+  <Group x={380} y={14} w={284} h={78} label="Mumbai · primary" tone="ok" />
+  <Box x={396} y={36} w={120} h={44} label="app" icon="service" />
+  <Box x={536} y={36} w={112} h={44} label="database" icon="db" tone="ok" />
+  <Wire points={[[310, 90], [346, 90], [346, 58], [396, 58]]} tone="req" />
+  <Group x={380} y={118} w={284} h={78} label="Singapore · standby" tone="muted" />
+  <Box x={396} y={140} w={120} h={44} label="app (scaled down)" icon="service" dim />
+  <Box x={536} y={140} w={112} h={44} label="replica" icon="db" dim />
+  <Wire points={[[592, 80], [592, 140]]} tone="warn" dashed label="async" />
+  <Wire points={[[310, 112], [346, 112], [346, 162], [396, 162]]} tone="muted" />
+</Diagram>
+
+## Active-active
+
+In **active-active**, every region serves live traffic and users go to the nearest. Latency drops, capacity is used, and losing a region costs only that region's share of capacity, with no cold failover to run. Try it in the visual below, in both modes, and fail Mumbai in each.
+
+<RegionRouting />
+
+The catch is the data. If Mumbai and Frankfurt both accept writes, two fans can book seat A12 for the same show at the same time, one in each region, and neither region knows until replication catches up. Your options are the ones from the replication and consistency modules:
+
+- **Partition by owner.** Every record has a *home region*, and writes for it go there. Berlin fans' bookings live in Frankfurt, Delhi fans' bookings in Mumbai. Each record has one writer, so no conflicts. The hard case is the shared one: a show in Mumbai sold to fans from every region. Route those writes to the show's home region, even if the fan is far away.
+- **Resolve conflicts.** Accept writes anywhere, then merge: last-write-wins (simple, loses data), or conflict-free data types that merge by design (good for counters and sets, awkward for "only one fan gets A12").
+- **Synchronous consensus across regions.** Systems like Spanner pay a cross-region round trip on every write to get strong consistency everywhere. It works, and every commit costs tens to hundreds of milliseconds.
+
+Most teams settle on a hybrid: reads served locally from replicas, writes for each record routed to its home region, and a small set of truly global data (such as configuration) replicated everywhere.
+
+<KeyIdea>Multi-region is easy for stateless code and read-only data. The whole difficulty is writes: decide where each piece of data is allowed to change.</KeyIdea>
+
+## Data residency
+
+If EU fan data must stay in the EU, then Frankfurt can't just be a faster replica of Mumbai. It must be the home of EU records, and Mumbai must not hold copies of them, including in backups, logs and analytics exports. Turn on the residency checkbox in the visual: Berlin is pinned to Frankfurt even when Singapore would be a cheaper fallback, and loses service if Frankfurt is down. That's the real cost of the rule: **residency trades availability for compliance**. You can mitigate it with a second EU region, such as Paris, as Frankfurt's failover.
+
+Practical rules of thumb: tag each record with a region at creation; keep only a pseudonymous ID, not personal data, in globally replicated tables; and check where your log shipping and monitoring pipelines send data.
+
+## Before you go multi-region
+
+It multiplies cost, deploy complexity and the number of failure modes (cross-region partitions, replication lag, split brain), so earn it. Make one region solid first: multiple zones, tested backups, good SLOs. Add a CDN for static content and edge caching for reads, which gets most of the latency win with none of the data problems. Move to a second region when an SLO, a law or a business case demands it, and start with active-passive.
+
+<Quiz
+  id="mr-active-active-write"
+  question="In an active-active Gatepass, two fans in different regions book the last seat for the same show within 100 ms of each other. What is the cleanest way to prevent a double sale?"
+  options={[
+    "Use geo-DNS with a shorter TTL",
+    "Route all seat-allocation writes for a show to that show's home region, which serialises them",
+    "Run last-write-wins merge between regions",
+    "Add more replicas in each region"
+  ]}
+  answer={1}
+  explain={<>Selling a seat must happen in one place that can say yes to exactly one buyer. Giving each show a home region keeps a single writer for its inventory, while reads and unrelated writes still stay local. Last-write-wins would silently drop one of the two bookings after both were confirmed.</>}
+/>
+
+## Key takeaways
+
+- Multi-region buys lower latency, survival of a regional failure and compliance with data-location laws. Know which one you are paying for.
+- Users reach the right region through geo-DNS, anycast or a global load balancer, driven by health checks that avoid flapping.
+- Active-passive is simple but wastes capacity, keeps distant users slow, and loses the unreplicated tail of writes on failover.
+- Active-active gives local latency but needs a plan for writes: a home region per record, conflict resolution, or cross-region consensus.
+- Data residency pins records to a region and trades availability for compliance. Start with one strong region and add a second when you must.
