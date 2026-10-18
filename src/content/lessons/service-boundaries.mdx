@@ -1,0 +1,130 @@
+Gatepass has thirty engineers in one codebase, and every Friday deploy is a negotiation. Splitting it into services sounds like the fix, but where you cut matters far more than whether you cut. Cut in the wrong place and you get all the cost of a distributed system with none of the freedom.
+
+## What a service actually is
+
+A service is not just "some code running in its own container". A useful service has three properties at once:
+
+- **It owns one business capability end to end.** Payments takes money and gives it back. Nobody else does that.
+- **It owns its data.** The payments tables live in the payments database, and only payments code reads or writes them.
+- **It can be changed and deployed alone.** The payments team can ship on Tuesday without asking anyone.
+
+Take away any one of the three and the benefit leaks out. A service that shares tables with another can't change its schema alone. A service that only does half a job needs a partner for every change, so the two always deploy together.
+
+The price of all this is that a function call becomes a network call. A call inside one process takes about 100 nanoseconds and never half-fails. A call across the network takes a millisecond or more, can time out, and can succeed on the far side while you see an error. Module 12 is entirely about that price. So the bar for a split is high: it has to save more coordination than it costs in network.
+
+## Split by capability, not by layer
+
+The tempting first cut follows the layers you already have: a "frontend service", a "business logic service" and a "data service". It looks tidy on a whiteboard. It's the worst cut you can make.
+
+<Diagram w={640} h={280} caption="A layered split makes every feature cross every service. A capability split keeps most features inside one.">
+  <Text x={150} y={22} size={12} tone="err" mono>SPLIT BY LAYER</Text>
+  <Box x={40} y={40} w={220} h={46} label="Web/API service" />
+  <Box x={40} y={110} w={220} h={46} label="Logic service" />
+  <Box x={40} y={180} w={220} h={46} label="Data service" icon="db" />
+  <Wire points={[[285, 203], [285, 63], [262, 63]]} tone="err" dashed />
+  <Wire points={[[285, 133], [262, 133]]} tone="err" dashed />
+  <Wire points={[[285, 203], [262, 203]]} tone="err" dashed />
+  <Text x={160} y={262} size={11} tone="err">a new feature touches all three</Text>
+  <Text x={480} y={22} size={12} tone="ok" mono>SPLIT BY CAPABILITY</Text>
+  <Box x={340} y={40} w={130} h={46} label="Events" icon="service" />
+  <Box x={490} y={40} w={130} h={46} label="Booking" icon="service" tone="accent" />
+  <Box x={340} y={150} w={130} h={46} label="Payments" icon="service" />
+  <Box x={490} y={150} w={130} h={46} label="Notifications" icon="service" />
+  <Box x={375} y={96} w={60} h={30} label="db" />
+  <Box x={525} y={96} w={60} h={30} label="db" tone="accent" />
+  <Box x={375} y={206} w={60} h={30} label="db" />
+  <Box x={525} y={206} w={60} h={30} label="db" />
+  <Text x={480} y={262} size={11} tone="ok">a new feature mostly lives in one</Text>
+</Diagram>
+
+Look at what a real change does. Product wants a waitlist for sold-out shows. In the layered split, the waitlist needs a new screen (web service), new rules (logic service) and a new table (data service). Three teams, three deploys, and they must go out in the right order. You've made the coordination problem worse.
+
+In the capability split, the waitlist is a booking concern. The booking team adds a table, an endpoint and a rule, then ships. Maybe notifications gets a new message template, but that can land a day later.
+
+<KeyIdea>Draw boundaries so that the changes you make most often happen inside one service.</KeyIdea>
+
+For Gatepass, four capabilities fall out naturally:
+
+- **Events**: venues, shows, seat maps, prices. Read-heavy, changes when organisers edit a show.
+- **Booking**: holds, bookings, tickets. The heart of the system, and the part that must never double-sell.
+- **Payments**: charges, refunds, talking to the payment gateway. Has strict audit and compliance needs.
+- **Notifications**: email, SMS and push. Slow third parties, retries, templates.
+
+Each has a different rhythm. Events gets read 50,000 times a second on a big on-sale and barely written. Payments sees a hundred writes a second and must keep every one forever. Separating them lets each scale, store and fail in its own way.
+
+## Each service owns its data
+
+The rule that hurts the most is also the one you can't skip: **no shared database**. If booking and payments both read the `payments` table, then the payments team can't rename a column, add an index that changes locking, or move to a different database without breaking booking. You've built two services that must deploy together, which is one service with extra network hops.
+
+So booking asks payments through its API, and payments answers. That has real consequences you should name up front:
+
+- **Joins become calls.** "Show my bookings with payment status" used to be one SQL join. Now booking returns bookings, and something calls payments for their status. If that's a hot screen, booking keeps a copy of the status, updated by events from payments.
+- **Transactions stop at the boundary.** You can't wrap "charge the card" and "create the booking" in one database transaction any more. Module 16 covers sagas and the outbox pattern, which exist precisely because of this.
+- **Copies are fine, owners are not.** Booking may cache the show name and start time from events. It must never *change* them. Every piece of data has exactly one owner, and everyone else holds a read-only copy that may be a little old.
+
+<Callout tone="warn" title="The shared-database trap">
+Teams often split the code but keep one database "for now". It feels safe and it lets the old joins keep working. In practice "for now" lasts years, and every schema change becomes a cross-team meeting. If you split, split the data in the same project.
+</Callout>
+
+## Finding the seams
+
+A codebase rarely tells you where its boundaries are. These questions help:
+
+1. **What changes together?** Look at the last fifty pull requests. Files that keep changing in the same PR belong in the same service.
+2. **Who owns the words?** In booking, a "ticket" is a seat someone paid for. In events, a "ticket type" is a price tier like "Early bird, ₹799". When the same word means different things to different teams, that's a boundary.
+3. **What needs different guarantees?** Payments needs audit logs and strong consistency. Show descriptions can be a few seconds stale. Different needs pull towards different services.
+4. **What does one team own?** A service that two teams edit has no clear owner. A boundary should match a team you can actually name.
+
+A boundary should also be *narrow*: a few well-defined calls or events cross it, not dozens. If booking needs to call events forty times to render one page, the line is in the wrong place, or booking needs its own copy of what it reads.
+
+## Too small is also wrong
+
+Once a team discovers services, it's tempting to keep cutting: a seat-hold service, a ticket-PDF service, a price-calculator service. Each sounds reasonable. Together they turn one booking into eight network hops, each a place to time out.
+
+The warning sign has a name: the **distributed monolith**. You know you have one when:
+
+- Services must be deployed in a specific order or at the same time.
+- A change to one service's API breaks three others on the same day.
+- Services share a database, or read each other's tables "just for reporting".
+- One user request makes a long chain of synchronous calls, and any one being down fails the whole request.
+
+A good rule of thumb: start with fewer, larger services than you think you need. It is much easier to split a service with a clean boundary later than to merge two services that grew tangled.
+
+<Quiz
+  id="distributed-monolith"
+  question="Gatepass's booking and payments services both read and write the same payments table. What is the main problem?"
+  options={[
+    "Two services can't connect to the same database server",
+    "Neither team can change that table's schema without coordinating with the other, so they can't deploy independently",
+    "Reads will be slower because two services share connections",
+    "It is fine as long as both services use transactions",
+  ]}
+  answer={1}
+  explain={<>Sharing a table couples the two services at the schema level. Any change to it needs both teams to agree and deploy together, which removes the main reason for having separate services. Give the table to one owner and let the other ask through an API or keep a read-only copy fed by events.</>}
+/>
+
+<YourTurn
+  id="resale-boundary"
+  prompt="Gatepass wants to let fans resell tickets to other fans, at face value. Which service should own resale, what data does it own, and which other services does it need to talk to?"
+  fields={3}
+  hint="Ask what changes together with resale, and who owns a ticket."
+>
+**Owner: booking.** Resale changes who holds a ticket, and booking already owns tickets and the rule that a seat is sold once. Putting resale anywhere else means two services editing ticket ownership.
+
+**Data it owns:** resale listings (ticket, asking price, status), and the transfer history of each ticket.
+
+**Who it talks to:**
+- **Payments**, synchronously, to charge the buyer and to pay out the seller (a refund-like payout). The booking only transfers once the charge succeeds.
+- **Events**, to check the show hasn't started and the price cap for that ticket type. Booking can keep a cached copy of these rules.
+- **Notifications**, asynchronously, by publishing a `ticket.transferred` event. Nobody should wait for the email.
+
+If you said "a new resale service", that's not wrong forever. But it would share tickets with booking on day one, so start inside booking and split later if resale grows its own team.
+</YourTurn>
+
+## Key takeaways
+
+- A service owns one business capability, its own data, and its own deploys. Lose any of the three and you lose the benefit.
+- Split by capability, not by layer, so that the most common changes stay inside one service.
+- No shared databases. Data has one owner; everyone else asks, or keeps a read-only copy.
+- Find seams by looking at what changes together, which words mean different things, and which team owns what.
+- Too many tiny services become a distributed monolith. Start with fewer, larger ones.
