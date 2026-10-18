@@ -1,0 +1,109 @@
+Every Monday at 9:00, the finance team runs the weekly sales report. It joins bookings, payments and shows across three million rows, and for the next four minutes checkout gets slower for everyone. The same tables serve two very different jobs, and they're bad at doing both at once. CQRS splits them.
+
+## One model, two jobs
+
+Look at what the booking database is asked to do.
+
+**Writes** are few and careful. "Book A12 and A13 for show 17" must check that the seats are free, that the fan hasn't exceeded the limit, and that payment succeeded, all inside a transaction. The data is normalised so every fact lives in one place and can't contradict itself.
+
+**Reads** are many, and they want the data in many shapes. The show page wants seat availability by section. The fan's "My tickets" screen wants their bookings with show names, venues and QR codes. Organisers want sales per hour per tier. Search wants shows by city, date and genre. At Gatepass there are about 100 reads for every write.
+
+One normalised schema serves all of these by joining at read time, and the indexes and joins that make one query fast make another one slow. Worse, a heavy read like the Monday report competes for the same CPU, memory and locks as checkout.
+
+## Separate the writing from the reading
+
+**CQRS**, Command Query Responsibility Segregation, says: use one model to change data and different models to read it.
+
+- The **command side** handles commands like `BookSeats` and `CancelBooking`. It owns the business rules and the normalised data, and it is optimised for correct, transactional writes. It answers "did it work?", not "show me a page".
+- The **query side** is one or more **read models**: copies of the data shaped exactly for a screen or a report, often in a different database. They're never written by users directly.
+- **Events** connect them. Every change on the command side publishes an event, through the outbox from the last module, and a **projector** for each read model consumes those events and updates its copy.
+
+<Diagram w={680} h={320} caption="Commands go to the write model. Events flow out, and a projector keeps each read model in the shape its screen needs.">
+  <Box x={16} y={40} w={130} h={52} label="Fan's app" sub="commands" icon="phone" tone="req" />
+  <Box x={200} y={40} w={150} h={52} label="Booking" sub="write model" icon="service" tone="req" />
+  <Box x={200} y={130} w={150} h={52} label="Postgres" sub="normalised" icon="db" />
+  <Wire points={[[146, 66], [196, 66]]} tone="req" label="BookSeats" labelAt={[171, 52]} />
+  <Wire points={[[275, 92], [275, 126]]} tone="req" />
+  <Box x={200} y={240} w={150} h={52} label="bookings topic" sub="via outbox" icon="stream" tone="info" />
+  <Wire points={[[275, 182], [275, 236]]} tone="info" />
+  <Box x={420} y={20} w={250} h={52} label="Show page" sub="Redis · seats per section" icon="cache" tone="res" />
+  <Box x={420} y={96} w={250} h={52} label="My tickets" sub="per-fan table" icon="db" tone="res" />
+  <Box x={420} y={172} w={250} h={52} label="Organiser sales" sub="columnar store · per hour" icon="db" tone="res" />
+  <Box x={420} y={248} w={250} h={52} label="Search" sub="index by city, date, genre" icon="db" tone="res" />
+  <Wire points={[[350, 266], [385, 266], [385, 46], [416, 46]]} tone="info" />
+  <Wire points={[[385, 122], [416, 122]]} tone="info" />
+  <Wire points={[[385, 198], [416, 198]]} tone="info" />
+  <Wire points={[[385, 274], [416, 274]]} tone="info" />
+  <Text x={385} y={312} size={11} tone="info" mono>projectors</Text>
+</Diagram>
+
+Now the Monday report reads from the sales read model, a database built for scanning millions of rows by time, and checkout never notices. Each read model scales on its own: the show page model is copied to every region, while the sales model lives in one place.
+
+<KeyIdea>Shape the write side for correctness and the read side for each screen, and connect them with events.</KeyIdea>
+
+## Building a read model
+
+A projector is an ordinary consumer, so everything from module 15 applies. For the organiser dashboard:
+
+```text
+on BookingCreated(showId, tier, seats, amount, at):
+    row = sales[showId, tier, hour(at)]
+    row.tickets += seats.length
+    row.revenue += amount
+    remember event_id   # same transaction, so replays don't double-count
+on BookingCancelled(...):
+    subtract the same amounts
+```
+
+Three properties make read models pleasant to own:
+
+- **They're disposable.** A read model contains nothing that isn't in the events. If a bug corrupts it, or you want a new column, drop it and rebuild it by replaying the topic from the start (if the topic keeps all history, or from the event store if you use event sourcing).
+- **They're cheap to add.** Product wants "fans who booked twice in a month"? Write a new projector and backfill it. You don't touch the booking service.
+- **They're allowed to duplicate.** A show's name lives in the search index, the ticket table and the sales table. That's fine, because the projectors keep them in step from the same events.
+
+CQRS pairs naturally with event sourcing, where the events *are* the write model and you have no choice but to project them. But it doesn't need it. Gatepass's booking service keeps an ordinary Postgres schema and publishes events through an outbox, and that is CQRS too.
+
+## The price: reads lag behind writes
+
+A projector runs after the write commits, usually tens of milliseconds behind, sometimes seconds during a spike, and longer if it's down. So a fan who books and immediately opens "My tickets" might not see the new ticket. This is the read-your-writes problem from module 5, and the fixes are similar.
+
+- **Return what the screen needs from the command.** The booking response includes the ticket, and the app shows it without reading the read model.
+- **Wait for a version.** The command returns the event's position, say offset 81,442. The app asks the read model for "my tickets, at least as new as 81,442", and the read side waits briefly, or falls back to the write side, until its projector has caught up.
+- **Be honest in the UI.** "Your ticket is being prepared" for two seconds is better than an empty list.
+
+Watch projector lag the way you watch consumer lag. If the sales projector is ten minutes behind, the organiser dashboard is showing ten-minute-old numbers while everyone thinks they're live.
+
+<Callout tone="warn" title="Don't start here">
+For a screen with simple data and modest traffic, CQRS is several moving parts where one table would do: a topic, a projector, a second store and a lag to explain. Many systems already do a light version, a read replica or a cache, and that's enough. Reach for full CQRS when read shapes truly differ from the write shape, or when reads hurt writes.
+</Callout>
+
+<Quiz
+  id="cqrs-bug"
+  question="A bug in the organiser sales projector double-counted refunds for a week. The bookings topic keeps 30 days of events. What's the fix?"
+  options={[
+    "Write a SQL script to correct the sales numbers by hand",
+    "Fix the projector, drop the sales read model, and rebuild it by replaying the topic",
+    "Ask the booking service to republish a week of events",
+    "Nothing can be done: the read model is the source of truth for sales"
+  ]}
+  answer={1}
+  explain={<>The read model is derived data. The events are the truth, and they're still in the topic. Replaying them through the fixed projector rebuilds the correct numbers, with no hand-written corrections and no load on the booking service. (If the dashboard needs more than 30 days, you'd keep events longer or snapshot the model.)</>}
+/>
+
+<YourTurn
+  id="cqrs-seat-map"
+  prompt="Design the read model behind the live seat map for a show. What store would you use, what does one record look like, and which events update it?"
+  fields={3}
+>
+- **Store:** an in-memory store like Redis, one hash per show, because the seat map is read thousands of times a second during a sale and must answer in a millisecond.
+- **Record:** `seatmap:show_17` → `{ A12: "sold", A13: "held", A14: "free", ... }` plus a `version` field with the last event offset applied.
+- **Events:** `SeatHeld` sets a seat to held, `SeatReleased` sets it to free, `TicketIssued` sets its seats to sold, and `BookingCancelled` frees them. Each update is a set, not an increment, so a replayed event is harmless. The version lets clients ignore a stale snapshot, and the WebSocket fan-out from module 6 can push each change to open seat maps.
+</YourTurn>
+
+## Key takeaways
+
+- CQRS separates the model that changes data (commands) from the models that serve reads (queries).
+- Read models are shaped for one screen or report each, live in whatever store suits them, and are kept up to date by projectors consuming events.
+- Read models are derived and disposable: rebuild them by replaying events.
+- Reads lag writes. Return results from commands, wait on versions, and monitor projector lag.
+- It's a big step. Use it when read and write shapes truly differ, or reads hurt writes.
