@@ -1,0 +1,102 @@
+import { CircuitBreakerSim } from "@/components/visuals/circuit-breaker-sim"
+
+On fest night, the payment gateway's bank partner slowed down. Not down: slow, answering in 4 seconds instead of 200 ms. Within two minutes, Gatepass couldn't show an event page, even though event pages never touch payments. One slow dependency, three services away, took the whole product down. This lesson is about building walls so that can't happen.
+
+## How a slow service takes everything down
+
+Booking handles requests with a pool of workers: threads, or connections, or in-flight slots. Say 20. Each request occupies one worker until it finishes. Normally a checkout holds a worker for about 200 ms while it waits for payments, and a page view holds one for 50 ms. Twenty workers are plenty.
+
+Now payments takes 4 seconds per call. Little's law from Part 1 tells you what happens: 15 checkouts a second × 4 seconds each = **60 workers busy waiting**, and you only have 20. Every worker is soon stuck waiting on payments. New requests, including people who just want to look at the seat map, queue behind them and time out.
+
+<Diagram w={640} h={200} caption="A cascading failure: the slowness spreads backwards, one full pool at a time, until callers that never needed payments fail too.">
+  <Box x={20} y={70} w={110} h={56} label="Fans" sub="see errors" icon="phone" tone="err" />
+  <Box x={180} y={70} w={120} h={56} label="Gateway" sub="pool full" icon="lb" tone="err" />
+  <Box x={350} y={70} w={120} h={56} label="Booking" sub="20/20 waiting" icon="service" tone="err" />
+  <Box x={520} y={70} w={110} h={56} label="Payments" sub="4 s per call" icon="service" tone="warn" />
+  <Wire points={[[130, 98], [180, 98]]} tone="err" />
+  <Wire points={[[300, 98], [350, 98]]} tone="err" />
+  <Wire points={[[470, 98], [520, 98]]} tone="warn" />
+  <Text x={325} y={160} size={12} tone="muted">Slowness flows upstream: each caller's workers fill with requests waiting on the next.</Text>
+</Diagram>
+
+Then the gateway's pool fills with requests waiting on booking, and the whole site is down. This is a **cascading failure**, and it's the most common way large systems have big outages: not one thing breaking, but one thing being slow and everything that calls it waiting politely.
+
+## Slow is worse than down
+
+Here's the counter-intuitive part. If payments were completely **down**, failing every call in 50 ms with a connection error, booking would be fine. Checkouts would fail, but each would hold a worker for only 50 ms, and browsing would carry on.
+
+<CircuitBreakerSim />
+
+Try it with everything off:
+
+1. **Healthy**: both lines at 100%, a handful of workers busy.
+2. **Down**: checkouts fail, but browsing stays at 100%. Workers are barely used.
+3. **Slow**: workers max out, and browsing collapses along with checkouts.
+
+<KeyIdea>A dependency that fails fast hurts only the requests that need it. A dependency that answers slowly can take down everything that shares its caller's resources.</KeyIdea>
+
+Timeouts help, and you need them, but they only bound the damage: with a 4-second timeout, each stuck call still holds a worker for 4 seconds. The two tools in this lesson go further. A circuit breaker turns "slow" back into "fails fast". A bulkhead stops one dependency from using everyone's workers.
+
+## Circuit breakers
+
+A **circuit breaker** wraps calls to a dependency and watches how they go. Like the breaker in your house, when things go badly wrong it trips and stops the current flowing. It has three states:
+
+- **Closed** (normal). Calls go through. The breaker counts successes and failures over a recent window, say the last 20 calls. Timeouts count as failures.
+- **Open** (tripped). If too many recent calls failed, say 50% of at least 10, the breaker opens. Now it **doesn't call the dependency at all**. It fails immediately, in microseconds, for a cooldown period, say 5 seconds.
+- **Half-open** (testing). After the cooldown, it lets one or a few trial calls through. If they succeed, the dependency has recovered: back to closed. If they fail, back to open for another cooldown.
+
+Turn on the breaker in the visual and make payments slow. Within a second the breaker opens, workers free up, and browsing recovers to 100%. Checkouts still fail, but they fail *fast*, with a clear message, instead of hanging for 4 seconds. Every 5 seconds a trial call checks whether payments is back. Switch payments to healthy and watch the next trial close the breaker.
+
+Opening the breaker also helps the dependency. A struggling payments service that keeps receiving 15 calls a second, plus retries, may never recover. A breaker gives it room to breathe.
+
+## What to return when the breaker is open
+
+"Fail fast" doesn't have to mean "show an error". When the breaker is open, you choose a **fallback**:
+
+- **Degrade the feature.** Gatepass can hold the seats for 10 minutes and say "Payments are slow right now. Your seats are held; we'll retry for you", then retry from a background job.
+- **Serve something older.** If the recommendations service is open-circuited, show yesterday's popular shows from a cache.
+- **Leave it out.** If the reviews service is down, render the event page without reviews.
+- **Fail clearly.** For a few things there's no good fallback. Then a fast, honest "try again in a minute" beats a spinner that never ends.
+
+Decide the fallback per call, with the product team. It's a product decision as much as an engineering one.
+
+## Bulkheads
+
+Ships are divided into watertight compartments called bulkheads, so a hole in one doesn't sink the ship. In software, a **bulkhead** gives each dependency its own limited pool of resources, so one can't drain everyone's.
+
+Instead of 20 shared workers, booking gives payments calls at most 10 and keeps 10 for everything else. When payments slows down, its 10 fill up and further checkouts are rejected immediately. Browsing never notices, because its workers were never available to payments in the first place.
+
+Turn off the breaker, turn on the bulkhead, and make payments slow. Checkouts suffer, browsing doesn't. The two tools combine well: the bulkhead caps the damage instantly; the breaker notices the pattern and stops calling.
+
+Bulkheads show up at many levels: separate connection pools per downstream service, separate thread pools for slow and fast endpoints, separate instances or clusters for your biggest customers, or limits on concurrent requests per route at the gateway.
+
+## Getting the details right
+
+A few things separate breakers that help from breakers that hurt:
+
+- **Only count the dependency's failures.** A `402 card declined` is the dependency working correctly. Count timeouts, connection errors and 5xx, not 4xx.
+- **Require a minimum number of calls** before tripping, so two failures out of three at 3 a.m. don't open the circuit.
+- **Keep breakers per dependency, and often per instance or route.** One bad payments instance shouldn't cut off the healthy ones.
+- **Combine with timeouts and capped retries.** Retries go *inside* the breaker, so an open breaker stops retries too.
+- **Alert when a breaker opens.** An open breaker hides a problem from users, which is the point, but someone should still know.
+
+<Quiz
+  id="slow-vs-down"
+  question="Booking shares one pool of 20 workers across all requests. Which change to the payments service is most likely to make the event browsing pages fail?"
+  options={[
+    "Payments starts returning 500 errors in 30 ms",
+    "Payments starts responding in 6 seconds",
+    "Payments is removed from the service registry, so calls fail to connect immediately",
+    "Payments starts declining 20% of cards",
+  ]}
+  answer={1}
+  explain={<>Fast failures release workers almost immediately, so browsing keeps working. A 6-second response holds a worker for 6 seconds per checkout, the shared pool fills, and browsing requests queue behind it and time out. That's why slow is worse than down, and why breakers and bulkheads exist.</>}
+/>
+
+## Key takeaways
+
+- A slow dependency fills its callers' worker pools, and the slowness cascades upstream until unrelated features fail.
+- Slow is worse than down: fast failures cost almost nothing, slow ones hold resources.
+- A circuit breaker watches failures and timeouts. When it opens, calls fail fast for a cooldown, then a trial call decides whether to close again.
+- Give every open breaker a fallback: degrade, serve cached data, leave the feature out, or fail clearly.
+- Bulkheads give each dependency its own capped pool, so one can't starve the rest. Use them together with breakers, timeouts and capped retries.
