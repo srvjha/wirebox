@@ -1,9 +1,23 @@
+import createMDX from "@next/mdx";
 import type { NextConfig } from "next";
 
+const posthogHost = process.env.POSTHOG_HOST ?? "https://us.i.posthog.com";
+const posthogAssets = process.env.POSTHOG_ASSETS_HOST ?? "https://us-assets.i.posthog.com";
+
 const nextConfig: NextConfig = {
-  /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  output: "standalone",
+  pageExtensions: ["ts", "tsx", "md", "mdx"],
+  // PostHog API calls use trailing slashes.
+  skipTrailingSlashRedirect: true,
+  async rewrites() {
+    return [
+      { source: "/ingest/static/:path*", destination: `${posthogAssets}/static/:path*` },
+      { source: "/ingest/array/:path*", destination: `${posthogAssets}/array/:path*` },
+      { source: "/ingest/:path*", destination: `${posthogHost}/:path*` },
+    ];
+  },
   turbopack: {
     rules: {
       "*.css": {
@@ -14,4 +28,6 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+const withMDX = createMDX({});
+
+export default withMDX(nextConfig);
