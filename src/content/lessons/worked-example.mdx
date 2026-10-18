@@ -1,0 +1,84 @@
+import { GatepassDesignBuilder } from "@/components/visuals/gatepass-design-builder"
+
+You have the pieces: caches, queues, rate limits, partitions, shards, and a framework for ordering them. Now we apply all of it to one problem, from a blank page: **design Gatepass**, a ticketing service for gigs, comedy nights and college fests. Watch what gets added at each step, and just as important, what doesn't.
+
+## The walkthrough
+
+Step through the builder below. Read each panel before pressing Next, and try to predict what comes next. Then come back for the commentary.
+
+<GatepassDesignBuilder />
+
+## Why each step came out the way it did
+
+**Requirements chose the database.** Of everything listed, one line had the largest effect: "never sell the same seat twice". That makes inventory a **consistency** problem, and it points to a relational database with transactions and a unique constraint, not a looser store with faster writes. The line about browse latency decided something else: browsing can be cached aggressively, so it won't compete with booking for resources.
+
+**Estimates told us what to ignore.** Ten million page views a day sounds large. Divided by 86,400 it is a few hundred requests a second even at peak. 200,000 bookings a day is two a second. Seventy-odd gigabytes a year fits on one disk. So the design has **no sharding, no microservices and no stream platform**. A reviewer who asks "what about scale?" gets a straight answer: the average is small, the interesting load is a burst on a single event, and that's where the effort goes.
+
+**The API exposed the two-phase booking.** Writing down `POST /holds` and `POST /bookings` as separate calls forced a decision that would otherwise surface late: a seat is held first, for a limited time, and then paid for. That separation makes the payment step slow and retryable without locking the seat map. It also marks both calls as needing **idempotency keys**, because mobile clients retry on flaky networks.
+
+**The data model supplied the safety net.** A unique constraint on `(event_id, seat_no)` among confirmed bookings means that even if every other mechanism fails, the database refuses the second sale. Application checks can have bugs; constraints don't. This is defence in depth, a common move in good designs.
+
+## The high-level design is deliberately dull
+
+At step 5 the picture has a CDN, a load balancer, stateless API servers, a cache and one Postgres. Every box traces to a number or a requirement:
+
+- The **CDN** serves event images, which are the bulk of the bytes.
+- The **load balancer** and stateless servers let us add machines for the thousand-requests-a-second peak.
+- The **cache** serves the event list, which is the same for everyone and changes slowly.
+- **One database** is enough because the data is small and the steady write rate is tiny.
+
+Nothing here is clever, and that's the point. You could build this on day one and it would work.
+
+<Callout tone="note" title="Say what you left out">
+Naming what you didn't add shows judgement: "No sharding yet, because 73 GB a year and 2 writes a second don't justify it. If bookings grow tenfold I'd archive and partition first."
+</Callout>
+
+## The deep dive goes where the risk is
+
+The estimate flagged one number as dangerous: 2,000 booking attempts a second on a single event for a minute. That is where the simple design breaks, since thousands of requests contend for the same few hundred rows. The deep dive solves exactly that, using lessons from earlier modules:
+
+1. **A waiting room** (queue and admission control) lets fans in at a rate the database can sustain, say 200 a second. Everyone else sees an honest "you're number 1,840 in line" rather than a timeout.
+2. **Seat holds in Redis** with a five-minute TTL. A single atomic `SET seat:123 user:9 NX EX 300` decides the winner, in microseconds, without touching Postgres. If the fan abandons checkout, the key expires and the seat returns by itself.
+3. **Payment through a queue.** The provider takes up to several seconds and sometimes fails. A worker retries with exponential backoff and jitter, uses the idempotency key so a retry never charges twice, and parks poison jobs in a dead-letter queue for a human.
+4. **Commit last.** Only after payment succeeds does the booking row get written, then ticket generation and the confirmation email become follow-up jobs.
+
+Each piece answers a specific failure: stampede, double-sale, abandoned checkout, flaky payments. If you can name the failure a component prevents, you can defend it.
+
+## Wrap-up: 10x and observability
+
+The last step is a forecast, not new features. If traffic grows ten times:
+
+- **First**, add read replicas and let the seat map read from them with a short staleness allowance (the hold in Redis is the source of truth for contention).
+- **Then** archive bookings for events older than 90 days and partition the bookings table by month.
+- **Only if** one primary can't keep up with write volume, shard by event id, and put the hottest events behind the waiting room as a special case.
+
+Alongside, list what you'd watch: booking p99 latency, hold conflicts, payment failure rate, queue depth and oldest-job age, replica lag, cache hit rate. A design you can't observe is a design you can't operate.
+
+## Practise it
+
+<YourTurn
+  id="worked-example-variation"
+  prompt="Gatepass adds resale: fans can list a ticket for sale to another fan. Which parts of the design change, and what new risk appears?"
+  fields={3}
+  minAnswers={3}
+  examples={["A ticket needs an owner history", "The QR code must be invalidated on transfer"]}
+  hint="Think about data model, consistency, and fraud."
+>
+Strong answers: a `listings` entity and an ownership history on tickets; a transfer is a transaction that changes owner and **invalidates the old QR code atomically**, so the same ticket cannot be scanned by both people; two buyers racing for one listing is the same hold-then-pay problem as seat inventory, so reuse holds with a TTL; rate-limit listing and purchase routes per user and per device to blunt scalpers; payments now include payouts to sellers, so idempotency and reconciliation matter even more. The API gains `POST /listings` and `POST /listings/:id/purchase`.
+</YourTurn>
+
+<Quiz
+  id="worked-example-why-no-shard"
+  question="Why does the first Gatepass design leave out sharding?"
+  options={["Sharding is always bad", "The estimates show ~73 GB a year and ~2 writes a second on average; one primary handles that", "Sharding needs Redis", "Interviewers dislike it"]}
+  answer={1}
+  explain={<>Components must be justified by numbers. The measured load fits comfortably on one database, so sharding would add cross-shard queries and complexity for <strong>no demonstrated benefit</strong>. The spike is handled by the waiting room, not by more databases.</>}
+/>
+
+## Key takeaways
+
+- Requirements and estimates are not paperwork: they chose the database, ruled out sharding and located the one real risk, the on-sale spike.
+- Define the API and data model early. They exposed the hold-then-pay split and gave the database a final safety net.
+- The first diagram should be dull and fully justified. Add complexity only where a number or failure demands it.
+- Spend deep-dive time on the place where requirements and load collide, and name the failure each component prevents.
+- Finish with what changes at 10x and what you'd monitor.
