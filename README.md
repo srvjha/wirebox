@@ -25,7 +25,7 @@ your design in a simulator, and fix what breaks.
 | Auth | Better Auth (email/password, optional Google & GitHub) |
 | Database | Postgres 17 (Docker) + Drizzle ORM |
 | Analytics | PostHog via a `/ingest` reverse proxy; server-side sign-up events |
-| AI debriefs | Anthropic API (optional) for "why did my design fail?" |
+| AI debriefs | Pluggable provider (`src/lib/ai`): Anthropic, OpenAI (or any OpenAI-compatible API) or Gemini |
 
 ## Getting started
 
@@ -52,7 +52,7 @@ docker compose --profile app up --build
 | `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET` | Optional OAuth buttons (hidden when unset) |
 | `ADMIN_EMAILS` | Comma-separated emails allowed to open `/admin` |
 | `NEXT_PUBLIC_POSTHOG_KEY` | Analytics (disabled when unset) |
-| `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | AI lab debriefs (falls back to built-in feedback) |
+| `AI_PROVIDER` + one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` (+ `OPENAI_BASE_URL`), `GEMINI_API_KEY`, each with an optional `*_MODEL` | AI lab debriefs (falls back to built-in feedback) |
 
 OAuth callback URLs: `<BETTER_AUTH_URL>/api/auth/callback/google` and `/callback/github`.
 
