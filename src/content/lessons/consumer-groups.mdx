@@ -1,0 +1,98 @@
+import { ConsumerGroupRebalance } from "@/components/visuals/consumer-group-rebalance"
+
+On the night the band's tickets go on sale, Gatepass publishes 8,000 booking events a second. One email worker can send about 500 emails a second, so a single consumer falls further behind every second. You need many copies of the email service reading the same topic, without two of them sending the same email and without a fan getting "your ticket" before "your payment went through".
+
+## A consumer group shares the work
+
+In Kafka, consumers that do the same job join a **consumer group** under one name, such as `email-sender`. Kafka divides the topic's partitions among the group's members, and the rule is strict: **each partition is read by exactly one consumer in the group at a time**. A consumer can own several partitions, but a partition never has two owners in one group.
+
+Different groups are completely independent. The `email-sender` group and the `analytics` group each get every event, each with their own offsets. Within a group, work is split. Across groups, work is copied. That is pub/sub and a work queue in a single system.
+
+<Diagram w={680} h={320} caption="Two groups read the same six partitions. Inside a group each partition has one owner; the groups don't affect each other.">
+  <Group x={16} y={24} w={170} h={280} label="topic: bookings" tone="info" />
+  <Box x={32} y={40} w={138} h={34} label="P0" icon="stream" />
+  <Box x={32} y={84} w={138} h={34} label="P1" icon="stream" />
+  <Box x={32} y={128} w={138} h={34} label="P2" icon="stream" />
+  <Box x={32} y={172} w={138} h={34} label="P3" icon="stream" />
+  <Box x={32} y={216} w={138} h={34} label="P4" icon="stream" />
+  <Box x={32} y={260} w={138} h={34} label="P5" icon="stream" />
+  <Group x={300} y={24} w={170} h={280} label="group: email-sender" tone="res" />
+  <Box x={316} y={60} w={138} h={48} label="email-1" sub="P0 P1" icon="worker" tone="res" />
+  <Box x={316} y={140} w={138} h={48} label="email-2" sub="P2 P3" icon="worker" tone="res" />
+  <Box x={316} y={220} w={138} h={48} label="email-3" sub="P4 P5" icon="worker" tone="res" />
+  <Group x={520} y={24} w={150} h={280} label="group: analytics" tone="warn" />
+  <Box x={532} y={140} w={126} h={48} label="analytics-1" sub="P0–P5" icon="worker" tone="warn" />
+  <Wire points={[[170, 57], [240, 57], [240, 84], [312, 84]]} tone="res" />
+  <Wire points={[[170, 101], [240, 101], [240, 84], [312, 84]]} tone="res" arrow={false} />
+  <Wire points={[[170, 145], [250, 145], [250, 164], [312, 164]]} tone="res" />
+  <Wire points={[[170, 189], [250, 189], [250, 164], [312, 164]]} tone="res" arrow={false} />
+  <Wire points={[[170, 233], [240, 233], [240, 244], [312, 244]]} tone="res" />
+  <Wire points={[[170, 277], [240, 277], [240, 244], [312, 244]]} tone="res" arrow={false} />
+  <Wire points={[[100, 304], [100, 314], [595, 314], [595, 192]]} tone="warn" dashed />
+</Diagram>
+
+Why one owner per partition? Because that is what keeps order cheap. If two consumers read the same partition, they would race: one might handle offset 8 while the other is still on offset 7. With one owner, the partition is processed strictly in sequence, and the owner tracks progress with a single committed offset.
+
+## Partitions cap your parallelism
+
+The one-owner rule has a direct consequence: **a group can never have more busy consumers than the topic has partitions**. Six partitions and ten consumers means four consumers sit idle, waiting in case someone dies.
+
+So the partition count is a decision about future scale, made on day one. Work it out from the numbers. At peak Gatepass produces 8,000 events a second, and one email consumer handles about 500. That needs at least 16 busy consumers, so the topic needs at least 16 partitions. Teams usually add headroom and pick something like 24 or 32, since adding partitions later moves keys around.
+
+Try it. Press play and add consumers until the lag stops climbing. Then keep going past six and watch the extra consumers do nothing.
+
+<ConsumerGroupRebalance />
+
+## Order is per key, not per topic
+
+In the visual, keep "Key: booking id" on and the out-of-order counter stays at zero. Every event for booking #112 lands in the same partition, and that partition has exactly one owner, so `Created`, `Paid` and `Ticketed` are handled in sequence.
+
+Now switch to "No key". Events are sprayed across partitions, so booking #112's `Created` might sit at the back of a long partition while its `Paid` sits at the front of a short one. A different consumer handles `Paid` first, and the counter starts climbing. For email that might mean sending "here is your ticket" before "payment received". For a seat counter it might mean releasing a seat that was never held.
+
+Kafka gives you order in exactly this shape: **within a partition, and therefore within a key**. There is no global order across the topic, and you almost never need one. You need each booking's story to make sense, not every booking's story to interleave in a fixed way.
+
+<Callout tone="warn" title="It's easy to throw the order away yourself">
+Kafka delivers a partition in order, but your consumer can still scramble it. Two common ways: handing messages to a thread pool that runs them in parallel, and "parking" a failed message to retry later while carrying on with the next one. If order matters, parallelise *by key* inside the consumer (one lane per booking id), and retry a failing message in place before moving on.
+</Callout>
+
+## Rebalancing: when the group changes
+
+The assignment of partitions to consumers is recalculated whenever the group changes: a consumer joins, a consumer leaves cleanly, or a consumer stops sending heartbeats because it crashed or froze in a long garbage-collection pause. This is a **rebalance**.
+
+In the classic protocol a rebalance is stop-the-world. Every consumer gives up its partitions, the group agrees on a new assignment, and only then does consuming resume. You saw it in the visual: changing the consumer count pauses the whole group and the lag jumps. Newer Kafka versions rebalance **incrementally**, moving only the partitions that need to move while the rest keep working, which shrinks the pause a lot.
+
+Rebalances also cause duplicates. Suppose email-2 sends ten emails, then crashes before it commits its offset. The new owner of its partitions starts from the last *committed* offset and sends those ten emails again. Kafka didn't lose anything, it just can't know work was done that was never recorded. The next lesson is about living with exactly this.
+
+<Callout tone="tip" title="Rebalance storms">
+A consumer that takes longer than the poll timeout to process one batch looks dead, gets kicked out, rejoins, and triggers another rebalance, over and over. Keep batches small enough to finish well within the timeout, and use a stable member id for consumers that restart quickly, so a quick redeploy isn't treated as a departure.
+</Callout>
+
+<Quiz
+  id="consumer-groups-idle"
+  question="The email topic has 12 partitions. To handle a spike you scale the email-sender group from 10 to 20 consumers. What happens?"
+  options={[
+    "Throughput doubles, because twice as many consumers share the work",
+    "12 consumers each own one partition and 8 sit idle, after a rebalance pause",
+    "Kafka automatically creates 8 more partitions",
+    "Each partition is now read by two consumers, so emails are sent twice"
+  ]}
+  answer={1}
+  explain={<>A partition has at most one owner per group, so at most 12 consumers can be busy. Going from 10 to 12 busy consumers helps a little; the other 8 are standbys. And you pay a rebalance pause to get there. To scale further you need more partitions, which you should have planned before the spike.</>}
+/>
+
+<YourTurn
+  id="consumer-groups-sizing"
+  prompt="The SMS service can send 200 messages a second per instance, and peak is 8,000 bookings a second. How many partitions does the SMS topic need, what key would you use, and what happens to lag during a deploy?"
+  fields={3}
+>
+- **Partitions:** 8,000 ÷ 200 = 40 busy consumers, so at least 40 partitions. With headroom, 48 or 64.
+- **Key:** the booking id, so all SMS for one booking go out in order, with the load spread evenly. Keying by phone number also works and keeps one person's messages in order across bookings.
+- **During a deploy:** each restarted consumer triggers a rebalance. With the classic protocol the group pauses each time and lag builds, then drains after. Rolling slowly, using incremental rebalancing and stable member ids keeps the pauses short. Expect some duplicate SMS from work done but not committed, and make the consumer idempotent.
+</YourTurn>
+
+## Key takeaways
+
+- A consumer group splits a topic's partitions among its members. Each partition has exactly one owner per group; separate groups each get everything.
+- Busy consumers can't exceed partitions. Size the partition count from peak rate divided by per-consumer rate, plus headroom.
+- Order is guaranteed per partition, so key by the entity whose events must stay in order.
+- Rebalances pause consumption and replay uncommitted work. Expect duplicates and keep processing within the poll timeout.
