@@ -1,0 +1,126 @@
+import { HyperLogLogSim } from "@/components/visuals/hyperloglog-sim"
+
+Organisers want one number on their Gatepass dashboard: how many *different* people looked at their event page this week. Page views are easy, just a counter. Unique visitors are harder, because to know whether someone is new you seem to need a list of everyone you have already seen. For a popular event that list holds millions of IDs, and Gatepass has thousands of events.
+
+**HyperLogLog** counts distinct items in about 12 KB, whether there are a thousand of them or a billion, and is typically within 1% of the truth. Redis, BigQuery, Snowflake, Presto and Druid all ship it. Here you will stream visitors into one and watch its estimate track the real count.
+
+## The exact way, and what it costs
+
+The honest approach is a set. Add every visitor ID; the answer is the set's size. With 64-bit IDs that is at least 8 bytes per visitor, and real hash sets carry overhead on top, so 10 million visitors is somewhere between 80 MB and several hundred megabytes. For *one* event, for *one* week.
+
+Then the organiser asks for "unique visitors across all my events this month". You need to merge sets, which means shipping them around and de-duplicating, at the same memory cost again.
+
+HyperLogLog gives up exactness to make both problems go away: fixed, tiny memory, and two counters can be merged by taking a maximum.
+
+## The coin-flip intuition
+
+Suppose someone tells you, "I flipped a fair coin in runs, and my longest run of heads before the first tail was 10." You would guess they flipped a lot of runs, around 2¹⁰ = 1,024, because a run that long happens about once in a thousand tries.
+
+Hash a visitor ID and you get bits that look like coin flips. The chance that a hash starts with k zeros is 1 in 2<sup>k</sup>. So if the longest run of leading zeros among all hashes you have seen is 10, you have probably seen about a thousand **distinct** IDs. Duplicates do not matter: the same ID always hashes to the same bits, so seeing it again cannot produce a new record.
+
+One coin-flipper is a terrible estimator, though. A single lucky hash with 20 leading zeros would make you guess a million.
+
+## Many small estimators, averaged well
+
+HyperLogLog splits the stream into **m buckets**, called registers, and keeps one "longest run" per register:
+
+1. Hash the ID to 32 or 64 bits.
+2. Use the first **p** bits to pick one of m = 2<sup>p</sup> registers.
+3. In the remaining bits, count the leading zeros and add 1. Call that ρ.
+4. Store ρ in the register if it is bigger than what is there.
+
+<Diagram w={660} h={220} caption="With p = 4, the first four bits pick register 6. The rest starts with three zeros, so ρ = 4. The register keeps the largest ρ it has ever seen.">
+  <Text x={20} y={34} anchor="start" mono size={11} tone="muted">hash(“visitor-48213”)</Text>
+  <rect x={20} y={46} width={112} height={32} rx={6} fill="var(--info)" fillOpacity={0.14} stroke="var(--info)" />
+  <Text x={76} y={67} mono size={15} weight={600} tone="info">0110</Text>
+  <rect x={138} y={46} width={84} height={32} rx={6} fill="var(--accent)" fillOpacity={0.14} stroke="var(--accent)" />
+  <Text x={180} y={67} mono size={15} weight={600} tone="accent">0001</Text>
+  <rect x={228} y={46} width={260} height={32} rx={6} fill="none" stroke="var(--border-strong)" />
+  <Text x={358} y={67} mono size={15}>0110 1011 0010 1110 …</Text>
+  <Text x={76} y={98} size={11.5} tone="info">first p bits → register 6</Text>
+  <Text x={250} y={98} size={11.5} tone="accent">3 leading zeros → ρ = 4</Text>
+  <Wire points={[[76, 106], [76, 130], [266, 130], [266, 150]]} tone="info" />
+  <rect x={20} y={156} width={36} height={36} rx={5} fill="var(--surface-2)" stroke="var(--border-strong)" />
+  <rect x={58} y={156} width={36} height={36} rx={5} fill="var(--surface-2)" stroke="var(--border-strong)" />
+  <rect x={96} y={156} width={36} height={36} rx={5} fill="var(--surface-2)" stroke="var(--border-strong)" />
+  <rect x={134} y={156} width={36} height={36} rx={5} fill="var(--surface-2)" stroke="var(--border-strong)" />
+  <rect x={172} y={156} width={36} height={36} rx={5} fill="var(--surface-2)" stroke="var(--border-strong)" />
+  <rect x={210} y={156} width={36} height={36} rx={5} fill="var(--surface-2)" stroke="var(--border-strong)" />
+  <rect x={248} y={156} width={36} height={36} rx={5} fill="var(--accent)" fillOpacity={0.2} stroke="var(--accent)" strokeWidth={1.6} />
+  <rect x={286} y={156} width={36} height={36} rx={5} fill="var(--surface-2)" stroke="var(--border-strong)" />
+  <rect x={324} y={156} width={36} height={36} rx={5} fill="var(--surface-2)" stroke="var(--border-strong)" />
+  <Text x={38} y={179} mono size={13}>2</Text>
+  <Text x={76} y={179} mono size={13}>5</Text>
+  <Text x={114} y={179} mono size={13}>1</Text>
+  <Text x={152} y={179} mono size={13}>3</Text>
+  <Text x={190} y={179} mono size={13}>2</Text>
+  <Text x={228} y={179} mono size={13}>6</Text>
+  <Text x={266} y={179} mono size={13} weight={600} tone="accent">4</Text>
+  <Text x={304} y={179} mono size={13}>2</Text>
+  <Text x={342} y={179} mono size={13}>1</Text>
+  <Text x={420} y={179} anchor="start" size={12} tone="muted">… 16 registers in all</Text>
+  <Text x={420} y={140} anchor="start" size={12} tone="muted">estimate ∝ m² ⁄ Σ 2^(−register)</Text>
+</Diagram>
+
+To estimate, combine the registers with a **harmonic mean** of 2<sup>register</sup>, scaled by a constant. The harmonic mean is the clever part: it is dominated by the small values, so one register that got lucky with a huge run barely moves the answer. Two corrections handle the edges: for small counts, when many registers are still empty, it switches to counting the empty ones (*linear counting*), and for counts near the hash size it adjusts for collisions.
+
+The error shrinks with the number of registers: the standard error is **1.04 ⁄ √m**.
+
+- p = 10, m = 1,024 registers: about ±3.2%, in under 1 KB.
+- p = 14, m = 16,384 registers: about ±0.81%, in 12 KB. This is what Redis uses for every `PFADD` key.
+
+Memory does not grow with the count. Each register holds a number up to about 64, so 6 bits is enough, and 16,384 × 6 bits = 12 KB whether you have counted ten visitors or ten billion.
+
+## Run it
+
+This is a real HyperLogLog: FNV-1a hashes, 2<sup>p</sup> registers, the standard estimator and its small-range correction. The true count is tracked separately so you can see the error.
+
+<HyperLogLogSim />
+
+Try this:
+
+- **Add 100,000 visitors a few times.** The estimate stays near the truth while memory stays the same size. Compare it with the exact set's memory.
+- **Press "10,000 returning".** These are visitors already counted. The registers do not change, so the estimate does not either. That is de-duplication for free.
+- **Drag p down to 4.** Sixteen registers. The error jumps to around ±26%, and the chart shows it swinging wildly. Drag it up to 14 and it settles under 1%.
+
+<Quiz
+  id="hll-duplicates"
+  question="The same visitor opens the Gatepass event page 500 times. What happens to the HyperLogLog?"
+  options={[
+    "The estimate rises a little each time",
+    "Nothing after the first visit: the same ID always hashes to the same register and run",
+    "The estimate rises once per hour, when the TTL resets",
+    "It counts 500 visitors, and the error correction removes 499 of them",
+  ]}
+  answer={1}
+  explain={<>Hashing is deterministic. The first visit may raise one register; every later visit produces the same register index and the same ρ, which cannot raise it again. Duplicates are ignored without being stored.</>}
+/>
+
+## Merging is the killer feature
+
+Two HyperLogLogs with the same p can be combined by taking the **maximum of each register**. The result is exactly the sketch you would have built from both streams together. Redis exposes this as `PFMERGE`.
+
+For Gatepass that unlocks cheap rollups. Keep one 12 KB sketch per event per day. "Unique visitors to this event this week" merges 7 sketches. "Unique visitors across an organiser's 40 events this month" merges 1,200 sketches, 14 MB of registers, in milliseconds. You could never do that by adding up daily unique counts, because the same person visiting on Monday and Tuesday would be counted twice.
+
+## When not to use it
+
+- **When you need exact numbers.** Billing, ticket sales and payouts must be exact. HyperLogLog is for dashboards and analytics, where "about 1.2 million, ±1%" is what people actually want.
+- **When you need to know *who*.** It cannot list members or tell you whether a particular visitor was counted. For membership, use a Bloom filter; for exact lists, use a set.
+- **When counts are tiny.** Below a few thousand, an exact set is small anyway. Redis switches to a compact "sparse" representation for small counts for this reason.
+- **Intersections.** "Visitors to event A *and* event B" can be derived from union sizes, but the error grows quickly. Other sketches (such as theta sketches) handle it better.
+
+<Quiz
+  id="hll-memory"
+  question="You want ±0.4% error instead of ±0.8%. How does the memory change?"
+  options={["It doubles", "It quadruples", "It stays 12 KB", "It grows with the number of visitors"]}
+  answer={1}
+  explain={<>Error is 1.04 ⁄ √m, so halving it needs 4× the registers: about 48 KB. Still independent of how many visitors there are.</>}
+/>
+
+## Key takeaways
+
+- HyperLogLog estimates how many distinct items it has seen, using fixed memory: 12 KB gives about ±0.8% at any scale.
+- Each item is hashed; the first p bits choose a register, and the register keeps the longest run of leading zeros seen.
+- A harmonic mean across thousands of registers turns many noisy guesses into one accurate estimate. Error is 1.04 ⁄ √m.
+- Duplicates cannot change it, and two sketches merge by taking each register's maximum, which makes daily, weekly and cross-event rollups cheap.
+- Use it for analytics, never for counts that must be exact or for questions about specific members.

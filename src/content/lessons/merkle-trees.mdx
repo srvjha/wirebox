@@ -1,0 +1,111 @@
+import { MerkleTreeDiff } from "@/components/visuals/merkle-tree-diff"
+
+Gatepass now keeps three copies of its bookings, in two regions. Most of the time they agree. But a node that was down for an hour missed some writes, a network blip dropped a few more, and nobody knows exactly which rows. Copying the entire 2 TB table across regions to be safe would take hours and cost real money. You need to find the handful of rows that differ, while moving almost nothing.
+
+A **Merkle tree** does that. It lets two machines discover exactly where they disagree by exchanging a few dozen hashes. Cassandra, Riak and Amazon's Dynamo use it for replica repair, and Git, Bitcoin, IPFS and certificate transparency logs all rely on the same idea.
+
+## Hashes of hashes
+
+Start by splitting the data into blocks, for example by key range: bookings 0–999, 1,000–1,999 and so on. Then:
+
+1. Hash every block. These are the **leaves**.
+2. Hash each pair of leaf hashes together to get their parent.
+3. Keep pairing and hashing until one hash is left: the **root**.
+
+The root summarises everything. Change one byte in one booking and that block's hash changes, which changes its parent, and its parent's parent, all the way up. If two replicas have the same root, their data is identical (unless the hash collides, which with a good 128- or 256-bit hash will not happen in the lifetime of the universe).
+
+The useful part is what happens when the roots *differ*.
+
+## Descend only where it differs
+
+Two replicas compare roots. If they match, they are done: one comparison proves terabytes are in sync. If not, they compare the two children. Any child that matches is in sync, and its whole subtree is skipped. Any child that differs is explored further. At the bottom, the differing leaves are exactly the blocks to repair.
+
+<Diagram w={640} h={230} caption="Roots differ, so compare the children. The left subtree matches and is never opened. On the right, block c matches and block d does not: only d needs syncing.">
+  <circle cx={320} cy={34} r={16} fill="var(--err)" fillOpacity={0.2} stroke="var(--err)" />
+  <circle cx={170} cy={104} r={13} fill="var(--ok)" fillOpacity={0.2} stroke="var(--ok)" />
+  <circle cx={470} cy={104} r={13} fill="var(--err)" fillOpacity={0.2} stroke="var(--err)" />
+  <Wire points={[[308, 45], [180, 94]]} arrow={false} />
+  <Wire points={[[332, 45], [460, 94]]} arrow={false} tone="err" />
+  <Wire points={[[160, 115], [105, 160]]} arrow={false} dashed />
+  <Wire points={[[180, 115], [235, 160]]} arrow={false} dashed />
+  <Wire points={[[460, 115], [405, 160]]} arrow={false} tone="err" />
+  <Wire points={[[480, 115], [535, 160]]} arrow={false} tone="err" />
+  <Box x={70} y={160} w={70} h={36} label="a" dim />
+  <Box x={200} y={160} w={70} h={36} label="b" dim />
+  <Box x={370} y={160} w={70} h={36} label="c" tone="ok" />
+  <Box x={500} y={160} w={70} h={36} label="d" tone="err" />
+  <Text x={346} y={30} anchor="start" mono size={11} tone="err">root: A ≠ B</Text>
+  <Text x={170} y={140} size={11} tone="ok">match → skip</Text>
+  <Text x={494} y={100} anchor="start" mono size={11} tone="err">differs</Text>
+  <Text x={535} y={216} size={11} tone="err">sync this</Text>
+  <Text x={170} y={216} size={11} tone="muted">never compared</Text>
+</Diagram>
+
+How cheap is that? With N blocks and d of them different, each difference costs at most two comparisons per level, and there are log₂ N levels. So the work is about **2 × d × log₂ N** hashes, instead of N. For a million blocks with 3 bad ones: about 120 hash comparisons instead of a million. The data that crosses the network is those hashes plus the 3 bad blocks.
+
+<KeyIdea>A matching hash at any level proves the whole subtree below it is identical, so you only ever walk down the paths that lead to differences.</KeyIdea>
+
+## Run it
+
+Two replicas of the bookings table, 16 key ranges each, with real hashes (hover a node on desktop to see both values). Replica B starts with two stale blocks.
+
+<MerkleTreeDiff />
+
+Try these:
+
+- **Press Step** a few times and follow the search. Green nodes end a branch; red nodes open their two children.
+- **Press "In sync", then Compare.** One comparison. The roots match, so all 16 blocks are proven identical.
+- **Make one block differ.** The search needs exactly 9 comparisons: the root, then two at each of the four levels below. That is 1 + 2 × log₂ 16.
+- **Make all 16 differ.** Now the tree costs 31 comparisons, *more* than checking 16 blocks directly. Merkle trees win when differences are rare, which for replicas that are mostly in sync is the normal case.
+- **Repair** copies only the blocks the search found. Compare again and the roots match.
+
+<Quiz
+  id="mk-cost"
+  question="Two replicas have 1,048,576 (2²⁰) blocks each, and exactly one block differs. About how many hash comparisons does a Merkle comparison need?"
+  options={["1", "About 41", "About 1,000", "1,048,576"]}
+  answer={1}
+  explain={<>The root, then two children at each of the 20 levels below it: 1 + 2 × 20 = 41. Each matching sibling cuts off half of what is left.</>}
+/>
+
+## Anti-entropy in real databases
+
+Leaderless databases like Cassandra and Dynamo accept writes on several replicas and repair disagreements in the background. That background process is called **anti-entropy**, and it works like the simulation:
+
+- Each replica builds a Merkle tree over a key range it shares with another replica. Cassandra's `nodetool repair` does this per token range.
+- The replicas exchange trees top-down, find differing leaves, and stream only those key ranges to each other.
+- Read repair and hinted handoff fix most inconsistencies quickly. Anti-entropy is the safety net for the ones they miss, such as a write whose hint expired while a node was down.
+
+Two practical details matter:
+
+- **Leaf size is a tradeoff.** Big leaves mean a small tree, but one changed row forces a whole big range to be streamed. Small leaves stream less data but make a bigger tree to build and exchange. Cassandra caps the tree depth, so on huge tables each leaf covers many rows.
+- **Building the tree is the expensive part.** Hashing every row means reading the whole table from disk. That is why repairs are scheduled, throttled and run range by range, not continuously.
+
+## The same trick, elsewhere
+
+Anywhere you need to prove that data is unchanged, or find what changed, without shipping it all:
+
+- **Git** names every file and directory by the hash of its contents. If a directory's hash matches, nothing inside it changed, which is how `git status` and fetches stay fast.
+- **Bitcoin and other blockchains** put a Merkle root of all transactions in each block header, so a phone can verify one transaction belongs to a block with a short proof (about log₂ N hashes) instead of downloading the block.
+- **Certificate Transparency** logs and **ZFS** use Merkle trees to detect tampering and silent disk corruption.
+- **Sync tools** like rsync-style backups and some file-sync products compare hash trees to send only changed chunks.
+
+<Quiz
+  id="mk-when"
+  question="After a network partition, two Gatepass replicas disagree on 60% of their blocks. Is a Merkle comparison still a good idea?"
+  options={[
+    "Yes, it always beats comparing blocks directly",
+    "Not really: with most blocks different it compares more hashes than there are blocks, so a bulk copy is simpler",
+    "No, Merkle trees only work when exactly one block differs",
+    "Yes, but only if the leaves are larger than 1 MB",
+  ]}
+  answer={1}
+  explain={<>The savings come from skipping matching subtrees. When most leaves differ there is little to skip, and the tree adds overhead on top of shipping most of the data anyway. Merkle trees shine when replicas are mostly in sync.</>}
+/>
+
+## Key takeaways
+
+- A Merkle tree hashes data blocks, then hashes pairs of hashes up to a single root that summarises everything.
+- Equal roots prove the data is identical. Unequal roots lead you down only the branches that differ.
+- Finding d differences among N blocks costs about 2 × d × log₂ N hash comparisons, which is tiny when replicas mostly agree.
+- Cassandra, Riak and Dynamo use it for anti-entropy repair; Git, blockchains and transparency logs use it to verify data cheaply.
+- Leaf size trades tree size against how much data a single change forces you to resend.

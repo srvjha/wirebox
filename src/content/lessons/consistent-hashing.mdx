@@ -1,0 +1,145 @@
+import { ConsistentHashRing } from "@/components/visuals/consistent-hash-ring"
+
+Gatepass keeps hot booking data in three cache servers. The night before a big sale you add a fourth one for headroom, and the database falls over at 10:00 anyway. Nothing crashed. The new server simply made most of the cache forget where everything was.
+
+This lesson builds the fix, consistent hashing, and lets you run it. You will add and remove servers, count how many keys move, and see why real systems give every server a hundred places on the ring instead of one.
+
+## The trouble with hash mod N
+
+The obvious way to spread keys over servers is `server = hash(key) % N`. It is fast, needs no lookup table and spreads keys evenly. It also has one terrible property: the answer depends on N.
+
+Go from 3 servers to 4 and almost every key lands somewhere new. A key whose hash is 17 lived on server `17 % 3 = 2` and now lives on `17 % 4 = 1`. On average only about 1 key in N+1 stays where it was, so going from 3 to 4 servers moves roughly **75%** of keys.
+
+For a cache that means a 75% miss rate the moment you scale, which is exactly when you can least afford one. For a database spread over shards it is worse: 75% of your data has to be copied across the network before reads are correct again.
+
+<Diagram w={660} h={270} caption="Left: hash mod N reshuffles three of these four keys when a server is added. Right: on a ring, adding D only takes keys from the arc between A and D.">
+  <Text x={150} y={22} mono size={11} tone="muted">HASH % N</Text>
+  <Text x={40} y={52} anchor="start" mono size={11} tone="muted">hash</Text>
+  <Text x={120} y={52} mono size={11} tone="muted">% 3</Text>
+  <Text x={190} y={52} mono size={11} tone="muted">% 4</Text>
+  <Text x={40} y={86} anchor="start" mono size={13}>17</Text>
+  <Text x={120} y={86} mono size={13}>C</Text>
+  <Text x={190} y={86} mono size={13} tone="err">B</Text>
+  <Tag x={255} y={82} tone="err">moved</Tag>
+  <Text x={40} y={122} anchor="start" mono size={13}>22</Text>
+  <Text x={120} y={122} mono size={13}>B</Text>
+  <Text x={190} y={122} mono size={13} tone="err">C</Text>
+  <Tag x={255} y={118} tone="err">moved</Tag>
+  <Text x={40} y={158} anchor="start" mono size={13}>12</Text>
+  <Text x={120} y={158} mono size={13}>A</Text>
+  <Text x={190} y={158} mono size={13} tone="ok">A</Text>
+  <Tag x={255} y={154} tone="ok">stays</Tag>
+  <Text x={40} y={194} anchor="start" mono size={13}>40</Text>
+  <Text x={120} y={194} mono size={13}>B</Text>
+  <Text x={190} y={194} mono size={13} tone="err">A</Text>
+  <Tag x={255} y={190} tone="err">moved</Tag>
+  <Text x={150} y={236} size={12}>3 of 4 keys move</Text>
+  <Text x={480} y={22} mono size={11} tone="muted">HASH RING</Text>
+  <circle cx={480} cy={135} r={85} fill="none" stroke="var(--border-strong)" strokeWidth={8} />
+  <path d="M522.5 61.4 A85 85 0 0 1 563.7 149.8" fill="none" stroke="var(--accent)" strokeWidth={8} />
+  <circle cx={522.5} cy={61.4} r={7} fill="var(--res)" />
+  <circle cx={522.5} cy={208.6} r={7} fill="var(--info)" />
+  <circle cx={395} cy={135} r={7} fill="var(--warn)" />
+  <circle cx={563.7} cy={149.8} r={7} fill="var(--surface)" stroke="var(--accent)" strokeWidth={2} strokeDasharray="3 2" />
+  <circle cx={553.6} cy={92.5} r={3.5} fill="var(--accent)" />
+  <circle cx={450.9} cy={214.9} r={3.5} fill="var(--warn)" />
+  <circle cx={425.4} cy={69.9} r={3.5} fill="var(--res)" />
+  <circle cx={553.6} cy={177.5} r={3.5} fill="var(--info)" />
+  <Text x={534} y={45} size={13} weight={600}>A</Text>
+  <Text x={534} y={238} size={13} weight={600}>B</Text>
+  <Text x={372} y={139} size={13} weight={600}>C</Text>
+  <Text x={582} y={154} anchor="start" size={13} weight={600} tone="accent">D (new)</Text>
+  <Text x={480} y={139} mono size={11} tone="muted">clockwise</Text>
+  <Text x={480} y={258} size={12}>only the orange arc moves, from B to D</Text>
+</Diagram>
+
+## Put servers and keys on a ring
+
+Consistent hashing changes the question. Instead of asking "which of N servers?", it asks "which server comes next?"
+
+1. Take the whole output range of a hash function, 0 to 2³² − 1, and bend it into a circle.
+2. Hash each server's name to get its position on the circle. That position is called a **token**.
+3. Hash each key the same way. The key belongs to the first token you meet walking clockwise from it.
+
+Now add server D. It lands at one spot on the ring and takes over only the keys on the arc just before it, which used to belong to the next server along. Every other key keeps its owner. With N servers, adding one moves about 1/(N+1) of the keys, the theoretical minimum, since the new server has to own *something*.
+
+Removing a server is the mirror image. Its keys slide clockwise to the next server; nobody else notices.
+
+<KeyIdea>Consistent hashing makes a membership change cost about one server's share of keys, instead of nearly all of them.</KeyIdea>
+
+## Run it
+
+The ring below holds 300 real booking keys hashed with FNV-1a (plus a mixing step so similar names spread out). Every change is replayed against `hash % N` on the same keys, so the two numbers at the bottom are a fair fight.
+
+<ConsistentHashRing />
+
+Try this sequence:
+
+- **Add node D.** The ring moves roughly a quarter of the keys. `hash % N` moves around three quarters.
+- **Remove B.** Only B's dots change colour. With `hash % N`, removing a server from the middle of the list shifts every index after it.
+- **Look at "Busiest node" with 1 virtual node.** One server probably owns far more than its fair share. That is the next problem.
+
+## Virtual nodes fix the lumps
+
+With one token per server, the arcs between tokens are random lengths. Three random points on a circle almost never cut it into equal thirds. In the simulation, one server will often hold 40–50% of the keys while another holds 25%. In production that server runs hot, fills up first and pages someone at 3 a.m.
+
+The fix is to give every server many tokens, called **virtual nodes**. Server A hashes `A#0`, `A#1`, … `A#127` and appears at 128 places on the ring. Each server's share is now the sum of many small random arcs, and sums of many random pieces are very close to their average. Switch the simulation to 128 virtual nodes and the bars line up near the fair-share line.
+
+Virtual nodes buy two more things:
+
+- **Smoother failure.** When a server with one token dies, *one* neighbour inherits its whole load and may tip over next. With 128 tokens, its load is spread across all the survivors.
+- **Weights.** A server with twice the memory gets twice the tokens. Capacity planning becomes a number in a config file.
+
+The cost is a bigger routing table (servers × tokens entries, still tiny) and a binary search per lookup, which takes nanoseconds.
+
+<Quiz
+  id="ch-vnodes"
+  question="Gatepass runs 4 cache servers with 1 token each. One server holds 45% of keys. What is the most direct fix?"
+  options={[
+    "Switch to hash mod N, which spreads keys evenly",
+    "Give each server many virtual nodes on the ring",
+    "Add a fifth server",
+    "Use a longer hash, like SHA-256 instead of 32 bits",
+  ]}
+  answer={1}
+  explain={<>Many tokens per server average out the random arc lengths. <code>hash % N</code> is even but reshuffles everything on change, a fifth single-token server is just another random arc, and a longer hash does not change where four points land on a circle.</>}
+/>
+
+## Where you will meet it
+
+Consistent hashing sits under a lot of systems you already use:
+
+- **Amazon Dynamo, Cassandra and Riak** place data on a token ring. To keep 3 copies, a key is stored on the first 3 *distinct* servers clockwise from it, a list Dynamo calls the preference list. Cassandra assigns each node many tokens (256 by default for years, fewer with its newer allocator).
+- **Memcached and Redis clients** use it to pick a cache server, so adding a server only cools a slice of the cache. The classic "ketama" library did exactly this with 100–200 points per server.
+- **Load balancers** such as Envoy's ring-hash and Google's Maglev use variants of it to keep a user's requests on the same backend while the backend pool changes.
+- **Gatepass** can lean on it in two places you have already met: picking which cache server holds a booking (the Caching module), and deciding which partition owns a key so that adding a node is cheap (the Rebalancing lesson).
+
+## Where it still hurts
+
+Consistent hashing spreads *keys* evenly, not *traffic*. If one event page gets half of all reads, its key lives on one server no matter how many tokens you add. Hot keys need a separate fix: replicate the hot key, cache it locally in each app server, or add a random suffix and spread copies.
+
+Two other limits are worth knowing:
+
+- **Data still has to move.** A quarter of the keys moving is better than three quarters, but in a database that might be terabytes. Systems stream that data in the background and keep serving reads from the old owner until the copy is done.
+- **Everyone must agree on the ring.** If two app servers have different views of membership, they send the same key to different places. Real systems spread ring changes with a coordination service or a gossip protocol.
+
+<Reveal id="ch-alternatives" title="Other ways to get the same property">
+**Rendezvous (highest random weight) hashing:** for each key, score every server with `hash(key, server)` and pick the highest. No ring, perfect balance, and removing a server only moves its keys. The cost is O(N) work per lookup, fine for tens of servers.
+
+**Jump consistent hash** (Google, 2014): a few lines of arithmetic that map a key to one of N buckets with minimal movement and no memory. The catch: buckets can only be added or removed at the end, so it suits numbered shards rather than named servers that die at random.
+</Reveal>
+
+<Quiz
+  id="ch-movement"
+  question="A ring with 9 servers and plenty of virtual nodes gets a 10th server. Roughly what share of keys moves?"
+  options={["About 10%", "About 50%", "About 90%", "None, until the cache expires"]}
+  answer={0}
+  explain={<>The new server ends up owning about 1/10 of the ring, and those are exactly the keys that move. With <code>hash % N</code> going from 9 to 10, about 90% would move.</>}
+/>
+
+## Key takeaways
+
+- `hash % N` balances well but moves almost every key when N changes. For a cache that is an instant stampede.
+- On a ring, a key belongs to the next server clockwise, so adding or removing a server moves only about 1/N of the keys.
+- One token per server gives lumpy load. Many virtual nodes per server even it out, spread failover load and let you weight bigger machines.
+- It balances keys, not traffic. Hot keys and data copying still need their own plans.
