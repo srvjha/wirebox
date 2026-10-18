@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
-import { ArrowRight, CircleAlert, Loader2 } from "lucide-react";
+import { ArrowRight, CircleAlert, Loader2, UserRound } from "lucide-react";
 import { Button, buttonClass } from "@/components/ui/button";
 import { signIn, signOut, signUp, useSession } from "@/lib/auth-client";
 import { track } from "@/lib/analytics";
+import { isGuestEmail } from "@/lib/guest";
 import { cn } from "@/lib/utils";
 
 export type Provider = "google" | "github";
@@ -95,7 +96,7 @@ function Field({
   );
 }
 
-export function SignInForm({ providers }: { providers: Provider[] }) {
+export function SignInForm({ providers, guest = false }: { providers: Provider[]; guest?: boolean }) {
   const params = useSearchParams();
   const router = useRouter();
   const next = safeNext(params.get("next"));
@@ -104,7 +105,7 @@ export function SignInForm({ providers }: { providers: Provider[] }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | "email" | Provider>(null);
+  const [busy, setBusy] = useState<null | "email" | "guest" | Provider>(null);
   const { data: session, isPending } = useSession();
 
   if (!isPending && session?.user) {
@@ -112,7 +113,13 @@ export function SignInForm({ providers }: { providers: Provider[] }) {
       <div>
         <h2 className="text-[18px] font-semibold text-fg">You&apos;re signed in</h2>
         <p className="mt-1.5 text-[14px] text-muted">
-          As <span className="text-fg">{session.user.email}</span>. Your progress syncs automatically.
+          {isGuestEmail(session.user.email) ? (
+            <>As a guest. Your progress is saved to this guest account.</>
+          ) : (
+            <>
+              As <span className="text-fg">{session.user.email}</span>. Your progress syncs automatically.
+            </>
+          )}
         </p>
         <div className="mt-6 flex flex-col gap-2">
           <Link href={next} className={buttonClass("primary", "md")}>
@@ -167,6 +174,20 @@ export function SignInForm({ providers }: { providers: Provider[] }) {
       setBusy(null);
       setError(res.error.message ?? `Couldn't start ${providerMeta[provider].label} sign-in.`);
     }
+  };
+
+  const asGuest = async () => {
+    setError(null);
+    setBusy("guest");
+    track("sign_in_started", { method: "guest" });
+    const res = await signIn.anonymous();
+    if (res?.error) {
+      setBusy(null);
+      setError(res.error.message ?? "Couldn't start a guest session.");
+      return;
+    }
+    router.replace(next);
+    router.refresh();
   };
 
   const switchMode = (m: Mode) => {
@@ -248,6 +269,22 @@ export function SignInForm({ providers }: { providers: Provider[] }) {
           {mode === "sign-up" ? "Create account" : "Sign in"}
         </Button>
       </form>
+
+      {guest && (
+        <div className="mt-4">
+          <Button type="button" variant="outline" className="w-full" disabled={!!busy} onClick={asGuest}>
+            {busy === "guest" ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <UserRound className="size-4" aria-hidden />
+            )}
+            Continue as guest
+          </Button>
+          <p className="mt-1.5 text-center text-[12px] text-subtle">
+            A throwaway account for trying things out. No email or password.
+          </p>
+        </div>
+      )}
 
       <p className="mt-5 text-center text-[13px] text-subtle">
         {mode === "sign-in" ? "New here? " : "Already have an account? "}

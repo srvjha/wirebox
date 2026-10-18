@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { Cloud, LineChart } from "lucide-react";
+import { guestLoginEnabled } from "@/lib/auth";
 import { SignInForm, type Provider } from "./sign-in-form";
 
 export const metadata: Metadata = {
@@ -15,7 +16,7 @@ async function Form() {
   const providers: Provider[] = [];
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) providers.push("google");
   if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) providers.push("github");
-  return <SignInForm providers={providers} />;
+  return <SignInForm providers={providers} guest={guestLoginEnabled} />;
 }
 
 function FormSkeleton() {

@@ -7,6 +7,7 @@ import { LogOut, User } from "lucide-react";
 import { buttonClass } from "@/components/ui/button";
 import { signOut, useSession } from "@/lib/auth-client";
 import { track } from "@/lib/analytics";
+import { isGuestEmail } from "@/lib/guest";
 
 export function UserMenu() {
   const { data, isPending } = useSession();
@@ -56,7 +57,9 @@ export function UserMenu() {
         <div className="absolute right-0 z-50 mt-2 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-card">
           <div className="px-2.5 py-2">
             <p className="truncate text-[13px] font-medium text-fg">{data.user.name}</p>
-            <p className="truncate text-[12px] text-subtle">{data.user.email}</p>
+            <p className="truncate text-[12px] text-subtle">
+              {isGuestEmail(data.user.email) ? "Guest session · progress saved here" : data.user.email}
+            </p>
           </div>
           <Link
             href="/me"
