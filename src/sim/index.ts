@@ -5,6 +5,7 @@ import { runTimeline, type Incident, type Timeline } from "./timeline";
 import { cacheProfile, type CacheConfig, type CacheValueOption, type LimiterConfig } from "./traffic";
 
 export * from "./evaluate";
+export * from "./flows";
 export * from "./grade";
 export * from "./spec";
 export * from "./timeline";

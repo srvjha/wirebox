@@ -14,7 +14,16 @@ import {
 } from "./spec";
 import { TRAFFIC, limiterEffect, type CacheProfile, type LimiterConfig } from "./traffic";
 
-export type SimNode = { id: string; kind: Kind; size?: ServerSize; role?: "primary" | "replica" };
+export type SimNode = {
+  id: string;
+  kind: Kind;
+  size?: ServerSize;
+  role?: "primary" | "replica";
+  /** Databases: shard count (1-16). */
+  shards?: number;
+  /** cdn / cache: share of cacheable requests answered here (flow steps). */
+  hitRate?: number;
+};
 export type SimEdge = { from: string; to: string };
 
 export type Resilience = {
@@ -70,6 +79,14 @@ export type NodeStat = {
   reads?: number;
   writes?: number;
   p99?: number;
+  /** ws gateways (flow steps): open connections vs the gateway's limit. */
+  conns?: number;
+  connCap?: number;
+  /** workers / queues (flow steps): jobs waiting. */
+  backlog?: number;
+  /** Databases (flow steps): shard count and the hottest shard's utilisation. */
+  shards?: number;
+  hotUtil?: number;
 };
 
 export type EvalResult = {
