@@ -41,5 +41,5 @@ export async function GET() {
       },
     ];
   });
-  return Response.json(out);
+  return Response.json({ labs: out });
 }
