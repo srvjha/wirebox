@@ -50,6 +50,7 @@ docker compose --profile app up --build
 | `DATABASE_URL` | Postgres (defaults to the Docker database) |
 | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` | Sessions |
 | `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET` | Optional OAuth buttons (hidden when unset) |
+| `GUEST_LOGIN` | "Continue as guest" button (on in dev by default; `true` to allow in production) |
 | `ADMIN_EMAILS` | Comma-separated emails allowed to open `/admin` |
 | `NEXT_PUBLIC_POSTHOG_KEY` | Analytics (disabled when unset) |
 | `AI_PROVIDER` + one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` (+ `OPENAI_BASE_URL`), `GEMINI_API_KEY`, each with an optional `*_MODEL` | AI lab debriefs (falls back to built-in feedback) |
