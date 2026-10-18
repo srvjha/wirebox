@@ -25,9 +25,6 @@ export function SiteHeader() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-          <span className="hidden rounded-full border border-ok/30 bg-ok/10 px-2 py-0.5 font-mono text-[10.5px] tracking-wide text-ok uppercase sm:inline">
-            Free forever
-          </span>
           <ThemeToggle />
           <UserMenu />
         </div>

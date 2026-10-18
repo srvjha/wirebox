@@ -76,11 +76,7 @@ export default function Home() {
         />
         <div className="relative mx-auto max-w-6xl px-4 pt-14 pb-16 sm:px-6 sm:pt-24 sm:pb-20">
           <div className="max-w-3xl">
-            <p className="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 font-mono text-[11px] tracking-wide text-muted uppercase">
-              <span className="size-1.5 rounded-full bg-ok" />
-              Free forever · no paywall · no trial
-            </p>
-            <h1 className="mt-6 text-[40px] leading-[1.04] font-semibold tracking-[-0.035em] text-balance text-fg sm:text-[64px]">
+            <h1 className="text-[40px] leading-[1.04] font-semibold tracking-[-0.035em] text-balance text-fg sm:text-[64px]">
               Learn system design <span className="text-accent">by building it.</span>
             </h1>
             <p className="mt-6 max-w-2xl text-[16.5px] leading-relaxed text-pretty text-muted sm:text-[18px]">

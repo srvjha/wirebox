@@ -2,18 +2,18 @@ import { ImageResponse } from "next/og";
 import { courseStats } from "@/content/course";
 import { labCatalog } from "@/content/labs/catalog";
 
-export const alt = "Wirebox: learn system design by building it. Free forever.";
+export const alt = "Wirebox: learn system design by building it. Free for everyone.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const C = {
-  bg: "#0b0b0c",
+  bg: "#121212",
   surface: "#19191b",
   border: "#353538",
   fg: "#ededec",
   muted: "#a3a3a0",
   subtle: "#6f6f6c",
-  accent: "#fb7c3c",
+  accent: "#3ecf8e",
   ok: "#3ccf8e",
   err: "#f0605d",
 };
@@ -79,20 +79,6 @@ export default function OpengraphImage() {
           />
         </svg>
         <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: -1 }}>Wirebox</div>
-        <div
-          style={{
-            display: "flex",
-            marginLeft: "auto",
-            padding: "8px 18px",
-            borderRadius: 999,
-            border: `2px solid rgba(60,207,142,0.4)`,
-            color: C.ok,
-            fontSize: 20,
-            letterSpacing: 2,
-          }}
-        >
-          FREE FOREVER
-        </div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", marginTop: 56 }}>
