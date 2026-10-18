@@ -1,0 +1,118 @@
+So far every cache in this module lives next to your servers. But the fastest request is one that never reaches your servers at all. The band's poster is a 400 KB image that 2 million people will load this week, and a fan in Guwahati is 2,000 km from your data centre in Mumbai. Two more caches can help: one in the fan's own browser, and one in a building down the road from them.
+
+## The layers between a fan and your server
+
+A request for the event page's poster can be answered at any of these places, and each one closer to the fan is faster and cheaper for you:
+
+<Diagram w={700} h={220} caption="Every layer can answer the request if it has a fresh copy. Each one that does saves every layer behind it.">
+  <Box x={14} y={84} w={120} label="Browser cache" sub="0 ms" icon="phone" tone="ok" />
+  <Box x={186} y={84} w={130} label="CDN edge" sub="Guwahati · ~10 ms" icon="cdn" tone="ok" />
+  <Box x={368} y={84} w={130} label="App servers" sub="Mumbai · ~60 ms" icon="server" />
+  <Box x={550} y={20} w={136} label="Redis" sub="+1 ms" icon="cache" />
+  <Box x={550} y={148} w={136} label="Postgres / S3" sub="+25 ms" icon="db" />
+  <Wire points={[[134, 110], [186, 110]]} tone="req" label="miss" labelAt={[160, 92]} />
+  <Wire points={[[316, 110], [368, 110]]} tone="req" label="miss" labelAt={[342, 92]} />
+  <Wire points={[[498, 100], [550, 46]]} tone="req" />
+  <Wire points={[[498, 120], [550, 174]]} tone="req" dashed />
+  <Text x={74} y={160} size={11} tone="ok">no request at all</Text>
+  <Text x={251} y={160} size={11} tone="ok">answered nearby</Text>
+  <Text x={433} y={160} size={11} tone="muted">your servers</Text>
+</Diagram>
+
+You've already met the right-hand side. This lesson covers the left: the **browser cache**, which lives on the fan's device, and the **CDN** (content delivery network), a company running cache servers in hundreds of cities that sit between users and your origin.
+
+## The browser cache and Cache-Control
+
+When your server sends a response, it can tell the browser how long it may reuse it. That's what the `Cache-Control` header is for:
+
+```http
+Cache-Control: public, max-age=31536000, immutable
+```
+
+This says "anyone may cache this, it's good for a year, and it will never change". The next time the page needs that file, the browser uses its own copy without sending a request. Zero milliseconds, zero bytes, zero load.
+
+The header's main directives, in plain terms:
+
+- `max-age=N`: reuse this for N seconds without asking.
+- `s-maxage=N`: the same, but only for shared caches like a CDN. Lets the CDN keep something longer than browsers do.
+- `no-cache`: you may store it, but check with the server before each reuse. (The name is misleading; it *does* cache.)
+- `no-store`: never store it anywhere. For truly private responses.
+- `private`: only the user's browser may cache it, not a CDN. For pages that differ per user.
+- `stale-while-revalidate=N`: after `max-age` runs out, keep serving the old copy for up to N more seconds while fetching a fresh one in the background. This is the early-refresh trick from lesson 3.6, built into HTTP.
+
+## Asking "has it changed?" cheaply
+
+When a cached copy runs out, the browser doesn't have to download everything again. If the response carried an `ETag` (a fingerprint of the content, like `"v7-a91f"`), the browser can ask:
+
+```http
+GET /events/the-band-mumbai/poster.jpg
+If-None-Match: "v7-a91f"
+```
+
+If nothing changed, the server answers `304 Not Modified` with no body. That still costs a round trip, but not the 400 KB. `Last-Modified` and `If-Modified-Since` do the same with timestamps.
+
+## Fingerprinted file names: cache forever, change instantly
+
+There's a tension: you want the browser to cache the poster for a year, but when the organiser uploads a new poster you want everyone to see it at once. You can't take back a `max-age` you've already sent.
+
+The fix is to never change a file at a given URL. Put a hash of the content in the file name: `poster.3f9a1c.jpg`. The URL is cached for a year with `immutable`. When the poster changes, the new one is `poster.b72e04.jpg`, and the event page (cached only briefly) points to the new name. Old copies are never requested again.
+
+Frameworks like Next.js do this automatically for JavaScript and CSS bundles. Do the same for anything users upload.
+
+<KeyIdea>Cache files forever under names that change when their content changes. Cache the page that points to them only briefly.</KeyIdea>
+
+## What a CDN does for you
+
+A CDN runs cache servers (called **edges** or *points of presence*) in many cities. DNS sends each fan to a nearby edge. If that edge has a fresh copy, it answers in about 10 ms. If not, it fetches from your server (the **origin**), stores the copy, and serves the next thousand fans from there.
+
+For Gatepass, that buys three things:
+
+- **Latency.** The fan in Guwahati gets the poster in 10 ms instead of 60 ms plus transfer time across the country.
+- **Origin load.** Two million poster loads become a few hundred requests to your servers, one per edge, per expiry.
+- **Bandwidth cost and spikes.** The CDN's network absorbs the announcement surge. Your servers see a gentle trickle.
+
+CDNs are best at **static** content: images, video, JavaScript, CSS, fonts and ticket PDFs. They can also cache **dynamic pages that are the same for everyone**, like the public event page, if you give them an `s-maxage`. Even 5 seconds of edge caching on a page read 20,000 times a second means your origin sees each edge's request once every 5 seconds, not 20,000 times.
+
+<Callout tone="warn" title="Never cache a personal page publicly">
+If the "My tickets" page is sent with `Cache-Control: public, s-maxage=60`, the CDN will happily serve one fan's tickets to the next fan who visits the same URL. Personal responses must be `private` or `no-store`. This exact mistake has leaked account pages at real companies.
+</Callout>
+
+## Purging and what the CDN can't do
+
+When something cached at the edge must change *now*, say a cancelled show, most CDNs offer a **purge** API: tell every edge to drop a URL or a tag. Purges usually take a few seconds to reach every edge worldwide. Treat them like delete-on-write from lesson 3.3: useful, not instant, and backed up by a sensible TTL.
+
+A CDN can't help with anything that must be unique per user and fresh on every request: seat availability during checkout, payment, the booking itself. Those still reach your servers. The goal is that *only* those reach your servers.
+
+<Quiz
+  id="cdn-headers"
+  question="Which Cache-Control header suits the public event page for the band, which changes a few times a day but is read 20,000 times a second?"
+  options={[
+    "no-store",
+    "private, max-age=3600",
+    "public, max-age=30, s-maxage=30, stale-while-revalidate=60",
+    "public, max-age=31536000, immutable",
+  ]}
+  answer={2}
+  explain={<>A short TTL at both browser and CDN keeps changes visible within half a minute, and stale-while-revalidate means nobody waits while the edge refreshes. "immutable" for a year would freeze an edit forever; "private" stops the CDN from helping; "no-store" sends every request to your origin.</>}
+/>
+
+<YourTurn
+  id="cdn-plan"
+  prompt="Write the Cache-Control header you'd send for each: the band's poster image, the public event page, a fan's 'My tickets' page, and the JavaScript bundle for the app."
+  fields={4}
+  minAnswers={3}
+>
+- **Poster** (with a fingerprinted file name): `public, max-age=31536000, immutable`. A new poster gets a new name.
+- **Public event page**: `public, max-age=30, s-maxage=30, stale-while-revalidate=60`. Short enough that edits show up quickly, long enough that the CDN absorbs the surge. Purge on cancellation.
+- **My tickets**: `private, no-cache` (or `no-store`). The browser may keep it but must check first, and no shared cache may store it.
+- **JS bundle** (fingerprinted by the build): `public, max-age=31536000, immutable`.
+</YourTurn>
+
+In the URL shortener lab at [/labs/url-shortener](/labs/url-shortener), think about which responses could carry a cache header. A redirect for a popular link is the same for everyone, which makes it a candidate for edge caching, as long as you're happy to give up exact click counts.
+
+## Key takeaways
+
+- The browser and a CDN are caches too, and they sit before your servers. Every request they answer costs you nothing.
+- `Cache-Control` sets the rules: `max-age` for browsers, `s-maxage` for CDNs, `private`/`no-store` for personal data, `stale-while-revalidate` to avoid waiting on refreshes.
+- Fingerprinted file names let you cache static files forever and still change them instantly.
+- CDNs cut latency and origin load for static files and for pages that are the same for everyone. Personal pages must never be publicly cached.
