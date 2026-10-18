@@ -1,0 +1,94 @@
+The booking service now does two things for every booking: it saves the booking to Postgres and publishes `BookingCreated` to Kafka. Those are two different systems, and no transaction covers both. Somewhere in a million bookings, the process will die between the two writes. This lesson makes sure that when it does, the event still goes out.
+
+## The dual-write problem
+
+Writing to two systems that don't share a transaction is called a **dual write**, and whichever order you choose, a crash in the middle leaves them disagreeing.
+
+**Save, then publish.** The booking commits. The process crashes, or Kafka is briefly unreachable, before the publish. The booking exists, but the email, seat map and analytics services never hear about it. The fan has a booking with no ticket email, and nothing will ever retry, because nothing remembers that an event is owed.
+
+**Publish, then save.** The event goes out, then the database insert fails on a constraint or the process dies. Now email sends a confirmation for a booking that doesn't exist, and analytics counts a sale that never happened.
+
+Retrying doesn't save you: the crash can happen after the first write and before the retry loop records anything. Wrapping both in a distributed transaction is two-phase commit again, which Kafka and Postgres don't do together, and which you rejected two lessons ago for good reasons.
+
+<Diagram w={680} h={230} caption="Two systems, two separate commits. A crash between them leaves the database and the event stream telling different stories.">
+  <Box x={20} y={88} w={150} h={54} label="Booking" sub="service" icon="service" tone="req" />
+  <Box x={290} y={20} w={160} h={54} label="Postgres" sub="1. INSERT booking ✓" icon="db" tone="ok" />
+  <Box x={290} y={156} w={160} h={54} label="Kafka" sub="2. publish ✕" icon="stream" tone="err" />
+  <Wire points={[[170, 104], [230, 104], [230, 47], [286, 47]]} tone="ok" />
+  <Wire points={[[170, 126], [230, 126], [230, 183], [286, 183]]} tone="err" dashed />
+  <Tag x={230} y={154} tone="err">CRASH</Tag>
+  <Box x={520} y={156} w={145} h={54} label="Email, SMS…" sub="never hear of it" icon="worker" dim />
+  <Wire points={[[450, 183], [516, 183]]} dashed arrow={false} />
+</Diagram>
+
+## Write the event to your own database
+
+The fix is to make it one write again. The **transactional outbox** pattern adds an `outbox` table to the booking service's own database. In the *same local transaction* that inserts the booking, you insert a row describing the event.
+
+```sql
+BEGIN;
+INSERT INTO bookings (id, show_id, seats, amount, status)
+  VALUES ('b_8812', 'show_17', '{A12,A13}', 1800, 'CONFIRMED');
+INSERT INTO outbox (event_id, aggregate_id, type, payload, created_at)
+  VALUES ('evt_7f3a', 'b_8812', 'BookingCreated', '{"showId":"show_17", ...}', now());
+COMMIT;
+```
+
+Now the booking and its event are atomic, because they're in one database. Either both rows exist or neither does. A crash before `COMMIT` loses both, which is fine: the fan sees an error and tries again. A crash after `COMMIT` leaves the event safely on disk, waiting to be sent.
+
+A separate process, the **relay**, reads new outbox rows and publishes them to Kafka. If the relay is down for ten minutes, events wait in the table and go out when it returns. Booking never talks to Kafka at all, so a Kafka outage no longer fails bookings either.
+
+<Diagram w={680} h={250} caption="The booking and its event commit together in one local transaction. A relay ships outbox rows to Kafka afterwards.">
+  <Box x={16} y={98} w={140} h={54} label="Booking" sub="one transaction" icon="service" tone="req" />
+  <Group x={200} y={24} w={200} h={204} label="booking database" tone="ok" />
+  <Box x={220} y={44} w={160} h={50} label="bookings" sub="b_8812 CONFIRMED" icon="db" />
+  <Box x={220} y={156} w={160} h={50} label="outbox" sub="evt_7f3a pending" icon="queue" tone="info" />
+  <Wire points={[[156, 116], [188, 116], [188, 69], [216, 69]]} tone="req" />
+  <Wire points={[[156, 134], [188, 134], [188, 181], [216, 181]]} tone="req" />
+  <Box x={440} y={156} w={100} h={50} label="Relay" icon="worker" tone="info" />
+  <Box x={570} y={156} w={100} h={50} label="Kafka" icon="stream" />
+  <Wire points={[[380, 181], [436, 181]]} tone="info" label="read" labelAt={[408, 167]} />
+  <Wire points={[[540, 181], [566, 181]]} tone="info" />
+  <Packet points={[[380, 181], [440, 181], [540, 181], [570, 181]]} tone="info" dur={2.6} />
+</Diagram>
+
+## Two ways to run the relay
+
+**Polling.** The relay runs a query every few hundred milliseconds: fetch unpublished rows in `event_id` or insertion order, publish them, mark them published. It's simple and works with any database. The costs are a steady trickle of queries, latency up to the polling interval, and care around concurrency: two relay instances polling the same rows will publish duplicates and scramble order, so either run one active relay with a lock, or split rows between relays by aggregate id.
+
+**Change data capture (CDC).** The database already writes every committed change to its own log: the write-ahead log in Postgres, the binlog in MySQL. A CDC tool such as Debezium reads that log like a replica would, and turns each new outbox row into a Kafka message. There's no polling load and latency is milliseconds, and the order matches the commit order. The cost is another piece of infrastructure to run and monitor, with access to your database's replication stream.
+
+Gatepass starts with polling, which is enough at a few hundred bookings a second, and moves to CDC when the polling query starts to show up in the database's load.
+
+## Duplicates, order and housekeeping
+
+The outbox guarantees an event is never lost. It does not guarantee it is published once. The relay can publish a row and crash before marking it published; on restart it publishes it again. So the outbox gives you **at-least-once** delivery, and everything from the delivery-guarantees lesson applies: every event carries a stable `event_id` from the outbox row, and consumers deduplicate on it. Some teams mirror the pattern on the consumer side with an **inbox** table: record the incoming `event_id` in the same transaction as the work it triggers.
+
+For order, publish each event with the aggregate id (the booking id) as its Kafka key, so all of a booking's events land in one partition in the order the relay read them.
+
+Finally, the outbox is a table that only grows. Delete or archive rows once they're published and a safe margin has passed, say a day, and put a number on a dashboard: the age of the oldest unpublished row. If it climbs past a minute, the relay is stuck, and every downstream service is quietly falling behind.
+
+<Callout tone="tip" title="The same idea, everywhere">
+Whenever one action must change your database and notify another system, ask: can I turn this into a single local write plus a reliable process that follows it up? Webhooks to organisers, search-index updates and cache invalidation messages can all go through the outbox.
+</Callout>
+
+<Quiz
+  id="outbox-duplicates"
+  question="With the outbox and a polling relay, what can still go wrong, and who handles it?"
+  options={[
+    "A booking can be saved without its event. The relay must retry harder.",
+    "An event can be published twice. Consumers deduplicate by event id.",
+    "An event can be published for a booking that was never saved. Consumers must check the booking exists.",
+    "Nothing. The outbox gives exactly-once delivery."
+  ]}
+  answer={1}
+  explain={<>The booking and the outbox row commit together, so neither loss nor phantom events are possible. But the relay can publish and crash before marking the row as sent, so an event may go out twice. That is at-least-once, and the consumer's idempotency check on the event id handles it.</>}
+/>
+
+## Key takeaways
+
+- Writing to a database and a broker separately is a dual write. A crash between them loses events or invents them.
+- The outbox pattern inserts the event into an outbox table in the same local transaction as the data change.
+- A relay ships outbox rows to the broker, by polling or by change data capture from the database log.
+- The result is at-least-once: give each event a stable id, key by aggregate id for order, and make consumers idempotent.
+- Clean up published rows and alert on the age of the oldest unpublished one.
