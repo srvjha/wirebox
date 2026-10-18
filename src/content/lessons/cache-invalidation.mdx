@@ -1,0 +1,144 @@
+The organisers move the band's show from 8 pm to 9 pm. The database is updated in a millisecond. The event page, served from the cache, keeps saying 8 pm to everyone for the next hour, and a few hundred fans turn up early. A cache holds copies, and every copy can go out of date. This lesson is about deciding how out of date is acceptable, and how to bring copies back in line.
+
+## Every cached value is a guess
+
+When you put `event:the-band-mumbai` in Redis, you are betting that the event won't change before someone reads it again. Most of the time you win. When you lose, a user sees **stale data**: a value that was true when it was cached and isn't any more.
+
+You can't make staleness disappear without throwing away the point of caching. If you checked the database on every read to confirm the cached value was still current, you'd be doing a database query per request again. So the real question isn't "how do I avoid stale data?" It's "for this piece of data, how stale is acceptable, and what happens if I'm wrong?"
+
+That's a **product decision** as much as an engineering one. Ask the person who owns the feature:
+
+- A trending list that's 5 minutes old? Nobody notices.
+- A poster image that's a day old after a redesign? Mildly embarrassing.
+- A show time that's an hour old? Fans at the wrong door.
+- A seat shown as free when it's sold? A failed checkout and an angry fan, unless the booking step re-checks the database (it must).
+
+There are two tools for keeping staleness in its box: expiry and invalidation. You'll usually use both.
+
+## Tool one: expiry (TTL)
+
+Every value you `SET` gets a **time to live**, after which the cache deletes it by itself. `SET event:42 … EX 300` means "forget this in 5 minutes". The next read after that is a miss, which reloads fresh data.
+
+A TTL is a ceiling on staleness. No matter what else goes wrong (a bug in your invalidation code, a write that bypassed the app, a message that got lost), no value can be wrong for longer than its TTL. That's why you should **always set one**, even when you also invalidate on write. It's the safety net under everything else.
+
+Choosing the number is a trade:
+
+- **Short TTL** (seconds): fresher data, more misses, more database load.
+- **Long TTL** (hours): fewer misses, but changes take longer to appear, unless you also invalidate.
+
+<Diagram w={700} h={190} caption="With a 60-second TTL, a change made at t = 10 s is invisible until the cached copy expires at t = 60 s. Every read in between gets the old show time.">
+  <Text x={30} y={34} anchor="start" mono size={11} tone="muted">CACHE</Text>
+  <Text x={30} y={104} anchor="start" mono size={11} tone="muted">DATABASE</Text>
+  <Wire points={[[100, 30], [680, 30]]} arrow={false} />
+  <Wire points={[[100, 100], [680, 100]]} arrow={false} />
+  <rect x={110} y={18} width={380} height={24} rx={6} fill="var(--surface-2)" stroke="var(--warn)" />
+  <Text x={300} y={34} size={11.5} mono tone="warn">starts 8 pm (cached at 0 s)</Text>
+  <rect x={500} y={18} width={170} height={24} rx={6} fill="var(--surface-2)" stroke="var(--ok)" />
+  <Text x={585} y={34} size={11.5} mono tone="ok">starts 9 pm</Text>
+  <rect x={110} y={88} width={70} height={24} rx={6} fill="var(--surface-2)" stroke="var(--border-strong)" />
+  <Text x={145} y={104} size={11.5} mono>8 pm</Text>
+  <rect x={190} y={88} width={480} height={24} rx={6} fill="var(--surface-2)" stroke="var(--ok)" />
+  <Text x={430} y={104} size={11.5} mono tone="ok">9 pm (updated at 10 s)</Text>
+  <Wire points={[[190, 120], [190, 150]]} tone="info" arrow={false} dashed />
+  <Text x={190} y={166} size={11} tone="info">organiser edits</Text>
+  <Wire points={[[495, 50], [495, 150]]} tone="ok" arrow={false} dashed />
+  <Text x={495} y={166} size={11} tone="ok">TTL expires, next read reloads</Text>
+  <rect x={190} y={56} width={305} height={20} rx={5} fill="var(--accent-soft)" />
+  <Text x={342} y={70} size={11} tone="err" weight={600}>50 seconds of stale reads</Text>
+</Diagram>
+
+<Callout tone="tip" title="Different data, different TTLs">
+For the event page: venue address, a day; ticket tiers, 10 minutes; seats-left count, 2 seconds. Splitting values by how fast they change (lesson 3.2) is what lets you give each its own TTL.
+</Callout>
+
+## Tool two: invalidate on write
+
+Waiting for a TTL is passive. When *you* change the data, you know exactly which key is now wrong, so you can act straight away. The standard move in cache-aside is:
+
+1. Write the change to the database.
+2. **Delete** the cached key.
+
+The next read misses and reloads the new value. You delete rather than update the cache because deleting is simple and safe: you don't need to rebuild the value (which may join five tables) in the write path, and if two writes race, a deleted key can't end up holding the wrong one of them.
+
+Order matters. Update the database **first**, then delete the key. If you delete first, a read can slip in between, miss, load the *old* value from the database (your write hasn't happened yet) and put it back in the cache, where it stays until the TTL runs out.
+
+<Quiz
+  id="invalidation-order"
+  question="An organiser updates the show time. Which sequence is safest in cache-aside?"
+  options={[
+    "Delete the cache key, then update the database",
+    "Update the database, then delete the cache key",
+    "Update the cache with the new value, then update the database",
+    "Update the database and rely on the TTL",
+  ]}
+  answer={1}
+  explain={<>Deleting first leaves a gap where a reader can repopulate the cache with the old value. Writing the cache first means a failed database write leaves the cache claiming something that never happened. Relying on TTL works, but you've chosen to show the wrong time for up to a full TTL when you could have fixed it immediately.</>}
+/>
+
+## The race that still gets through
+
+Even "update, then delete" has a rare hole. It needs a reader to miss and read the database just *before* your write, but then put the value in the cache just *after* your delete:
+
+<Diagram w={700} h={236} caption="A slow reader caches a value it read before the write. The delete happened in between, so nothing removes the stale copy. Only the TTL will.">
+  <Text x={22} y={50} anchor="start" mono size={11} tone="muted">READER</Text>
+  <Text x={22} y={120} anchor="start" mono size={11} tone="muted">WRITER</Text>
+  <Text x={22} y={190} anchor="start" mono size={11} tone="muted">CACHE</Text>
+  <Wire points={[[90, 46], [690, 46]]} arrow={false} />
+  <Wire points={[[90, 116], [690, 116]]} arrow={false} />
+  <Wire points={[[90, 186], [690, 186]]} arrow={false} />
+  <Tag x={140} y={46} tone="err">MISS</Tag>
+  <Tag x={230} y={46} tone="muted">READ DB: 8 PM</Tag>
+  <Text x={330} y={34} size={10.5} tone="muted">…slow (GC pause)…</Text>
+  <Tag x={330} y={116} tone="info">WRITE 9 PM</Tag>
+  <Tag x={440} y={116} tone="info">DEL KEY</Tag>
+  <Wire points={[[440, 126], [440, 176]]} tone="info" />
+  <Tag x={560} y={46} tone="warn">SET 8 PM</Tag>
+  <Wire points={[[560, 56], [560, 176]]} tone="warn" />
+  <Text x={560} y={212} size={11} tone="err" weight={600}>cache holds 8 pm until TTL</Text>
+</Diagram>
+
+It's unlikely: the reader's database query has to be slower than the whole write-plus-delete. But at 20,000 reads a second, unlikely things happen daily. Practical defences, cheapest first:
+
+- **Keep a TTL.** It bounds the damage, which is the main reason it's non-negotiable.
+- **Delete twice.** Delete again a second or so after the write (a "delayed double delete"), catching any reader that was in flight.
+- **Version the value.** Store an `updated_at` or version number in the cached value and refuse to `SET` an older version over a newer one.
+
+For a show time, a TTL plus one delete is plenty. For something where staleness costs money, don't serve it from the cache at all.
+
+## Who else writes to the database?
+
+Delete-on-write only works if every write goes through code that knows to delete. Real systems leak:
+
+- An admin edits a row directly in SQL during an incident.
+- A nightly job updates prices in bulk without touching Redis.
+- A second service shares the same table.
+
+Each of these leaves stale keys behind until they expire. Options: make every writer go through one module that handles invalidation, or listen to the database's change stream (change data capture) and delete keys from there, so invalidation happens no matter who wrote. Again, the TTL is what saves you from the writers you forgot about.
+
+## Invalidating many keys at once
+
+One change can make many keys stale. Renaming a venue affects every event page at that venue, every city listing that shows them, and every search result. Tracking all of those keys is fragile. Two tricks help:
+
+- **Namespace versions.** Put a version in the key prefix: `venue:17:v4:…`. To invalidate everything about venue 17, increment its version to `v5`. Old keys are never read again and quietly expire.
+- **Shorter TTLs on aggregate views.** Lists and search results are hard to invalidate precisely, so give them TTLs of a minute or two and accept that much staleness.
+
+<YourTurn
+  id="invalidation-plan"
+  prompt="For each Gatepass value, pick a TTL and say whether you would also delete on write: the event details page, the seats-left count, a user's 'My tickets' list, and the city home page list."
+  fields={4}
+  minAnswers={3}
+  hint="Ask who notices if it's stale, how fast, and how much it costs them."
+>
+- **Event details**: TTL of 10–60 minutes, and delete on every organiser edit. Edits are rare and must show up quickly (wrong show times hurt).
+- **Seats left**: TTL of 1–2 seconds, no delete. It changes constantly, so invalidating on every booking would empty the cache all the time. The booking itself always checks the database, so a slightly old count only affects the display.
+- **My tickets**: TTL of a few minutes, and delete when that user books or cancels. A user who just paid expects to see the ticket immediately.
+- **City list**: TTL of 1–5 minutes, no targeted delete. Too many events feed into it to track, and a new event appearing a minute late is fine.
+</YourTurn>
+
+## Key takeaways
+
+- Every cached value can be stale. How stale is acceptable is a product decision, made per piece of data.
+- Always set a TTL. It caps staleness even when invalidation code has bugs or someone writes behind your back.
+- On writes, update the database first, then delete the key. Delete instead of updating the cache.
+- A rare race can still re-cache an old value. A TTL bounds it; double deletes or versioned values close it further.
+- Data whose staleness costs money or seats should be read from the database, not the cache.
