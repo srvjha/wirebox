@@ -15,7 +15,7 @@ const MIN_SECONDS = 15;
 async function celebrate() {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const { default: confetti } = await import("canvas-confetti");
-  const colors = ["#fb7c3c", "#3ccf8e", "#b89cff", "#f2c94c"];
+  const colors = ["#3ecf8e", "#f5a524", "#b89cff", "#ededed"];
   const fire = (x: number, angle: number) =>
     confetti({ particleCount: 70, spread: 70, startVelocity: 48, angle, origin: { x, y: 0.75 }, colors });
   fire(0.15, 60);

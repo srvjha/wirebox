@@ -119,7 +119,7 @@ export function BloomFilterLab() {
         })}
       </div>
       <p className="mt-2 text-[11.5px] text-subtle">
-        Orange: bit set. Outlined: the {k} bits for <span className="font-mono text-muted">{q || "…"}</span>
+        Green: bit set. Outlined: the {k} bits for <span className="font-mono text-muted">{q || "…"}</span>
         {lastAdded && (
           <>
             . Brightest: bits set by <span className="font-mono text-muted">{lastAdded}</span>
