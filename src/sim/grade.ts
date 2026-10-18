@@ -10,7 +10,17 @@ export type Constraint =
   | { type: "recovery"; maxSeconds: number }
   | { type: "readYourWrites" }
   | { type: "noWrongData" }
-  | { type: "realUsersBlocked"; max: number };
+  | { type: "realUsersBlocked"; max: number }
+  /** Flow steps: the queue backlog never exceeds this many seconds of work. */
+  | { type: "maxQueueLag"; seconds: number }
+  /** Flow steps: share of fan-out messages that reach every recipient. */
+  | { type: "delivery"; min: number }
+  /** Flow steps: share of background jobs finished within their slaSeconds. */
+  | { type: "asyncOnTime"; min: number }
+  /** Flow steps: share of one flow's requests that succeed. */
+  | { type: "flowSuccess"; flow: string; min: number; label?: string }
+  /** A lab-defined check (see DesignStep.customChecks); never graded by `grade`. */
+  | { type: "custom"; id: string; label: string };
 
 export type Metrics = {
   successRate: number;
@@ -22,6 +32,14 @@ export type Metrics = {
   blockedRate: number;
   worstSecond?: number;
   recovery?: number | null;
+  /** Flow steps only. Seconds of work waiting in the worst queue. */
+  queueLag?: number;
+  /** Flow steps only. Worst delivered share over flows with a fanout. */
+  delivered?: number;
+  /** Flow steps only. Worst on-time share over flows with a queue. */
+  asyncOnTime?: number;
+  /** Flow steps only. Success share per flow id. */
+  flowServed?: Record<string, number>;
 };
 
 export type Check = { constraint: Constraint; label: string; ok: boolean; message: string | null };
@@ -54,6 +72,16 @@ export function describe(c: Constraint): string {
       return "Nobody gets someone else's data";
     case "realUsersBlocked":
       return `≤ ${pct(c.max)} of real users rate-limited`;
+    case "maxQueueLag":
+      return `Background work waits ≤ ${c.seconds} s`;
+    case "delivery":
+      return `${pct(c.min)} of messages reach every recipient`;
+    case "asyncOnTime":
+      return `${pct(c.min)} of background jobs finish on time`;
+    case "flowSuccess":
+      return c.label ?? `${pct(c.min)} of "${c.flow}" requests succeed`;
+    case "custom":
+      return c.label;
   }
 }
 
@@ -96,6 +124,24 @@ function check(c: Constraint, m: Metrics): string | null {
       return m.blockedRate <= c.max
         ? null
         : `${pct(m.blockedRate)} of real users' requests were rate-limited (429). Keep it under ${pct(c.max)}.`;
+    case "maxQueueLag":
+      return (m.queueLag ?? 0) <= c.seconds
+        ? null
+        : `Jobs waited up to ${Math.round(m.queueLag ?? 0)} s in the queue. This test allows ${c.seconds} s: add workers or shrink the work.`;
+    case "delivery":
+      return (m.delivered ?? 1) >= c.min
+        ? null
+        : `Only ${pct(m.delivered ?? 0)} of messages reached every recipient. This test needs ${pct(c.min)}.`;
+    case "asyncOnTime":
+      return (m.asyncOnTime ?? 1) >= c.min
+        ? null
+        : `Only ${pct(m.asyncOnTime ?? 0)} of background jobs finished in time. This test needs ${pct(c.min)}.`;
+    case "flowSuccess": {
+      const got = m.flowServed?.[c.flow] ?? 0;
+      return got >= c.min ? null : `${pct(got)} of "${c.flow}" requests succeeded. This test needs ${pct(c.min)}.`;
+    }
+    case "custom":
+      return null;
   }
 }
 

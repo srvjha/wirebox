@@ -31,6 +31,20 @@ const toneRing = {
 };
 const toneText = { ok: "text-ok", warn: "text-warn", err: "text-err" };
 
+/** The small line under the title while a test runs: what this kind of node is busy with. */
+function statLine(node: LabNode, stat: NodeStat) {
+  if (stat.down) return "no traffic";
+  if (node.kind === "ws" && stat.conns) return `${compact(stat.conns)} conns · ${compact(stat.load)}/s`;
+  if (node.kind === "worker") return `${compact(stat.load)} jobs/s`;
+  return `${compact(stat.load)}/s`;
+}
+
+function backlogLine(node: LabNode, stat: NodeStat) {
+  if ((node.kind === "worker" || node.kind === "queue") && (stat.backlog ?? 0) >= 1) return `${compact(stat.backlog ?? 0)} waiting`;
+  if (node.kind === "db" && (stat.shards ?? 1) > 1 && stat.hotUtil !== undefined && stat.hotUtil >= HOT_UTIL) return "hot shard";
+  return null;
+}
+
 function SimNodeView({ data, selected }: NodeProps<SimFlowNode>) {
   const { node, title, sub, stat } = data;
   const meta = KIND_META[node.kind];
@@ -72,11 +86,14 @@ function SimNodeView({ data, selected }: NodeProps<SimFlowNode>) {
       </div>
       {showStat && (
         <div className="mt-2 flex items-center justify-between gap-2 border-t border-line pt-1.5 font-mono text-[10.5px]">
-          <span className="text-muted">{stat.down ? "no traffic" : `${compact(stat.load)}/s`}</span>
+          <span className="text-muted">{statLine(node, stat)}</span>
           <span className={cn("font-semibold", tone && toneText[tone])}>
             {stat.down ? "DOWN" : `${Math.round(stat.util * 100)}%`}
           </span>
         </div>
+      )}
+      {showStat && !stat.down && backlogLine(node, stat) && (
+        <p className="mt-1 font-mono text-[10.5px] font-semibold text-warn">{backlogLine(node, stat)}</p>
       )}
       {showStat && !stat.down && (
         <div className="mt-1 h-1 overflow-hidden rounded-full bg-surface-3">

@@ -3,6 +3,11 @@ import type {
   CacheConfig,
   CacheValueOption,
   Constraint,
+  CustomKnob,
+  CustomCheckResult,
+  Flow,
+  FlowIncident,
+  FlowResult,
   Incident,
   Kind,
   LimiterConfig,
@@ -106,6 +111,10 @@ export type LabNode = {
   y: number;
   size?: ServerSize;
   role?: DbRole;
+  /** Databases: how many shards the data is split over (1-16). */
+  shards?: number;
+  /** cdn / cache nodes: share of cacheable requests answered here, when the step exposes it. */
+  hitRate?: number;
 };
 
 export type LabEdge = { id: string; from: string; to: string };
@@ -116,6 +125,8 @@ export type LabConfigs = {
   cache: CacheConfig;
   limiter: LimiterConfig;
   resilience: Resilience;
+  /** Selected option id per `DesignStep.customKnobs` id. Missing = the knob's default. */
+  custom?: Record<string, string>;
 };
 
 /** Inspector controls a design step unlocks. */
@@ -128,7 +139,11 @@ export type Knob =
   | "healthChecks"
   | "replica"
   | "failover"
-  | "readFrom";
+  | "readFrom"
+  /** Inspector: database shard count. */
+  | "shards"
+  /** Inspector: cdn / cache hit-rate slider. */
+  | "hitRate";
 
 export type LabScenario = {
   /** e.g. "Launch week". */
@@ -204,6 +219,30 @@ export type DesignStep = StepBase & {
   startGraph?: LabGraph;
   /** "Why it works": 2–4 sentences written from the learner's own passing design. */
   debrief: (ctx: DebriefContext) => string[];
+
+  // ---- Simulator v2 (see src/sim/flows.ts for a worked example) ----
+  /** When present the step is simulated with the flow engine instead of `scenario.load`. */
+  flows?: Flow[];
+  /** Flow steps: what goes wrong mid-run (instead of `scenario.incident`). */
+  incident?: FlowIncident;
+  /** Flow steps: the incident in plain words (instead of `scenario.incidentText`). */
+  incidentText?: string;
+  /** Lab-defined design choices rendered as selects, feeding both the engine and `customChecks`. */
+  customKnobs?: CustomKnob[];
+  /** Correctness checks throughput can't see (double booking, lost edits). Run after every test. */
+  customChecks?: (ctx: CustomCheckContext) => CustomCheckResult[];
+  /** Labels for `customChecks`, shown in the "To pass" list before the first run. */
+  customCheckLabels?: string[];
+  /** Per-kind engine numbers: `{ external: { cap: 5000 }, cdn: { hitRate: 0.95 } }`. */
+  nodeDefaults?: Partial<Record<Kind, Record<string, number>>>;
+};
+
+export type CustomCheckContext = {
+  graph: LabGraph;
+  configs: LabConfigs;
+  /** Selected option id per custom knob id, defaults filled in. */
+  knobs: Record<string, string>;
+  result: TestResult & { steady: FlowResult };
 };
 
 export type ChoiceOption = {

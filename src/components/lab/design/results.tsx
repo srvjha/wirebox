@@ -1,12 +1,12 @@
 "use client";
 
 import { ArrowRight, CircleCheck, CircleX, Sparkles } from "lucide-react";
-import { HOT_UTIL, type TestResult } from "@/sim";
+import { HOT_UTIL, type FlowResult, type FlowTimeline, type TestResult } from "@/sim";
 import type { LabGraph } from "@/lib/lab/types";
 import { cn } from "@/lib/utils";
 import { compact, nodeTitle } from "../canvas/meta";
 import { Postmortem, type PostmortemInput } from "./postmortem";
-import { TimelineChart } from "./timeline-chart";
+import { QueueLagChart, TimelineChart } from "./timeline-chart";
 
 type Props = {
   result: TestResult;
@@ -24,6 +24,8 @@ export function Results({ result, graph, dbLabel, incident, stale, debrief, post
   const m = result.metrics;
   const failed = result.checks.filter((c) => !c.ok).length;
   const nodes = graph.nodes.filter((n) => n.kind !== "client" && result.steady.nodes[n.id]);
+  const flow = "flows" in result.steady ? (result.steady as FlowResult) : null;
+  const flowTimeline = result.timeline && "flowTotals" in result.timeline ? (result.timeline as FlowTimeline) : null;
 
   return (
     <div className="space-y-4">
@@ -67,7 +69,10 @@ export function Results({ result, graph, dbLabel, incident, stale, debrief, post
         ))}
       </ul>
 
+      {flow && <FlowRows flow={flow} timeline={flowTimeline} />}
+
       {result.timeline && <TimelineChart timeline={result.timeline} incident={incident ?? ""} />}
+      {flowTimeline && flowTimeline.worstQueueLag >= 0.5 && <QueueLagChart timeline={flowTimeline} />}
 
       {nodes.length > 0 && (
         <div>
@@ -80,7 +85,11 @@ export function Results({ result, graph, dbLabel, incident, stale, debrief, post
                 <li key={n.id} className="grid grid-cols-[1fr_auto] items-center gap-x-3 text-[12px]">
                   <span className="truncate text-muted">{nodeTitle(n, dbLabel)}</span>
                   <span className="font-mono text-fg">
-                    {Math.round(s.util * 100)}% <span className="text-subtle">· {compact(s.load)}/s</span>
+                    {Math.round(s.util * 100)}%{" "}
+                    <span className="text-subtle">
+                      · {s.conns ? `${compact(s.conns)} conns` : `${compact(s.load)}/s`}
+                      {s.hotUtil !== undefined && (s.shards ?? 1) > 1 ? " · hottest shard" : ""}
+                    </span>
                   </span>
                   <span className="col-span-2 h-1 overflow-hidden rounded-full bg-surface-3">
                     <span className={cn("block h-full rounded-full", tone)} style={{ width: `${Math.min(100, s.util * 100)}%` }} />
@@ -129,6 +138,48 @@ export function Results({ result, graph, dbLabel, incident, stale, debrief, post
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function FlowRows({ flow, timeline }: { flow: FlowResult; timeline: FlowTimeline | null }) {
+  const pctOf = (x: number) => `${(x * 100).toFixed(x > 0.99 && x < 1 ? 2 : 1).replace(/\.0$/, "")}%`;
+  return (
+    <div>
+      <p className="mb-2 font-mono text-[10.5px] tracking-wider text-subtle uppercase">Traffic by flow</p>
+      <ul className="space-y-2">
+        {flow.flows.map((f) => {
+          const t = timeline?.flowTotals[f.id];
+          const served = t && t.offered > 0 ? t.served / t.offered : f.success;
+          const delivered = t && t.offered > 0 ? t.delivered / t.offered : f.delivered;
+          const onTime = t && t.asyncOffered > 0 ? t.asyncOnTime / t.asyncOffered : f.asyncOnTime;
+          const tone = !f.legit ? "text-subtle" : served >= 0.99 ? "text-ok" : served >= 0.9 ? "text-warn" : "text-err";
+          return (
+            <li key={f.id} className="rounded-lg border border-line bg-surface-2 px-2.5 py-2">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="min-w-0 truncate text-[12.5px] font-medium text-fg">
+                  {f.label}
+                  {!f.legit && <span className="ml-1.5 font-mono text-[10px] text-err uppercase">abusive</span>}
+                </span>
+                <span className={cn("shrink-0 font-mono text-[12.5px] font-semibold", tone)}>
+                  {f.legit ? `${pctOf(served)} served` : `${compact(f.offered)}/s`}
+                </span>
+              </div>
+              <p className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10.5px] text-subtle">
+                <span>{compact(f.offered)}/s</span>
+                {f.legit && <span>p99 {f.p99 >= 2000 ? "timeout" : `${f.p99} ms`}</span>}
+                {f.fanout && <span className={delivered < 0.99 ? "text-err" : undefined}>{pctOf(delivered)} delivered</span>}
+                {onTime !== null && <span className={onTime < 0.95 ? "text-warn" : undefined}>{pctOf(onTime)} of jobs on time</span>}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+      {flow.queueLagSeconds >= 0.5 || (timeline && timeline.worstQueueLag >= 0.5) ? (
+        <p className="mt-2 text-[12px] text-muted">
+          Queue wait peaked at <span className="font-mono text-fg">{Math.round(timeline?.worstQueueLag ?? flow.queueLagSeconds)} s</span>.
+        </p>
+      ) : null}
     </div>
   );
 }

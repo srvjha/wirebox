@@ -1,11 +1,27 @@
 // Relative imports keep this file runnable under vitest (no path aliases there).
-import { DEFAULT_CACHE, DEFAULT_RESILIENCE, TRAFFIC, runTest, type Load, type SimEdge, type SimNode, type TestResult } from "../../sim";
+import {
+  DEFAULT_CACHE,
+  DEFAULT_RESILIENCE,
+  TRAFFIC,
+  resolveKnobs,
+  runFlowTest,
+  runTest,
+  type Check,
+  type FlowKnobs,
+  type Load,
+  type SimEdge,
+  type SimNode,
+  type TestResult,
+} from "../../sim";
 import type { DesignStep, Endpoint, Lab, LabConfigs, LabGraph, SchemaDesign } from "./types";
+
+const DEFAULT_CUSTOM: Record<string, string> = {};
 
 export const DEFAULT_CONFIGS: LabConfigs = {
   cache: DEFAULT_CACHE,
   limiter: { by: "ip", rate: 10 },
   resilience: DEFAULT_RESILIENCE,
+  custom: DEFAULT_CUSTOM,
 };
 
 export function toSim(graph: LabGraph): { nodes: SimNode[]; edges: SimEdge[] } {
@@ -15,6 +31,8 @@ export function toSim(graph: LabGraph): { nodes: SimNode[]; edges: SimEdge[] } {
       kind: n.kind,
       size: n.kind === "server" ? (n.size ?? "s") : undefined,
       role: n.kind === "db" ? (n.role ?? "primary") : undefined,
+      shards: n.kind === "db" ? n.shards : undefined,
+      hitRate: n.kind === "cdn" || n.kind === "cache" ? n.hitRate : undefined,
     })),
     edges: graph.edges.map((e) => ({ from: e.from, to: e.to })),
   };
@@ -54,7 +72,42 @@ export type DesignRun = {
   dbLabel: string;
 };
 
+/** The learner's selected option per custom knob, defaults filled in, plus the engine's numeric values. */
+export function stepKnobs(step: DesignStep, configs: LabConfigs): FlowKnobs {
+  return resolveKnobs(step.customKnobs, configs.custom);
+}
+
+function runFlowDesign(lab: Lab, step: DesignStep, d: DesignInput, loadScale: number): DesignRun {
+  const dbLabel = dbLabelOf(lab, d.schema);
+  const knobs = stepKnobs(step, d.configs);
+  const flows = (step.flows ?? []).map((f) =>
+    loadScale === 1 ? f : { ...f, rps: f.rps * loadScale, connections: f.connections ? f.connections * loadScale : undefined },
+  );
+  const result = runFlowTest({
+    ...toSim(d.graph),
+    flows,
+    constraints: step.constraints,
+    incident: loadScale === 1 ? step.incident : undefined,
+    nodeConfig: step.nodeDefaults,
+    knobs,
+    healthChecks: d.configs.resilience.healthChecks,
+    dbLabel,
+  });
+  if (step.customChecks && loadScale === 1) {
+    const extra: Check[] = step.customChecks({ graph: d.graph, configs: d.configs, knobs: knobs.choices, result }).map((c, i) => ({
+      constraint: { type: "custom", id: `custom-${i}`, label: c.label },
+      label: c.label,
+      ok: c.ok,
+      message: c.ok ? null : (c.message ?? null),
+    }));
+    result.checks.push(...extra);
+    result.pass = result.pass && extra.every((c) => c.ok);
+  }
+  return { result, load: step.scenario.load, dbLabel };
+}
+
 export function runDesign(lab: Lab, step: DesignStep, d: DesignInput, loadScale = 1): DesignRun {
+  if (step.flows) return runFlowDesign(lab, step, d, loadScale);
   const base = effectiveLoad(step.scenario.load, d.api);
   const load: Load =
     loadScale === 1

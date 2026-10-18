@@ -116,6 +116,7 @@ export function getLabStore(lab: Lab): LabStore {
                 cache: { ...c.cache, ...patch.cache },
                 limiter: { ...c.limiter, ...patch.limiter },
                 resilience: { ...c.resilience, ...patch.resilience },
+                custom: { ...c.custom, ...(patch.custom as Record<string, string> | undefined) },
               },
             });
           },

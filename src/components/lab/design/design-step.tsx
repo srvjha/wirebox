@@ -7,13 +7,13 @@ import { useStore } from "zustand";
 import { describe, type EvalResult } from "@/sim";
 import { track } from "@/lib/analytics";
 import { useSession } from "@/lib/auth-client";
-import { dbLabelOf, effectiveLoad, permanentRedirect, runDesign } from "@/lib/lab/run";
+import { dbLabelOf, effectiveLoad, permanentRedirect, runDesign, stepKnobs } from "@/lib/lab/run";
 import { describeDesign, describeResult, describeScenario } from "@/lib/lab/serialize";
 import type { LabStore } from "@/lib/lab/store";
 import type { DesignStep, Lab, LabGraph } from "@/lib/lab/types";
 import { cn } from "@/lib/utils";
 import { DesignCanvas } from "../canvas/design-canvas";
-import { Inspector } from "../canvas/inspector";
+import { Inspector, KnobSelect } from "../canvas/inspector";
 import { compact } from "../canvas/meta";
 import { Results } from "./results";
 
@@ -117,7 +117,7 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
       frames.forEach((f, i) =>
         at(i * 120, () => {
           setFrame(f.result);
-          setTick({ t: f.t, label: f.t >= 5 && step.scenario.incident ? (step.scenario.incident.label ?? "Incident") : "Warming up" });
+          setTick({ t: f.t, label: f.t >= 5 && (step.incident ?? step.scenario.incident) ? ((step.incident ?? step.scenario.incident)?.label ?? "Incident") : "Warming up" });
         }),
       );
       at(frames.length * 120 + 150, finish);
@@ -136,6 +136,9 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
   }, [index, lab, session, step, store]);
 
   const load = effectiveLoad(step.scenario.load, api);
+  const globalKnobs = (step.customKnobs ?? []).filter((k) => !k.appliesTo);
+  const knobChoices = stepKnobs(step, configs).choices;
+  const incidentText = step.incidentText ?? step.scenario.incidentText;
   const permanent = permanentRedirect(api);
   const debrief = useMemo(() => {
     if (!live?.result.pass) return null;
@@ -151,6 +154,7 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
           lab={lab.slug}
           store={store}
           palette={step.palette}
+          replicas={!step.flows || step.knobs.includes("replica")}
           dbLabel={dbLabel}
           selected={selected}
           onSelect={setSelected}
@@ -169,7 +173,7 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
           </button>
           {tick && (
             <div className="rounded-lg border border-line bg-surface/95 px-2.5 py-1.5 text-right font-mono text-[11px] text-muted shadow-card backdrop-blur">
-              {step.scenario.incident ? <span className="text-fg">t = {tick.t}s · </span> : null}
+              {step.scenario.incident || step.incident ? <span className="text-fg">t = {tick.t}s · </span> : null}
               {tick.label}
               {frame && (
                 <span className="block text-fg">
@@ -184,7 +188,7 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
       <aside className="w-full shrink-0 bg-bg lg:w-[400px] lg:overflow-y-auto xl:w-[430px]">
         {selected && !running && (
           <div className="border-b border-line p-3">
-            <Inspector lab={lab} store={store} knobs={step.knobs} nodeId={selected} dbLabel={dbLabel} onClose={() => setSelected(null)} />
+            <Inspector lab={lab} store={store} knobs={step.knobs} step={step} nodeId={selected} dbLabel={dbLabel} onClose={() => setSelected(null)} />
           </div>
         )}
         <div className="sticky top-0 z-10 flex gap-1 border-b border-line bg-bg/95 px-3 pt-2 backdrop-blur">
@@ -213,7 +217,7 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
               result={live.result}
               graph={graph}
               dbLabel={live.dbLabel}
-              incident={step.scenario.incidentText}
+              incident={step.incidentText ?? step.scenario.incidentText}
               stale={stale}
               debrief={debrief}
               returnTo={returnTo}
@@ -221,7 +225,7 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
               postmortem={{
                 lab: lab.slug,
                 step: index,
-                design: describeDesign({ graph, configs, api, dbLabel }),
+                design: describeDesign({ graph, configs, api, dbLabel, step }),
                 scenario: describeScenario(step),
                 result: describeResult(live.result),
               }}
@@ -231,15 +235,31 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
               <section className="rounded-2xl border border-line bg-surface p-4">
                 <p className="font-mono text-[10.5px] tracking-wider text-accent uppercase">Scenario · {step.scenario.label}</p>
                 <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">{step.story}</p>
-                <dl className="mt-3 grid grid-cols-3 gap-2">
-                  <Num label="Reads/s" value={compact(load.reads)} />
-                  <Num label="Writes/s" value={compact(load.writes)} />
-                  <Num label={load.attack ? "Bot req/s" : "Bots"} value={load.attack ? compact(load.attack) : "none"} tone={load.attack ? "err" : undefined} />
-                </dl>
-                {step.scenario.incidentText && (
+                {step.flows ? (
+                  <ul className="mt-3 space-y-1.5">
+                    {step.flows.map((f) => (
+                      <li key={f.id} className="flex items-baseline justify-between gap-3 rounded-lg border border-line bg-surface-2 px-2.5 py-1.5">
+                        <span className="min-w-0 text-[12.5px] text-fg">
+                          {f.label}
+                          {f.legit === false && <span className="ml-1.5 font-mono text-[10px] text-err uppercase">abusive</span>}
+                          {f.route.some((h) => h.kind === "queue") && <span className="ml-1.5 font-mono text-[10px] text-subtle uppercase">background</span>}
+                          {f.fanout ? <span className="ml-1.5 font-mono text-[10px] text-subtle">×{f.fanout} fan-out</span> : null}
+                        </span>
+                        <span className="shrink-0 font-mono text-[13px] font-semibold text-req">{compact(f.rps)}/s</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <dl className="mt-3 grid grid-cols-3 gap-2">
+                    <Num label="Reads/s" value={compact(load.reads)} />
+                    <Num label="Writes/s" value={compact(load.writes)} />
+                    <Num label={load.attack ? "Bot req/s" : "Bots"} value={load.attack ? compact(load.attack) : "none"} tone={load.attack ? "err" : undefined} />
+                  </dl>
+                )}
+                {incidentText && (
                   <p className="mt-3 flex gap-2 rounded-lg border border-warn/30 bg-warn/10 px-2.5 py-2 text-[12.5px] text-fg">
                     <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warn" />
-                    {step.scenario.incidentText}
+                    {incidentText}
                   </p>
                 )}
                 {permanent && (
@@ -250,6 +270,23 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
                 )}
               </section>
 
+              {globalKnobs.length > 0 && (
+                <section className="space-y-4 rounded-2xl border border-line bg-surface p-4">
+                  <h3 className="font-mono text-[10.5px] tracking-wider text-subtle uppercase">Design choices</h3>
+                  {globalKnobs.map((k) => (
+                    <KnobSelect
+                      key={k.id}
+                      knob={k}
+                      value={knobChoices[k.id] ?? k.default}
+                      onChange={(v) => {
+                        store.getState().setConfigs({ custom: { [k.id]: v } });
+                        track("lab_knob_changed", { lab: lab.slug, knob: `custom_${k.id}`, value: v });
+                      }}
+                    />
+                  ))}
+                </section>
+              )}
+
               <section>
                 <h3 className="mb-2 font-mono text-[10.5px] tracking-wider text-subtle uppercase">To pass</h3>
                 <ul className="space-y-1.5">
@@ -257,6 +294,12 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
                     <li key={i} className="flex items-center gap-2 text-[13px] text-fg">
                       <span className="size-1.5 rounded-full bg-line-strong" />
                       {describe(c)}
+                    </li>
+                  ))}
+                  {(step.customCheckLabels ?? []).map((l) => (
+                    <li key={l} className="flex items-center gap-2 text-[13px] text-fg">
+                      <span className="size-1.5 rounded-full bg-line-strong" />
+                      {l}
                     </li>
                   ))}
                 </ul>

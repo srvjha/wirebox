@@ -41,9 +41,19 @@ export function wireProblem(a: Kind, b: Kind): string | null {
   if (ALLOWED_TARGETS[a].includes(b)) return null;
   const A = KIND_META[a].label;
   const B = KIND_META[b].label;
-  if (a === "cache" || a === "db") return `${A} only answers requests; it never sends them. Wire from an API server to it instead.`;
+  if (a === "cache" || a === "db" || a === "storage" || a === "external" || a === "search")
+    return `${A} only answers requests; it never sends them. Wire from an API server (or a worker) to it instead.`;
   if (a === "client" && (b === "db" || b === "cache"))
-    return `Users can't reach the ${b === "db" ? "database" : "cache"} directly: anyone could read or delete every link. Requests go through an API server.`;
+    return `Users can't reach the ${b === "db" ? "database" : "cache"} directly: anyone could read or delete everything. Requests go through an API server.`;
+  if (a === "client" && (b === "queue" || b === "worker" || b === "external" || b === "storage" || b === "search" || b === "pubsub"))
+    return `Users can't reach the ${B.toLowerCase()} directly. Their requests go to an API server (or a gateway), which calls it.`;
+  if (a === "server" && b === "worker")
+    return "Servers don't call workers directly. Put a queue between them: the request returns as soon as the job is saved, and workers pick it up at their own pace.";
+  if (a === "queue") return "A queue only hands work to workers.";
+  if (a === "worker" && (b === "server" || b === "lb" || b === "limiter"))
+    return "Workers pull jobs and call data stores or outside APIs. They don't send requests to servers.";
+  if (a === "pubsub" && b === "db") return "A broker passes messages between gateways and workers; it doesn't write to a database.";
+  if (a === "ws" && (b === "lb" || b === "limiter")) return "Wires point the way requests travel. The gateway sits behind those, not in front of them.";
   if ((a === "lb" || a === "limiter") && (b === "db" || b === "cache"))
     return `A ${A.toLowerCase()} only forwards HTTP requests to API servers. The server is what talks to the ${b === "db" ? "database" : "cache"}.`;
   if (a === "server" && b === "server") return "Servers don't hand requests to each other here. Put a load balancer in front of both.";
@@ -59,6 +69,8 @@ type Props = {
   lab: string;
   store: LabStore;
   palette: Kind[];
+  /** A second database becomes a read replica (steps that teach replication). */
+  replicas?: boolean;
   dbLabel: string;
   selected: string | null;
   onSelect: (id: string | null) => void;
@@ -76,7 +88,7 @@ export function DesignCanvas(props: Props) {
   );
 }
 
-function CanvasInner({ lab, store, palette, dbLabel, selected, onSelect, frame, locked, className }: Props) {
+function CanvasInner({ lab, store, palette, replicas = true, dbLabel, selected, onSelect, frame, locked, className }: Props) {
   const graph = useStore(store, (s) => s.graph);
   const { addNode, addEdge, removeEdges, removeNodes, moveNode } = store.getState();
   const flow = useReactFlow();
@@ -210,14 +222,14 @@ function CanvasInner({ lab, store, palette, dbLabel, selected, onSelect, frame, 
         kind,
         ...(at ?? placeNew(kind, nodes)),
         ...(kind === "server" ? { size: "s" as const } : {}),
-        ...(kind === "db" ? { role: hasPrimary && palette.includes("db") ? ("replica" as const) : ("primary" as const) } : {}),
+        ...(kind === "db" ? { role: hasPrimary && replicas ? ("replica" as const) : ("primary" as const) } : {}),
       };
       addNode(n);
       onSelect(n.id);
       track("lab_component_added", { lab, kind });
       if (!at) requestAnimationFrame(() => flow.fitView({ padding: 0.25, duration: 300, maxZoom: 1.1 }));
     },
-    [addNode, flow, lab, onSelect, palette, store],
+    [addNode, flow, lab, onSelect, replicas, store],
   );
 
   const onDrop = useCallback(

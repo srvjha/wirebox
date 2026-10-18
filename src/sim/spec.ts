@@ -7,7 +7,21 @@
  * gives less per extra core). Tune them here; every lab reads from this file.
  */
 
-export type Kind = "client" | "limiter" | "lb" | "server" | "cache" | "db";
+export type Kind =
+  | "client"
+  | "limiter"
+  | "lb"
+  | "server"
+  | "cache"
+  | "db"
+  | "cdn"
+  | "storage"
+  | "queue"
+  | "worker"
+  | "external"
+  | "ws"
+  | "pubsub"
+  | "search";
 
 export type ServerSize = "s" | "m" | "l" | "xl" | "2xl";
 
@@ -78,11 +92,89 @@ export const SPECS: Record<Kind, Spec> = {
     machine: "Postgres · 4 vCPU · 16 GB, hot data in RAM",
     note: "Indexed primary-key lookups. Writes cost ~4x a read (WAL, index updates, fsync).",
   },
+  cdn: {
+    label: "CDN",
+    short: "CDN",
+    cap: 1_000_000,
+    serviceMs: 5,
+    monthlyUsd: 150,
+    machine: "Edge cache in front of your origin",
+    note: "Answers cacheable requests from a server near the user, so they never reach your origin.",
+  },
+  storage: {
+    label: "Object storage",
+    short: "Storage",
+    cap: 50_000,
+    serviceMs: 25,
+    monthlyUsd: 90,
+    machine: "S3-style object store",
+    note: "Cheap, durable blobs (images, video, files). Slower than a database, but it scales almost without limit.",
+  },
+  queue: {
+    label: "Queue",
+    short: "Queue",
+    cap: 200_000,
+    serviceMs: 2,
+    monthlyUsd: 120,
+    machine: "Durable queue / log (SQS or Kafka style)",
+    note: "Accepts work instantly and hands it to workers at their own pace. Everything after a queue runs asynchronously.",
+  },
+  worker: {
+    label: "Worker",
+    short: "Worker",
+    cap: 500,
+    serviceMs: 16,
+    monthlyUsd: 60,
+    machine: "Background worker · 2 vCPU · 8 threads",
+    note: "Pulls jobs off a queue. Eight jobs at once; add more workers to drain faster.",
+  },
+  external: {
+    label: "Third-party API",
+    short: "3rd party",
+    cap: 2_000,
+    serviceMs: 300,
+    monthlyUsd: 0,
+    machine: "Someone else's API (SMS, email, payments, maps)",
+    note: "You can't scale it and you can't fix it. It has its own rate limit and its own bad days.",
+  },
+  ws: {
+    label: "WebSocket gateway",
+    short: "WebSocket",
+    cap: 100_000,
+    serviceMs: 1,
+    monthlyUsd: 90,
+    machine: "Gateway holding 50k open connections",
+    note: "Keeps a connection open per user and pushes messages down it. Each user is attached to exactly one gateway.",
+  },
+  pubsub: {
+    label: "Pub/sub broker",
+    short: "Pub/sub",
+    cap: 500_000,
+    serviceMs: 1,
+    monthlyUsd: 110,
+    machine: "Redis pub/sub or NATS",
+    note: "Lets one machine hand a message to every other machine that needs it.",
+  },
+  search: {
+    label: "Search index",
+    short: "Search",
+    cap: 6_000,
+    serviceMs: 12,
+    monthlyUsd: 300,
+    machine: "Elasticsearch / OpenSearch cluster",
+    note: "Inverted index for text queries and prefix lookups. Heavier than a key lookup.",
+  },
 };
+
 
 /** Writes per second one database node can take. */
 export const DB_WRITE_CAP = 8_000;
 export const DB_WRITE_MS = 2;
+/** Concurrent connections one WebSocket gateway can hold. */
+export const WS_CONN_CAP = 50_000;
+/** Jobs one worker node runs at once. */
+export const WORKER_THREADS = 8;
+export const MAX_SHARDS = 16;
 
 export type SizeSpec = { id: ServerSize; vcpu: number; ramGb: number; cap: number; monthlyUsd: number };
 
@@ -101,14 +193,18 @@ export function serverSize(id: ServerSize | undefined): SizeSpec {
 
 export const LARGEST_SERVER = SERVER_SIZES[SERVER_SIZES.length - 1];
 
-export type SimNodeLike = { kind: Kind; size?: ServerSize };
+export type SimNodeLike = { kind: Kind; size?: ServerSize; shards?: number };
+
+export const shardsOf = (n: SimNodeLike) => (n.kind === "db" ? Math.max(1, Math.min(MAX_SHARDS, Math.round(n.shards ?? 1))) : 1);
 
 export function nodeCap(n: SimNodeLike) {
-  return n.kind === "server" ? serverSize(n.size).cap : SPECS[n.kind].cap;
+  if (n.kind === "server") return serverSize(n.size).cap;
+  return SPECS[n.kind].cap * shardsOf(n);
 }
 
 export function nodeCost(n: SimNodeLike) {
-  return n.kind === "server" ? serverSize(n.size).monthlyUsd : SPECS[n.kind].monthlyUsd;
+  if (n.kind === "server") return serverSize(n.size).monthlyUsd;
+  return SPECS[n.kind].monthlyUsd * shardsOf(n);
 }
 
 export function nodeMachine(n: SimNodeLike) {
@@ -123,12 +219,20 @@ export function monthlyCost(nodes: SimNodeLike[]) {
 
 /** Which component may send requests to which. */
 export const ALLOWED_TARGETS: Record<Kind, Kind[]> = {
-  client: ["limiter", "lb", "server"],
-  limiter: ["lb", "server"],
-  lb: ["server"],
-  server: ["cache", "db"],
+  client: ["cdn", "limiter", "lb", "server", "ws"],
+  limiter: ["lb", "server", "ws"],
+  lb: ["server", "ws"],
+  server: ["cache", "db", "storage", "queue", "external", "search", "pubsub"],
   cache: [],
   db: [],
+  cdn: ["lb", "server", "storage"],
+  storage: [],
+  queue: ["worker"],
+  worker: ["db", "storage", "external", "cache", "search", "pubsub", "queue"],
+  external: [],
+  search: [],
+  ws: ["pubsub", "server", "cache", "db"],
+  pubsub: ["ws", "worker", "server"],
 };
 
 /** Utilisation above which queues build and tail latency climbs steeply. */
