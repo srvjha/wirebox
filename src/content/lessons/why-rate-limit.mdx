@@ -1,0 +1,100 @@
+At 10:00 the comedy special goes on sale. At 10:00:02 one scalper's script is requesting the booking page 20,000 times a second from a few hundred IP addresses, and requesting a login OTP for a fresh phone number on every attempt. Real fans see spinners. Gatepass's SMS bill for the morning is larger than the ticket revenue. Nothing is broken; the system is simply doing everything it's asked.
+
+## A server says yes to everyone
+
+Without limits, a server's capacity goes to whoever asks fastest. That's fine when everyone asks at human speed. It stops being fine the moment one client asks at machine speed, because that client gets most of the capacity, and the cost of serving it lands on you and on everyone else.
+
+A **rate limiter** sits in front of an endpoint and answers one question per request: has this client already used its share? If so, it rejects the request cheaply, before it touches the database, the payment provider or the SMS gateway.
+
+<Diagram w={640} h={200} caption="A rate limiter turns away excess requests at the door, before they cost anything.">
+  <Box x={10} y={20} w={120} label="Fans" sub="2 req/s each" icon="user" />
+  <Box x={10} y={120} w={120} label="Scalper bot" sub="20,000 req/s" icon="client" tone="err" />
+  <Box x={210} y={70} w={130} label="Rate limiter" sub="per user, per IP" icon="limiter" tone="accent" />
+  <Box x={420} y={70} w={110} label="Booking API" icon="server" />
+  <Box x={560} y={20} w={70} label="DB" icon="db" />
+  <Box x={560} y={120} w={70} label="SMS" icon="service" />
+  <Wire points={[[132, 46], [208, 88]]} tone="req" flow />
+  <Wire points={[[132, 146], [208, 106]]} tone="err" flow />
+  <Wire points={[[342, 96], [418, 96]]} tone="req" flow label="allowed" />
+  <Wire points={[[275, 124], [275, 176]]} tone="err" label="429" labelAt={[275, 166]} />
+  <Wire points={[[532, 88], [558, 50]]} tone="req" />
+  <Wire points={[[532, 106], [558, 140]]} tone="req" />
+</Diagram>
+
+## Four reasons to limit
+
+**1. Abuse.** Credential stuffing tries thousands of stolen passwords against the login endpoint. Scrapers copy your whole event catalogue. Scalper bots grab seats faster than any person can tap. A limit doesn't stop a determined attacker, but it raises their cost from one machine to thousands, which removes most of them.
+
+**2. Cost.** Some endpoints spend real money per call. Every OTP is an SMS that costs Gatepass about ₹0.20. A bot requesting 20,000 OTPs a second costs ₹4,000 a second. This kind of attack, often called SMS pumping, is common precisely because the victim pays. Limits on expensive endpoints are a budget control as much as a security one.
+
+**3. Fairness.** During an on-sale, ten thousand fans share one booking system. If one client can send a hundred times more requests than a person, they get a hundred times more chances at the best seats. A per-user limit keeps capacity spread across people instead of across scripts.
+
+**4. Protection from yourself.** The most frequent source of overload isn't an attacker; it's your own code. A mobile release with a bug that refreshes the seat map in a tight loop. A partner's integration that retries without backoff. An internal batch job that calls the API flat out. A limit turns those bugs from an outage into an error message for the client that caused them.
+
+<KeyIdea>A rate limit decides who gets your capacity when there isn't enough for everyone who's asking.</KeyIdea>
+
+## What a limit looks like
+
+A limit is a number of requests, per period, per **key**: “5 OTP requests per phone number per hour”, “10 booking attempts per user per minute”, “100 requests per second per API key”. Gatepass's starting set:
+
+<div className="overflow-x-auto">
+<table>
+  <thead>
+    <tr><th>Endpoint</th><th>Limit</th><th>Why</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>POST /otp</td><td>3 per phone per 10 min, 20 per IP per hour</td><td>Each one costs an SMS</td></tr>
+    <tr><td>POST /login</td><td>5 failures per account per 15 min</td><td>Password guessing</td></tr>
+    <tr><td>POST /bookings</td><td>10 per user per minute</td><td>Fairness during on-sales</td></tr>
+    <tr><td>GET /events/:id/seats</td><td>5 per second per user</td><td>Runaway clients</td></tr>
+    <tr><td>Partner API</td><td>100 per second per key</td><td>Contracted capacity</td></tr>
+  </tbody>
+</table>
+</div>
+
+Notice that the cheap read endpoints get generous limits, and the expensive or sensitive ones get tight limits. Limits are per endpoint because the cost per request is per endpoint.
+
+## Saying no, politely
+
+When a client is over its limit, reply with **`429 Too Many Requests`**, and tell it when to come back:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 20
+RateLimit-Limit: 10
+RateLimit-Remaining: 0
+RateLimit-Reset: 20
+```
+
+`Retry-After` lets well-behaved clients wait the right amount instead of hammering. The `RateLimit-*` headers let them slow down *before* they hit the wall. For a person in the app, translate it into words: “Too many attempts. Try again in 20 seconds.” Don't return a `500` or silently drop the request; a clear `429` is how good clients learn to behave.
+
+Rejecting must be **cheap**. A limiter that runs a database query to decide whether to reject has just moved the overload one step earlier. Limiters keep their counters in memory or in Redis, and run as early as possible: at the load balancer or API gateway, or as the first middleware in the app.
+
+## What limits don't do
+
+A rate limiter is one layer, not a defense on its own:
+
+- **It doesn't stop distributed attacks.** A botnet with 100,000 IP addresses sends one request each. Per-IP limits never trigger. You also need bot detection, CAPTCHAs on sensitive flows, and network-level DDoS protection from your CDN.
+- **It doesn't add capacity.** If 50,000 real fans each send one booking request a second, every limit is satisfied and the system is still overloaded. That's a job for queues (a virtual waiting room) and **load shedding**, which rejects work based on the server's own health rather than the client's behaviour.
+- **It can hurt real users.** Set the login limit too low and a family sharing a phone gets locked out. Limits need monitoring: how many `429`s, for whom, and on which endpoint.
+
+<Quiz
+  id="why-limit-cost"
+  question="Which Gatepass endpoint most needs a tight limit, even though it gets the least traffic?"
+  options={[
+    "GET /events (the event list)",
+    "GET /events/:id/seats (the seat map)",
+    "POST /otp (send a login code by SMS)",
+    "GET /health (the health check)",
+  ]}
+  answer={2}
+  explain={<>Each OTP request costs money and can be abused to send SMS to numbers the attacker profits from. Cheap, cacheable reads can take generous limits; endpoints with a per-call cost or security impact need tight ones.</>}
+/>
+
+## Key takeaways
+
+- Without limits, capacity goes to whoever asks fastest, and their costs land on you and everyone else.
+- Limit for four reasons: abuse, cost, fairness, and protection from your own buggy clients.
+- A limit is requests per period per key, set per endpoint according to what each request costs.
+- Reject with `429` and `Retry-After`, and make the rejection cheap: in memory or Redis, as early as possible.
+- Rate limits complement, not replace, bot detection, DDoS protection, waiting rooms and load shedding.
