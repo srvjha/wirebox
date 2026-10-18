@@ -1,0 +1,100 @@
+Most weak designs aren't weak because the designer lacked knowledge. They fail the same few ways, over and over. Learn the patterns here and you will start spotting them in your own diagrams, usually just after you've drawn them.
+
+## 1. Designing without numbers
+
+The most common mistake: no estimate at all, then confident architecture. "We'll use Kafka, a cache cluster and twelve shards" for a product with 400 requests a minute.
+
+Gatepass in year one served 3 requests a second on average. A single PostgreSQL instance with a CDN in front of it would have been fine for years. The team that built three services and a stream pipeline spent six months on plumbing and shipped half as many features.
+
+**The fix:** write down users, requests a second at peak, data size per year and read:write ratio before choosing any technology. If you can't justify a component with a number, remove it.
+
+## 2. Over-engineering
+
+A sibling of the first. Symptoms: microservices for a team of four, a message queue where a function call would do, sharding a 20 GB table, "so we can scale later".
+
+Each extra component has a cost: another thing to deploy, monitor, secure, and wake up for at 3 a.m. Complexity must be earned by a measured problem.
+
+**The fix:** start with the simplest design that meets today's requirements and *one order of magnitude* more. Write down which signal would make you add the next piece ("when p99 booking latency exceeds 500 ms for a week, add a read replica"). Evolve with evidence.
+
+<Diagram w={640} h={180} caption="Left: the design the numbers justify. Right: the design drawn to feel impressive. Both serve 3 requests a second.">
+  <Group x={10} y={14} w={290} h={150} label="enough" tone="ok" />
+  <Box x={26} y={60} w={80} h={48} label="Client" icon="client" />
+  <Box x={122} y={60} w={80} h={48} label="App" icon="server" />
+  <Box x={216} y={60} w={68} h={48} label="Postgres" icon="db" />
+  <Wire points={[[108, 84], [120, 84]]} tone="req" />
+  <Wire points={[[204, 84], [214, 84]]} tone="req" />
+  <Group x={330} y={14} w={300} h={150} label="too much" tone="err" />
+  <Box x={342} y={30} w={64} h={36} label="API GW" dim />
+  <Box x={416} y={30} w={64} h={36} label="Auth svc" dim />
+  <Box x={490} y={30} w={64} h={36} label="Kafka" dim />
+  <Box x={564} y={30} w={56} h={36} label="Redis" dim />
+  <Box x={342} y={80} w={64} h={36} label="Seat svc" dim />
+  <Box x={416} y={80} w={64} h={36} label="Pay svc" dim />
+  <Box x={490} y={80} w={64} h={36} label="Shard 1" dim />
+  <Box x={564} y={80} w={56} h={36} label="Shard 2" dim />
+</Diagram>
+
+## 3. Ignoring the real bottleneck
+
+Designs often add capacity everywhere except where the limit is. Ten API servers behind a load balancer all write to one database row, the last seat of a popular show. The servers are idle; the row lock is the bottleneck.
+
+**The fix:** for each major flow, ask "what is the scarce resource?" It may be a database write, a lock on a hot row, a third-party API's rate limit, or a single queue. Estimate that resource's capacity and design around it. In the ticket example the answer is a short queue or waiting room per event, not more servers.
+
+## 4. Treating every request the same
+
+A design that gives browse, search, login, payment and report generation the same infrastructure will be wrong for most of them. Browsing is read-heavy and cacheable. Payments are low-volume and need transactions. Reports are slow and belong in the background.
+
+**The fix:** sort flows by read/write ratio, latency need, and consistency need. Cache and CDN the reads; keep the transactional path small and boring; push slow work to queues.
+
+## 5. Forgetting failure
+
+The diagram works when everything is up. What happens when the payment provider times out? When a worker crashes after charging the card? When the cache restarts empty and every request hits the database at once?
+
+**The fix:** for every arrow, ask what happens if the callee is slow, down, or answers twice. Name the answer: timeout plus retry with backoff and jitter, idempotency keys, a dead-letter queue, a circuit breaker, a degraded mode ("show cached events, disable booking"). Single points of failure get replicated or explicitly accepted.
+
+## 6. Mixing up consistency needs
+
+Two opposite errors. Using strong consistency everywhere makes the system slow and fragile; showing a stale seat count on the event page is fine. Using eventual consistency for the money path loses or double-sells tickets.
+
+**The fix:** decide per piece of data. Seat inventory and payments: strong. View counts, recommendations, search results: eventual is fine. Say which in the design, so nobody has to guess.
+
+## 7. Picking technology by name
+
+"We'll use MongoDB because it scales", "Let's use Kafka" without saying why. Tools are answers to specific constraints. An interviewer, or a teammate reviewing your document, wants the reasoning: access pattern, consistency, scale, team familiarity, operating cost.
+
+**The fix:** complete the sentence "I chose X because the requirement is Y, and the cost is Z." If you can't say Z, you haven't understood X.
+
+## 8. No plan to observe or change it
+
+A design with no monitoring is a guess about how it behaves. A design with no migration path for its biggest decision (the shard key, the schema, the queue contract) is a trap.
+
+**The fix:** name the three or four metrics that would tell you the design is failing: latency percentiles, error rate, queue depth and age, cache hit rate, replica lag. Note how you'd change course if growth outpaced your assumptions.
+
+## 9. Communication mistakes
+
+In interviews and reviews, the design is only as good as it can be explained.
+
+- Jumping to the solution before confirming the problem.
+- Silent thinking for minutes. Say what you're considering.
+- Defending a choice instead of weighing it. "It depends" is correct, if followed by what it depends on.
+- Going deep on the easy parts and rushing the hard ones.
+- Treating the first idea as final, rather than checking it against the numbers.
+
+Use the framework from the previous lesson as your guardrail: if you skipped a step, go back to it.
+
+<Quiz
+  id="mistake-spot"
+  question="A teammate proposes sharding the 15 GB users table by country 'to be ready for growth'. Which mistake is this MOST clearly?"
+  options={["Forgetting failure modes", "Over-engineering without a measured need", "Ignoring caches", "Using strong consistency everywhere"]}
+  answer={1}
+  explain={<>15 GB fits easily on one machine. Sharding adds routing, cross-shard queries and a lumpy key (country), for a problem that <strong>no number shows exists</strong>. Add it when evidence demands it.</>}
+/>
+
+## Key takeaways
+
+- Put numbers first: users, peak requests a second, data size, read:write ratio. Every component should trace to one.
+- Start simple and grow with evidence. Complexity must earn its place.
+- Find the scarce resource in each flow (a hot row, a rate limit, a queue) and design around it.
+- Treat different flows differently; decide consistency per piece of data.
+- For every arrow, ask what happens when it fails, is slow, or answers twice.
+- Justify each technology as "because Y, at the cost of Z", and name the metrics that would tell you it's failing.
