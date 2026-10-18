@@ -1,0 +1,111 @@
+import { LeaseFencingTimeline } from "@/components/visuals/lease-fencing-timeline"
+
+The comedy show had five seats left. Booking ran on twelve servers, and each one checked "is this seat free?" and then wrote "sold". Eight fans got confirmation emails. Every server followed the rules; the rules just assumed nobody else was checking at the same moment. The fix sounds simple: take a lock. Across machines, a lock is much stranger than it looks.
+
+## Why a local lock isn't enough
+
+Inside one process, you'd wrap "check the seat, then sell it" in a mutex, and only one thread at a time could run it. That works because every thread shares the same memory and the same mutex.
+
+Twelve booking servers share nothing. A mutex on server 3 means nothing to server 7. The check and the write are also two separate steps against the database, and between them, any other server can run the same check and see the same free seat. This is a **race condition**, and adding servers makes it more likely, not less.
+
+A **distributed lock** is a lock held in a shared service that every server talks to: Redis, etcd, ZooKeeper, or the database itself. Before touching seat C14, a server asks for the lock named `seat:sh_88:C14`. Only one server gets it. The rest wait or give up.
+
+## Locks need leases
+
+Here's the first twist. What if the server holding the lock crashes? In one process, a crashed thread takes its mutex down with it. In a distributed system, the lock service has no idea the holder is gone. If the lock were held forever, seat C14 would be locked forever.
+
+So distributed locks are **leases**: the lock is granted for a fixed time, say 10 seconds, and expires automatically unless the holder renews it. In Redis, the classic version is one command:
+
+```
+SET lock:seat:sh_88:C14 worker-a NX PX 10000
+```
+
+`NX` means "only if nobody holds it", and `PX 10000` means "expire after 10,000 ms". If worker A crashes, the seat unlocks itself 10 seconds later. When A is done, it deletes the key, but only if the value is still its own name, so it never releases someone else's lock.
+
+Leases solve crashed holders. They create a new problem: a holder that isn't crashed, just **slow**.
+
+## The paused holder
+
+A process can stop running for a while without knowing it. A long garbage-collection pause can freeze it for seconds. The VM can be paused for migration. The machine can swap memory to disk under pressure. A network packet can sit in a queue. When the process resumes, from its point of view no time has passed. It carries on from the next line of code, believing it still holds the lock.
+
+Meanwhile, the lease expired, and the lock service, doing exactly what it should, gave the lock to someone else.
+
+<LeaseFencingTimeline />
+
+Start with a 10-second lease and a 15-second pause, fencing off. Worker A takes the lock and reads that C14 is free. Then it freezes. At 10 s its lease expires and B gets the lock, sees C14 free and sells it. At 17.5 s, A wakes up and writes "C14 → fan A", overwriting B's sale. Two fans paid for one seat.
+
+Making the lease longer only moves the problem: whatever lease you pick, some pause will be longer. Checking "do I still hold the lock?" just before writing doesn't fix it either, because the pause can happen between the check and the write.
+
+<KeyIdea>A lease can expire while its holder is frozen. The holder can never be sure it still holds the lock, so the lock alone can't protect the data.</KeyIdea>
+
+## Fencing tokens
+
+The fix moves the final check to the place that actually stores the data. Every time the lock service grants the lock, it also hands out a **fencing token**: a number that goes up by one with every grant. A got token 33; B, after A's lease expired, got token 34.
+
+Every write to the seats database must carry the token. The database remembers the highest token it has seen for that seat and rejects any write with a lower one:
+
+```sql
+UPDATE seats
+SET    holder = 'fan_a', fence = 33
+WHERE  show_id = 'sh_88' AND seat = 'C14' AND fence < 33;
+-- 0 rows updated: someone with a newer token already wrote
+```
+
+Turn fencing on in the visual and run the same scenario. A's late write arrives with 33 after the database has seen 34, updates zero rows, and A reports failure instead of a double sale.
+
+<Diagram w={640} h={220} caption="The lock service hands out increasing tokens. The database, not the worker, has the final say: older tokens are refused.">
+  <Box x={250} y={20} w={140} h={50} label="Lock service" sub="next token: 35" icon="limiter" tone="info" />
+  <Box x={40} y={150} w={130} h={50} label="Worker A" sub="token 33 (stale)" icon="worker" tone="warn" />
+  <Box x={470} y={150} w={130} h={50} label="Worker B" sub="token 34" icon="worker" />
+  <Box x={255} y={150} w={130} h={50} label="Seats DB" sub="max fence: 34" icon="db" tone="accent" />
+  <Wire points={[[280, 70], [130, 150]]} tone="info" dashed label="33" labelAt={[205, 110]} />
+  <Wire points={[[360, 70], [510, 150]]} tone="info" dashed label="34" labelAt={[435, 110]} />
+  <Wire points={[[470, 175], [385, 175]]} tone="ok" label="write 34 ✓" labelAt={[428, 195]} />
+  <Wire points={[[170, 175], [255, 175]]} tone="err" label="write 33 ✗" labelAt={[212, 195]} />
+</Diagram>
+
+Fencing has a catch: **the storage must cooperate**. It has to understand tokens and compare them atomically with the write. A database with conditional updates can. An email provider or a payment gateway can't, so you can't fence "send the ticket email". For those, you need idempotency keys instead, from the last lesson.
+
+## Which lock service?
+
+Locks are used for two very different reasons, and the right tool depends on which:
+
+- **Efficiency.** The lock stops two workers from doing the same work twice, like both regenerating a cached seat map. If the lock occasionally fails, you waste some CPU. A single Redis instance with `SET NX PX` is fine.
+- **Correctness.** The lock stops data from being corrupted, like a seat sold twice. If the lock fails, a customer is harmed. Here you want a lock service built on consensus, like etcd or ZooKeeper, which stays correct when nodes fail and gives you a natural fencing token (etcd's revision number, ZooKeeper's zxid). And you still fence the writes.
+
+A single Redis node can lose a lock if it crashes before persisting it, or fails over to a replica that never heard of it. Schemes that take locks on several Redis nodes at once reduce that risk, but they still rely on timing assumptions, so they still need fencing for correctness.
+
+## Often, don't lock at all
+
+Here's the part teams skip. For Gatepass's seat problem, the database already has everything needed, without a separate lock service:
+
+```sql
+UPDATE seats
+SET    holder = 'fan_b', held_until = now() + interval '10 minutes'
+WHERE  show_id = 'sh_88' AND seat = 'C14' AND holder IS NULL;
+```
+
+This is a **conditional write**: the check and the write happen in one atomic statement on the one machine that owns the row. If it updates one row, the fan has the seat. If it updates zero, someone else got there first. No lease, no pause problem, no extra service. A unique constraint on `(show_id, seat)` in a `tickets` table does the same job for the final sale.
+
+Reach for a distributed lock when the thing you're protecting **isn't** a single row in a database you control: coordinating a job across services, or guarding a resource with no atomic operations of its own. When it is a row, let the database decide.
+
+<Quiz
+  id="fencing"
+  question="Worker A holds a lock with a 30-second lease and token 41. It's paused for 45 seconds, during which worker B gets the lock with token 42 and writes. What should happen when A's write arrives?"
+  options={[
+    "It succeeds, because A's lease was valid when it started the operation",
+    "It succeeds, but A should renew its lease first",
+    "The storage rejects it, because it has already seen token 42",
+    "The lock service blocks it, because A's lease expired",
+  ]}
+  answer={2}
+  explain={<>The lock service isn't on the write path, so it can't stop A. A's lease is irrelevant once B has the lock, and A can't renew a lease it has already lost. Only the storage can enforce order, by refusing any write with a token lower than the highest it has seen.</>}
+/>
+
+## Key takeaways
+
+- A local mutex doesn't protect anything across servers. A distributed lock lives in a shared service.
+- Distributed locks are leases, so a crashed holder can't block forever. But a paused holder can wake up after its lease expired and still believe it holds the lock.
+- Fencing tokens fix this: the lock hands out increasing numbers, and the storage rejects writes with old ones. The storage must cooperate.
+- For correctness, use a consensus-based lock service and fence your writes. Simple Redis locks are fine for efficiency.
+- Often the best lock is none: a conditional update or unique constraint lets the database decide atomically.
