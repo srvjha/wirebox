@@ -1,0 +1,110 @@
+import { LsmTreeSim } from "@/components/visuals/lsm-tree-sim"
+
+At a college fest, Gatepass scanners at twelve gates log every ticket scan: 30,000 people in two hours, with bursts of 50 writes a second at each gate when the doors open. Nobody reads those rows until later. A database built for this shape of work does something that sounds wrong at first: it never updates anything in place.
+
+That design is the **log-structured merge tree**, or LSM tree. It sits inside Cassandra, RocksDB, LevelDB, ScyllaDB, HBase and Google's Bigtable. In this lesson you will push writes through one, watch it compact, and make it stall.
+
+## Why random writes are slow
+
+A B-tree, the index in most SQL databases, keeps data sorted *on disk*. Inserting a row means finding the right page, reading it, changing it and writing it back. Thousands of inserts with unrelated keys touch thousands of scattered pages, and each one is a small random write.
+
+Disks and SSDs are much better at big sequential writes than small random ones. On a spinning disk the gap is around 100×. On an SSD it is smaller but still real, and random rewrites also wear the flash out faster.
+
+The LSM idea: **accept writes in memory, and only ever write to disk in large, sorted, sequential chunks.** Sorting happens in RAM, where it is cheap.
+
+## The write path
+
+<Diagram w={690} h={250} caption="Writes go to a log and a sorted in-memory table. Full memtables become immutable files, and compaction merges files down the levels in the background.">
+  <Box x={10} y={40} w={128} label="Gate scan" sub="PUT t07 = v9" icon="phone" tone="req" />
+  <Box x={190} y={40} w={136} label="Memtable" sub="RAM, sorted" icon="cache" tone="accent" />
+  <Box x={190} y={160} w={136} label="Write-ahead log" sub="append only" icon="storage" />
+  <Wire points={[[138, 66], [190, 66]]} tone="req" flow />
+  <Wire points={[[160, 66], [160, 186], [190, 186]]} tone="req" />
+  <Group x={370} y={24} w={310} h={206} label="disk · immutable SSTables" />
+  <Box x={390} y={40} w={130} label="L0" sub="flushed, overlap" icon="db" />
+  <Box x={390} y={160} w={130} label="L1" sub="one sorted run" icon="db" />
+  <Box x={545} y={160} w={124} label="L2" sub="largest, oldest" icon="db" />
+  <Wire points={[[326, 66], [390, 66]]} label="flush" labelAt={[358, 52]} />
+  <Wire points={[[455, 92], [455, 160]]} label="compact" labelAt={[455, 126]} />
+  <Wire points={[[520, 186], [545, 186]]} />
+  <Text x={605} y={120} size={11} tone="muted">merge sort,</Text>
+  <Text x={605} y={134} size={11} tone="muted">drop old versions</Text>
+</Diagram>
+
+1. **Log it.** The write is appended to a write-ahead log on disk, so it survives a crash. Appending is sequential and fast.
+2. **Put it in the memtable.** An in-memory sorted structure (often a skip list). The write is now done, and the client gets its acknowledgment.
+3. **Flush.** When the memtable reaches a size limit (64 MB is a common default), it is written out as one sorted, immutable file: an **SSTable** (sorted string table). One big sequential write. The log for those entries can then be deleted.
+4. **Compact.** Over time there are many SSTables, often holding several versions of the same key. A background job merge-sorts them into fewer, larger files, keeping only the newest version of each key.
+
+Updates and deletes are just more writes. A delete writes a **tombstone**, a marker that says "this key is gone". The old value stays on disk until compaction merges the tombstone past it.
+
+## Run it
+
+Each key is a ticket ID and each write is a new version. The simulation implements the real rules: a sorted memtable, immutable tables with their own Bloom filter, newest-wins merging, and tombstones that are only dropped at the bottom level.
+
+<LsmTreeSim />
+
+Try these in order:
+
+- **Write ×10 a few times.** Watch the memtable fill and flush, L0 build up, and compaction fold it into L1 and L2. Note how **write amplification** climbs above 1×: each entry you wrote gets rewritten every time it is compacted.
+- **Read a few keys.** A read checks the memtable, then every L0 table from newest to oldest, then L1 and L2. It stops at the first version it finds, because newer always wins. Most tables are skipped by their Bloom filter without touching disk.
+- **Delete a key, then read it.** The read finds the tombstone and stops, even if an older value sits in a lower level.
+- **Turn auto-compaction off and keep writing.** L0 grows, reads have to consult more and more tables, and at 8 tables the database stops taking writes. RocksDB does exactly this, and calls it a *write stall*.
+
+## Reads pay for cheap writes
+
+The tradeoff is on the read side. A key could be in any SSTable, so a read may have to look in many places. Three things keep that affordable:
+
+- **Bloom filters** on each SSTable answer "definitely not here" from memory, so a read touches disk only for tables that probably have the key. This is the main reason the previous lesson exists.
+- **Sorted files with a sparse index.** Inside one SSTable, a small index of every few-kilobytes' first key lets the database jump straight to the right block.
+- **Compaction** keeps the number of tables small. Fewer tables, fewer places to look.
+
+Engineers describe the costs with three amplification numbers:
+
+- **Write amplification:** bytes written to disk ÷ bytes the app wrote. Compaction rewrites data many times, so 10–30× is normal for leveled compaction.
+- **Read amplification:** how many places one read has to check.
+- **Space amplification:** disk used ÷ live data. Old versions and tombstones waiting for compaction take room.
+
+You cannot minimise all three. **Leveled compaction** (the default in RocksDB and LevelDB) keeps few overlapping files, so reads and space are good but writes are amplified. **Size-tiered compaction** (Cassandra's long-time default) merges similar-sized files less often: cheaper writes, but more files to read and up to twice the disk space during a big merge.
+
+<KeyIdea>An LSM tree turns random writes into sequential ones by buffering in memory, then pays the bill later in compaction and on reads.</KeyIdea>
+
+<Quiz
+  id="lsm-tombstone"
+  question="A Gatepass ticket is deleted. Right after the delete, why does the disk usage not go down?"
+  options={[
+    "The delete is only in the write-ahead log, which is never compacted",
+    "A delete writes a tombstone; the old value stays until compaction merges past it",
+    "SSTables are mutable but the database delays the update",
+    "Bloom filters still remember the key, so it cannot be removed",
+  ]}
+  answer={1}
+  explain={<>SSTables are immutable, so a delete is a new write: a tombstone. The real space comes back only when compaction merges the tombstone with the older versions and drops them all. Heavy deletes can make reads slower for a while, since reads have to step over tombstones too.</>}
+/>
+
+## When to choose one
+
+LSM-based stores shine when writes dominate: event logs, metrics, messages, IoT readings, gate scans, activity feeds. Cassandra and ScyllaDB are built on them for exactly that reason, and RocksDB is the storage engine inside many other systems, including Kafka Streams' local state and CockroachDB (through its RocksDB-inspired Pebble).
+
+They are a weaker fit for read-heavy workloads with many point lookups and range scans over frequently updated rows, where a B-tree reads a key in one predictable path. That is the next lesson.
+
+Watch for two failure modes in production:
+
+- **Compaction falling behind.** Sustained write bursts outrun background merging. Reads slow down, disk fills with stale versions, and eventually writes stall. Leave headroom in disk I/O for compaction, not just for your traffic.
+- **Tombstone build-up.** A queue-like table where rows are inserted and soon deleted can leave reads wading through thousands of tombstones. Cassandra warns about this and will even fail a query that scans too many.
+
+<Quiz
+  id="lsm-read"
+  question="A read for a key that exists only in L2 checks 5 L0 tables first. Bloom filters are working. Roughly how many disk reads does it do?"
+  options={["0", "About 1", "6", "It depends on the memtable size"]}
+  answer={1}
+  explain={<>The five L0 filters (and L1's) almost always answer “definitely not”, so the read goes straight to L2. Only an occasional false positive adds an extra disk read. Without the filters it would be 6 or 7.</>}
+/>
+
+## Key takeaways
+
+- LSM trees buffer writes in a sorted memtable (backed by an append-only log) and flush them as immutable, sorted SSTables.
+- Updates and deletes are just new writes. The newest version wins, and deletes are tombstones until compaction removes them.
+- Compaction merges files in the background, trading write amplification for fewer files to read and less wasted space.
+- Reads may check many files, so every SSTable carries a Bloom filter and a sparse index.
+- Choose an LSM store for write-heavy workloads, and budget disk I/O for compaction or it will stall you at the worst moment.
