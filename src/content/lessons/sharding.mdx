@@ -1,0 +1,99 @@
+import { ShardKeyPicker } from "@/components/visuals/shard-key-picker"
+
+Gatepass has archived, indexed, cached and partitioned. The primary database is still a single machine, and during on-sales its CPU sits at 95% on writes alone. You can buy a bigger machine, up to a point. Past that point the only way left is to split the data across several databases. That is sharding, and it is the most expensive decision in this module.
+
+## Before sharding: try everything cheaper
+
+Sharding is a last resort because it permanently changes how your application works. Before you reach for it, check that you have:
+
+- Fixed slow queries and missing indexes. Most "we need to scale" problems are one bad query.
+- Added **read replicas** for read-heavy traffic and cached hot reads.
+- Moved background work to queues and archived cold data.
+- **Scaled up.** A machine with 64 cores and 512 GB of RAM handles a surprising amount of load, for a single line item on a cloud bill.
+
+Shard when you can show that a single primary cannot keep up with **writes** or **total data size** even after all that. If your pain is reads, replicas are far simpler.
+
+## What sharding is
+
+**Sharding** splits one dataset into several independent databases, called **shards**. Each shard holds a subset of the rows and runs on its own server. Unlike partitioning, which keeps pieces on one machine, sharding adds machines, so write capacity and storage grow with the number of shards.
+
+The rule that decides which shard owns a row is based on a **shard key**. A **router**, in the application or in a proxy, applies the rule: given `user_id = 48210`, ask shard 3.
+
+<Diagram w={640} h={250} caption="Every request carries the shard key. The router maps it to exactly one shard.">
+  <Box x={20} y={100} w={110} label="API" sub="booking for user 48210" icon="server" tone="req" />
+  <Box x={190} y={100} w={120} label="Router" sub="hash(user_id) % 4" icon="lb" tone="accent" />
+  <Box x={420} y={14} w={130} h={44} label="Shard 1" sub="users 0" icon="db" dim />
+  <Box x={420} y={74} w={130} h={44} label="Shard 2" sub="users 1" icon="db" dim />
+  <Box x={420} y={134} w={130} h={44} label="Shard 3" sub="users 2" icon="db" tone="accent" />
+  <Box x={420} y={194} w={130} h={44} label="Shard 4" sub="users 3" icon="db" dim />
+  <Wire points={[[132, 126], [188, 126]]} tone="req" flow />
+  <Wire points={[[312, 126], [370, 126], [370, 156], [418, 156]]} tone="req" flow />
+  <Wire points={[[312, 120], [370, 120], [370, 36], [418, 36]]} tone="muted" dashed />
+  <Wire points={[[312, 124], [350, 124], [350, 96], [418, 96]]} tone="muted" dashed />
+  <Wire points={[[312, 130], [350, 130], [350, 216], [418, 216]]} tone="muted" dashed />
+</Diagram>
+
+## The shard key is the whole game
+
+Once rows are placed by a key, that choice is very hard to undo. A good key does three things:
+
+1. **Spreads load evenly.** No shard should take much more traffic or data than the others.
+2. **Keeps related data together**, so the common request touches one shard.
+3. **Doesn't change** for a row, since changing it means moving the row to another database.
+
+Gatepass has three plausible keys. Try each and watch two things: which shard is busiest, and how many shards each common query has to ask.
+
+<ShardKeyPicker />
+
+What the experiment shows:
+
+- **`hash(user_id)`** spreads fans evenly, so no shard runs hot, and "my tickets" hits one shard. But showing the seat map for one event means asking every shard, because that event's bookings are scattered across all of them.
+- **City** keeps a city's events together, which reads nicely. But Mumbai dwarfs everyone else: that shard takes close to 40% of the traffic. Cities are lumpy, and the lumpiest day is the day it hurts.
+- **`hash(event_id)`** makes the seat map a one-shard read, and it places transactions for one event together, which is useful for avoiding double-booking. The price is the viral on-sale: one fest night sends a third of all traffic to a single shard, and no amount of other shards helps.
+
+There's no perfect key. You pick the one whose weakness you can live with, usually the dominant access pattern. Many ticketing systems shard bookings by event, then put a **queue and a waiting room** in front of the hottest events, since that single event's inventory is a single contention point anyway.
+
+## Hot shards and skew
+
+**Skew** means load or data piles up on one shard. Typical causes:
+
+- **A celebrity key.** One event, one user, one city that dwarfs the rest.
+- **Monotonic keys.** Sharding by *range* of an incrementing id or timestamp sends every new write to the latest shard, leaving the others idle.
+- **Too few distinct values.** Sharding by country with five shards and one country holding 60% of users.
+
+Hashing the key, rather than using ranges, fixes the monotonic case. Celebrity keys need special handling: split one hot event across several sub-keys (`event_id + seat_block`), or give it a dedicated shard.
+
+## What you lose
+
+Sharding is the point where the database stops doing things for you.
+
+- **Cross-shard queries.** "All bookings in the last hour" must go to every shard and be merged. This is called scatter-gather: slow, and as bad as the slowest shard.
+- **Cross-shard transactions.** A booking that moves money between a fan on shard 1 and an organiser on shard 4 can't use a plain database transaction. You need two-phase commit, which is slow and fragile, or a saga with compensating steps. Better: design so that one transaction stays on one shard.
+- **Joins and unique constraints** across shards no longer work as usual. A globally unique username needs a separate lookup service.
+- **IDs.** Auto-increment no longer gives unique ids. Use UUIDs, or time-ordered ids such as Snowflake-style 64-bit ids.
+- **Operations.** Four databases mean four backups, four migrations and four things to monitor.
+
+## Resharding: planning for growth
+
+Four shards will fill up. With `hash(key) % 4`, going to five shards remaps about 80% of the rows, a huge data move during which the system stays live. Avoid it by choosing a scheme that makes growth cheap:
+
+- **Many small logical shards.** Create 256 logical shards from day one and place them on 4 physical servers. Adding a server moves a few logical shards, not individual rows.
+- **Consistent hashing** or a **directory service** that maps key ranges to shards and can be updated one range at a time.
+
+Whichever you pick, build the routing as an isolated layer from the start. Retrofitting it into a codebase where every query assumes one database is a multi-quarter project.
+
+<Quiz
+  id="shard-key-bookings"
+  question="Gatepass shards bookings by city and Mumbai's shard is constantly overloaded. What is the most direct problem with the key?"
+  options={["Cities change over time", "Skew: the key has a few very large values, so the load is uneven", "Hashing is too slow", "There are too many shards"]}
+  answer={1}
+  explain={<>City has a few huge values (Mumbai) and many small ones, so one shard collects far more than its share. A <strong>higher-cardinality, evenly distributed key</strong> such as a hashed id spreads the load.</>}
+/>
+
+## Key takeaways
+
+- Shard only when writes or data size exceed what one well-tuned, scaled-up primary can handle. Replicas and caches solve read problems more cheaply.
+- Sharding spreads rows over independent databases by a shard key applied by a router.
+- A good key spreads load evenly, keeps data used together in one shard and never changes.
+- Expect skew, cross-shard queries, hard distributed transactions and awkward ids. Design so common requests touch one shard.
+- Plan resharding on day one with many logical shards or a directory, rather than `hash % N`.
