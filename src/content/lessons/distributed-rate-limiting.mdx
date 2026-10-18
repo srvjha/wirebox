@@ -1,0 +1,97 @@
+import { DistributedLimiter } from "@/components/visuals/distributed-limiter"
+
+Gatepass ships a token bucket for bookings: 10 per user per second, counted in each server's memory. In testing, on one server, it works perfectly. In production there are eight servers behind the load balancer, and the scalper's script gets 80 requests a second through without a single `429`. Every server is enforcing the limit correctly. None of them can see the other seven.
+
+## Eight servers, eight limits
+
+A limit is a statement about a **user**, but an in-memory counter is a statement about a **server**. With round-robin load balancing, one user's requests are spread across every server, so each server sees only a slice, and each slice stays under the limit. The real limit becomes the per-server limit times the number of servers, and it grows every time autoscaling adds a machine.
+
+The obvious patch, giving each server `limit ÷ N`, fails the other way. Load balancers don't spread one user's requests evenly; over a short burst, one server might get five of a user's requests and another none. The user gets refused while well under the real limit, and the error depends on luck.
+
+To enforce a limit per user, every server must see the **same counter**.
+
+## A shared counter in Redis
+
+The standard answer is Redis: in memory, sub-millisecond, and it has atomic operations. Every API server talks to the same Redis, and the counter for user 81 lives in one place.
+
+<Diagram w={640} h={220} caption="Every server checks and updates the same counter, so the limit holds however requests are spread.">
+  <Box x={10} y={84} w={110} label="Scalper" sub="10+ req/s" icon="client" tone="err" />
+  <Box x={160} y={84} w={110} label="Load balancer" icon="lb" />
+  <Box x={320} y={14} w={120} label="Server 1" icon="server" />
+  <Box x={320} y={84} w={120} label="Server 2" icon="server" />
+  <Box x={320} y={154} w={120} label="Server 3" icon="server" />
+  <Box x={500} y={84} w={130} label="Redis" sub="user81 → 7" icon="cache" tone="info" />
+  <Wire points={[[122, 110], [158, 110]]} tone="req" />
+  <Wire points={[[272, 100], [318, 40]]} tone="req" />
+  <Wire points={[[272, 110], [318, 110]]} tone="req" />
+  <Wire points={[[272, 120], [318, 180]]} tone="req" />
+  <Wire points={[[442, 40], [498, 98]]} tone="info" label="INCR" labelAt={[470, 62]} />
+  <Wire points={[[442, 110], [498, 110]]} tone="info" />
+  <Wire points={[[442, 180], [498, 122]]} tone="info" />
+</Diagram>
+
+## The race: read, decide, write
+
+The first version most people write is three steps:
+
+```
+count = GET rl:user81
+if count < 10: SET rl:user81 count + 1; allow
+else: reject
+```
+
+Run that from eight servers at once. Server 1 reads 7. Before its `SET` lands, server 2 also reads 7. Both allow, both write 8. Two requests were allowed and the counter went up by one. Under a burst, dozens of requests can read the same value in the same millisecond, and the limiter lets through two or three times the limit. The slower your network round trip to Redis, the wider the window for the race.
+
+The fix is to make the check and the update **one atomic operation** inside Redis, so no other request can run between them:
+
+- **Fixed window:** `INCR rl:user81:<window>` returns the new count after adding one. If it's over 10, reject. Set an expiry the first time (`EXPIRE` when the result is 1, or `SET … NX EX` to create it) so old windows clean themselves up.
+- **Token bucket or sliding window:** the logic needs several reads and writes, so run it as a **Lua script** (or a Redis function). Redis runs each script to completion before anything else, so the whole read-decide-write sequence is atomic. One round trip, no race.
+
+<KeyIdea>A shared counter fixes the per-server problem only if checking and updating it is one atomic step.</KeyIdea>
+
+## Try it: where should the counter live?
+
+Start with local counters and add servers. Switch to “limit ÷ N” and watch real requests get refused. Then try the naive Redis read-then-write, and drag the round trip up. Finish with atomic `INCR`.
+
+<DistributedLimiter />
+
+## The cost of sharing
+
+Atomic Redis counters are accurate. They also put a network call and a shared dependency in front of every request:
+
+- **Latency.** Each request now waits for a Redis round trip, typically 0.3–1 ms inside a data centre. Fine for bookings, worth thinking about for an endpoint that serves 50,000 requests a second.
+- **Load on Redis.** Every request is a Redis operation. A single Redis node handles roughly 100,000 simple operations a second. Beyond that, shard the counters across several Redis nodes by key (user 81's counter always lives on the same node, so it stays atomic).
+- **Availability.** When Redis is slow or down, what does the limiter do? **Fail open** (allow everything) keeps the site up but removes protection, which is usually right for general API limits. **Fail closed** (reject everything) is right where abuse is expensive, like OTP sending. Decide per endpoint, and always use a short timeout on the Redis call so a slow Redis can't stall every request.
+
+## Approximate limits are often fine
+
+Not every limit needs to be exact. The question is how much overshoot you can live with:
+
+- **Local first, shared second.** Each server keeps a local token bucket and syncs its usage to Redis every 100–500 ms in a batch. Redis load drops by orders of magnitude, and the limit can overshoot by about one sync interval's worth of traffic.
+- **Coarse limits on the edge.** Your CDN or API gateway can enforce a rough per-IP limit (say 100 a second) with its own distributed counters. That stops the flood before it reaches you, and your precise per-user limits run behind it on far less traffic.
+- **Exact where it matters.** OTP sends and login attempts are low-volume and costly to get wrong, so they get atomic, fail-closed limits.
+
+<Callout tone="tip" title="Two layers is normal">
+Gatepass runs a loose per-IP limit at the CDN (absorbs floods, costs nothing), a token bucket per user in Redis via a Lua script (fair booking), and strict sliding-log limits for OTP and login. Each layer is accurate enough for its job and cheap enough for its traffic.
+</Callout>
+
+<Quiz
+  id="distributed-limit-race"
+  question="Gatepass's limiter does GET, compares with the limit, then SET count + 1. Under a burst, users get well over the limit. What's the fix?"
+  options={[
+    "Add more Redis replicas",
+    "Use a shorter window",
+    "Make check-and-increment atomic: INCR and compare its result, or run the logic in a Lua script",
+    "Move the counter back into each server's memory",
+  ]}
+  answer={2}
+  explain={<>Requests that read the counter before another request's write all see the same value and all pass. <code>INCR</code> returns the updated value in a single atomic step, so every request sees a distinct count. Replicas would make it worse: reads from a lagging replica see even older values.</>}
+/>
+
+## Key takeaways
+
+- In-memory counters limit per server; with N servers a user gets up to N times the limit.
+- Splitting the limit across servers refuses real users, because one user's requests aren't spread evenly.
+- A shared Redis counter works only with atomic updates: `INCR` for windows, a Lua script for token buckets and sliding windows.
+- Shared counters add latency, load and a dependency. Set short timeouts and decide per endpoint whether to fail open or closed.
+- Use exact limits where abuse is costly and cheaper approximate limits (local plus batched sync, edge limits) elsewhere.
