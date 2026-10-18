@@ -1,0 +1,113 @@
+import { GeohashNearby } from "@/components/visuals/geohash-nearby"
+import { QuadtreeSplit } from "@/components/visuals/quadtree-split"
+
+A stadium gig ends at 11 pm and 20,000 people pour out wanting to get home. Gatepass has partnered with a cab service, and the app needs to show each person the drivers within a kilometre. That is "find what's nearby", one of the most common queries in any app with a map, and a normal database index is bad at it.
+
+This lesson covers the two classic answers: **geohashes**, which turn 2D positions into strings you can index like any other column, and **quadtrees**, which split space more finely wherever things are crowded.
+
+## Why an ordinary index struggles
+
+A driver's position is two numbers, latitude and longitude. You could index both columns and query:
+
+```sql
+SELECT * FROM drivers
+WHERE lat BETWEEN 12.966 AND 12.984
+  AND lon BETWEEN 77.588 AND 77.606;
+```
+
+A B-tree on `lat` finds every driver in that band of latitude, which is a thin strip running across the whole city. Then the database filters that strip by longitude. A two-column index on `(lat, lon)` helps only a little, since it is sorted by latitude first. One dimension is always the slow one. What you want is a single key where **points that are close in space are close in the index**.
+
+## Geohash: space as a string
+
+A geohash builds that key by halving the world, over and over:
+
+1. Is the longitude in the east or west half? Write 1 or 0.
+2. Is the latitude in the north or south half? Write 1 or 0.
+3. Repeat inside the chosen half, alternating longitude and latitude.
+4. Every 5 bits become one base-32 character.
+
+The result is a string like `tdr1v95` for a spot near Bengaluru's cricket stadium. Each extra character divides the cell into 32 smaller ones:
+
+- 5 characters: cells about 4.9 km across
+- 6 characters: about 1.2 km × 0.6 km
+- 7 characters: about 150 m × 150 m
+
+The property that makes it useful: **a point's geohash starts with the geohash of every larger cell that contains it.** Everything inside cell `tdr1v` has a geohash beginning with `tdr1v`. "Drivers in this cell" becomes a prefix query, `WHERE geohash LIKE 'tdr1v%'`, which an ordinary B-tree index answers with one range scan. Redis's `GEOSEARCH`, Elasticsearch's `geohash_grid` and many ride-hailing backends are built on exactly this.
+
+<Diagram w={660} h={260} caption="Left: each extra character zooms into one of 32 sub-cells, so longer prefixes mean smaller areas. Right: the edge problem. Two drivers 50 m apart sit in different cells, while one in the same cell is far away.">
+  <rect x={20} y={30} width={290} height={200} rx={6} fill="none" stroke="var(--border-strong)" />
+  <rect x={150} y={80} width={150} height={110} rx={4} fill="var(--accent)" fillOpacity={0.06} stroke="var(--accent)" strokeOpacity={0.5} />
+  <rect x={222} y={110} width={70} height={50} rx={3} fill="var(--accent)" fillOpacity={0.14} stroke="var(--accent)" />
+  <Text x={30} y={50} anchor="start" mono size={13} weight={600}>t</Text>
+  <Text x={160} y={98} anchor="start" mono size={13} weight={600} tone="accent">td</Text>
+  <Text x={230} y={128} anchor="start" mono size={12} weight={600} tone="accent">tdr</Text>
+  <circle cx={262} cy={145} r={4} fill="var(--accent)" />
+  <Text x={165} y={250} size={11.5} tone="muted">each character = 32× smaller cell</Text>
+  <rect x={370} y={60} width={135} height={135} rx={4} fill="var(--accent)" fillOpacity={0.1} stroke="var(--accent)" />
+  <rect x={505} y={60} width={135} height={135} rx={4} fill="none" stroke="var(--border-strong)" />
+  <Text x={437} y={50} mono size={12} tone="accent">tdr1v</Text>
+  <Text x={572} y={50} mono size={12}>tdr1y</Text>
+  <circle cx={493} cy={130} r={7} fill="var(--accent)" stroke="var(--surface)" strokeWidth={2} />
+  <circle cx={520} cy={130} r={4.5} fill="var(--err)" />
+  <circle cx={384} cy={74} r={4.5} fill="var(--ok)" />
+  <Wire points={[[493, 150], [520, 150]]} arrow={false} tone="err" />
+  <Text x={507} y={168} size={11} tone="err">50 m</Text>
+  <Text x={437} y={92} size={11} tone="ok">same cell, 1.6 km</Text>
+  <Text x={505} y={225} size={11.5} tone="muted">rider · near but different prefix</Text>
+</Diagram>
+
+## The edge problem, and the 9-cell fix
+
+Prefixes have a catch. Close in the index implies close in space, but close in space does *not* imply a shared prefix. Two drivers on either side of a cell border can be 50 metres apart and share almost no prefix, especially near the big boundaries (the equator or the prime meridian split the very first bit).
+
+So a nearby search never looks at one cell. It looks at the rider's cell **plus its eight neighbours**, which together cover every point within one cell-width of the rider. Then it computes the real distance for each candidate and keeps the ones inside the radius. The geohash narrows the search; the distance check makes it correct.
+
+That gives you the sizing rule: **pick a precision whose cells are at least as big as your search radius.** If cells are smaller, nine of them cannot cover the circle and you will miss drivers.
+
+<GeohashNearby />
+
+Try it:
+
+- **Untick "Also scan the 8 neighbouring cells"** and move the rider close to a cell border. Red dots appear: drivers within the radius that a single-cell search never saw.
+- **Set precision to 7 and the radius to 1 km.** The cells are about 150 m, so the 9 of them cover a small square and most nearby drivers are missed. The app would say "no cabs nearby" in a street full of them.
+- **Set precision to 5 with a small radius.** Nothing is missed, but you check far more drivers than needed. Cells that are too big are slow; cells that are too small are wrong.
+
+<Quiz
+  id="geo-precision"
+  question="Gatepass wants drivers within 500 m of a rider. Which geohash precision should the search use?"
+  options={[
+    "5 characters (≈ 4.9 km cells)",
+    "6 characters (≈ 1.2 × 0.6 km cells)",
+    "7 characters (≈ 150 m cells)",
+    "8 characters, the more precise the better",
+  ]}
+  answer={1}
+  explain={<>The cell has to be at least as large as the radius in every direction, so the 9-cell block covers the whole circle. Six characters gives about 600 m in its shortest direction: just enough, with few wasted candidates. Seven or eight would miss drivers; five would scan dozens of times more of them.</>}
+/>
+
+## Quadtrees: cells that follow the crowd
+
+Geohash cells are a fixed grid. At precision 6, a cell in a quiet suburb holds two drivers, and the cell outside the stadium at 11 pm holds four hundred. Every query there scans all four hundred.
+
+A **quadtree** adapts to density instead. Start with one square covering the map. When a square holds more than a set number of points, split it into four quadrants and move its points down. Repeat. Busy areas end up with many small cells, empty areas stay as one big cell, and every cell holds about the same number of points.
+
+<QuadtreeSplit />
+
+Press **Surge** a few times and only the area around the stadium subdivides. A box query walks down from the root, skipping every quadrant that does not overlap the box, so it checks a small fraction of the points even as the total grows. Lower the capacity and the tree gets deeper; raise it and the leaves get fuller.
+
+The tradeoffs between the two:
+
+- **Geohash** is just a string column. It works in any database with a B-tree index, shards easily by prefix and is simple to cache. But cell sizes are fixed, so dense areas are slow and sparse areas waste lookups.
+- **Quadtree** balances itself to the data, and k-nearest-neighbour queries are natural. But it is an in-memory structure you have to build and update, and with drivers moving every few seconds, rebuilding and sharding it takes real engineering. Uber's early dispatch system and many game engines used quadtrees; Uber later moved to **H3**, a hexagonal grid where every neighbour is the same distance away.
+
+Databases offer the same ideas ready-made: PostGIS uses R-trees (a cousin that groups nearby rectangles), MongoDB's `2dsphere` index uses cells from Google's S2 library, which maps the sphere onto a cube and then onto a space-filling curve.
+
+<KeyIdea>Turn 2D proximity into 1D order, by prefixes or by recursive splitting, then always check the neighbours and the true distance.</KeyIdea>
+
+## Key takeaways
+
+- An index on latitude and longitude can only narrow one dimension. Spatial search needs a key where nearby points sort together.
+- A geohash interleaves longitude and latitude bits into a string. Shared prefixes mean shared cells, so "in this cell" is a prefix range scan.
+- Nearby points can sit across a cell border, so always search the cell plus its 8 neighbours, then filter by real distance.
+- Choose a precision whose cells are at least as large as the search radius.
+- Quadtrees split only where points are dense, which keeps queries fast in hotspots at the cost of maintaining an in-memory tree.
