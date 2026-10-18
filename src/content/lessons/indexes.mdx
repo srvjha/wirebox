@@ -1,0 +1,103 @@
+import { IndexLookup } from "@/components/visuals/index-lookup"
+
+A year after launch, Gatepass's "My tickets" screen starts taking two seconds to load. Nothing in the code changed. What changed is the tickets table: it grew from 2,000 rows to 3 million. One line of SQL fixes it, and understanding why is one of the most useful things you'll learn in this course.
+
+## The query that got slow
+
+"My tickets" runs this:
+
+```sql
+SELECT * FROM tickets WHERE user_id = 7;
+```
+
+The database has no idea where user 7's tickets are. Rows are stored roughly in the order they were inserted, and user 7 bought tickets in March, in July and last week. So the database does the only thing it can: it reads **every row** in the table and keeps the ones where `user_id = 7`. This is a **full table scan**.
+
+With 2,000 rows, a scan takes a fraction of a millisecond. Nobody notices. With 3 million rows, it's hundreds of milliseconds. And because every student opening the app runs it, on fest day you have hundreds of scans running at once, all competing for the same disk and CPU. The database slows down for *everyone*, including bookings.
+
+<KeyIdea>A full scan's cost grows with the size of the table. A query that's instant today can be your slowest one in a year, with no code change at all.</KeyIdea>
+
+## An index is a sorted copy
+
+An **index** is a separate structure the database keeps alongside the table: the values of one column, kept sorted, each pointing to the row it came from. Think of the index at the back of a textbook. You don't read every page to find "replication"; you look it up alphabetically and jump to page 214.
+
+<Diagram w={680} h={230} caption="An index on user_id: sorted values, each pointing at its row. Finding user 7 means finding 7 in the sorted list, not reading the table.">
+  <Group x={10} y={30} w={200} h={185} label="index on user_id" tone="ok" />
+  <Group x={300} y={30} w={370} h={185} label="tickets table (insert order)" tone="muted" />
+  <Text x={40} y={62} anchor="start" mono size={12}>user 3</Text>
+  <Text x={40} y={90} anchor="start" mono size={12} tone="ok" weight={600}>user 7</Text>
+  <Text x={40} y={118} anchor="start" mono size={12} tone="ok" weight={600}>user 7</Text>
+  <Text x={40} y={146} anchor="start" mono size={12}>user 12</Text>
+  <Text x={40} y={174} anchor="start" mono size={12}>user 15</Text>
+  <Text x={40} y={202} anchor="start" mono size={12}>…</Text>
+  <Text x={320} y={62} anchor="start" mono size={12}>#1  user 12  event 4  paid</Text>
+  <Text x={320} y={90} anchor="start" mono size={12} tone="ok">#2  user 7   event 4  paid</Text>
+  <Text x={320} y={118} anchor="start" mono size={12}>#3  user 3   event 9  paid</Text>
+  <Text x={320} y={146} anchor="start" mono size={12}>#4  user 15  event 9  cancelled</Text>
+  <Text x={320} y={174} anchor="start" mono size={12} tone="ok">#5  user 7   event 11 paid</Text>
+  <Text x={320} y={202} anchor="start" mono size={12}>…</Text>
+  <Wire d="M110 86 C 200 86, 230 86, 312 86" tone="ok" />
+  <Wire d="M110 114 C 220 114, 230 170, 312 170" tone="ok" />
+</Diagram>
+
+Real databases store the index as a **B-tree**: a shallow tree of pages, where each page holds a few hundred sorted keys and pointers to the next level down. Because each level multiplies by a few hundred, the tree stays very shallow. Three levels cover millions of rows; four cover billions. Finding user 7 means reading one page per level, then the matching rows. A handful of page reads, whatever the table size.
+
+Adding one is a single statement:
+
+```sql
+CREATE INDEX tickets_user_id_idx ON tickets (user_id);
+```
+
+## Watch the gap grow
+
+Drag the table from a thousand rows to a hundred million. The scan's cost rises in a straight line with the rows. The index barely moves: it gains a level only when the table grows a few hundred times bigger.
+
+<IndexLookup />
+
+At a thousand rows, the two are neck and neck, which is why small apps get away without thinking about indexes. At a few million, the index is thousands of times faster. That ratio is the difference between a database that idles on fest day and one that falls over.
+
+## Indexes aren't free
+
+If indexes are this good, why not index every column? Because each one has costs:
+
+- **Slower writes.** Every `INSERT`, and every `UPDATE` that changes an indexed column, must update every index too. A table with eight indexes does nine writes for each new row.
+- **Storage and memory.** Indexes take disk space, and they're only fast when their hot pages fit in memory. Unused indexes push useful data out of the cache.
+- **Not every query can use them.** An index on `user_id` doesn't help `WHERE status = 'paid'`. A condition like `WHERE lower(email) = …` can't use a plain index on `email`.
+
+So you index for the queries you actually run, especially the frequent ones on big tables, and you drop indexes nothing uses.
+
+<Callout tone="tip" title="Ask the database">
+Put `EXPLAIN ANALYZE` in front of a query and Postgres tells you its plan: `Seq Scan` means it read the whole table; `Index Scan` means it used an index; the timings show where the milliseconds went. Check this before and after adding an index, instead of guessing.
+</Callout>
+
+## Indexes for Gatepass
+
+Go back to the questions from the data modeling lesson and decide, one by one:
+
+- **Event page** (`WHERE events.id = 42`): primary keys are indexed automatically. Nothing to do.
+- **My tickets** (`WHERE tickets.user_id = 7`): needs an index on `tickets (user_id)`. This is the one that got slow.
+- **Event's tickets for the organiser** (`WHERE tickets.event_id = 42`): an index on `tickets (event_id)`. Postgres doesn't index foreign keys automatically, so these are easy to forget.
+- **This week in a city** (`WHERE city = … AND starts_at BETWEEN …`): a **composite** index on `events (venue_id, starts_at)` lets the database find the venue and then read just the date range, already sorted.
+- **One pass per student per event**: the `UNIQUE (event_id, user_id)` constraint creates an index as a side effect, and that index also serves "does this student already have a ticket for this event?".
+
+Column order in a composite index matters. An index on `(event_id, user_id)` is sorted by event first, like a phone book sorted by surname then first name. It's great for "event 42" and for "event 42 and user 7", but useless for "user 7" alone, just as a phone book doesn't help you find everyone named Priya.
+
+<Quiz
+  id="indexes-1"
+  question="tickets has an index on (event_id, user_id). Which query can NOT use it efficiently?"
+  options={[
+    "WHERE event_id = 42",
+    "WHERE event_id = 42 AND user_id = 7",
+    "WHERE user_id = 7",
+    "WHERE event_id = 42 ORDER BY user_id",
+  ]}
+  answer={2}
+  explain={<>The index is sorted by event_id first. User 7's tickets are spread across every event's section, so the database would have to read the whole index. Queries starting from event_id, the leftmost column, can use it.</>}
+/>
+
+## Key takeaways
+
+- Without an index, a filter means a full table scan, and its cost grows with the table.
+- An index is a sorted copy of a column with pointers to rows; as a B-tree, it finds any value in a few page reads.
+- Indexes speed reads and slow writes, and use memory; index the queries you actually run.
+- Foreign key columns usually need an index, and in Postgres you add it yourself.
+- In a composite index, order matters: it helps queries that filter on its leftmost columns.
