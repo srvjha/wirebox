@@ -1,0 +1,114 @@
+import { SagaCompensation } from "@/components/visuals/saga-compensation"
+
+Two-phase commit is out: the payment provider can't "prepare" a charge and wait for your go-ahead, and nobody wants seat locks held across the network. Gatepass still needs a booking that either finishes or leaves no trace. The answer is to stop pretending it's one transaction. Make it a chain of small ones, each with a plan for taking it back.
+
+## A chain of local transactions
+
+A **saga** is a sequence of steps, each one an ordinary local transaction in one service. Each step commits immediately, so no locks are held between steps. For every step that might need to be taken back, you also write a **compensating action**: a separate transaction that semantically undoes it.
+
+For a Gatepass booking:
+
+<div className="overflow-x-auto">
+  <table>
+    <thead>
+      <tr><th>Step</th><th>Service</th><th>Compensation</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1. Hold seats A12 and A13</td><td>Seats</td><td>Release the seats</td></tr>
+      <tr><td>2. Charge ₹1,800</td><td>Payments</td><td>Refund ₹1,800</td></tr>
+      <tr><td>3. Issue the ticket</td><td>Tickets</td><td>Void the ticket</td></tr>
+      <tr><td>4. Send the confirmation</td><td>Notifications</td><td>None: retry until it works</td></tr>
+    </tbody>
+  </table>
+</div>
+
+If step 3 fails, the saga runs the compensations for steps 2 and 1, newest first: refund, then release. The end state looks like the booking never happened, though not *exactly*. The fan's bank statement shows a charge and a refund, and the payments database has two rows, not zero. A compensation is a new action that cancels the effect of an old one, not an erasure. That is the price of committing each step for real.
+
+<Diagram w={680} h={250} caption="Forward steps commit one by one. When step 3 fails, compensations run backwards over the steps that succeeded.">
+  <Box x={10} y={40} w={145} h={52} label="Hold seats" sub="Seats" tone="ok" />
+  <Box x={180} y={40} w={145} h={52} label="Charge" sub="Payments" tone="ok" />
+  <Box x={350} y={40} w={145} h={52} label="Issue ticket" sub="Tickets" tone="err" />
+  <Box x={520} y={40} w={145} h={52} label="Notify" sub="never reached" dim />
+  <Wire points={[[155, 66], [176, 66]]} tone="ok" />
+  <Wire points={[[325, 66], [346, 66]]} tone="ok" />
+  <Wire points={[[495, 66], [516, 66]]} dashed />
+  <Tag x={422} y={30} tone="err">FAILED</Tag>
+  <Box x={180} y={170} w={145} h={52} label="Refund" sub="compensate 2" tone="info" />
+  <Box x={10} y={170} w={145} h={52} label="Release seats" sub="compensate 1" tone="info" />
+  <Wire points={[[422, 96], [422, 196], [329, 196]]} tone="info" />
+  <Wire points={[[180, 196], [159, 196]]} tone="info" />
+</Diagram>
+
+## Who drives the saga?
+
+Something has to remember where the saga is and decide what runs next. There are two styles.
+
+**Orchestration.** A dedicated component, the orchestrator, runs the saga as a state machine. It calls Seats, waits for the result, records "step 1 done" in its **saga log**, calls Payments, and so on. If it crashes, it restarts, reads the log and carries on from the last recorded step. Workflow engines such as Temporal exist largely to be this component for you. The flow lives in one readable place, which makes it easy to change and to debug.
+
+**Choreography.** There is no central brain. Seats holds the seats and publishes `SeatsHeld`. Payments listens, charges, and publishes `PaymentCaptured` or `PaymentFailed`. Seats listens for `PaymentFailed` and releases. Each service knows only its own step and the events around it. This is simple with three steps and no central dependency, but with eight steps the flow exists only as the sum of many subscriptions, and "why is this booking stuck?" means reading five codebases.
+
+A common rule of thumb: choreography for short, stable flows; orchestration once a flow has more than three or four steps or changes often. Gatepass's booking is the core of the business and will grow (coupons, seat upgrades, insurance), so it gets an orchestrator.
+
+Try the orchestrated saga below. Inject a failure, run it, and watch the right-hand panel.
+
+<SagaCompensation />
+
+## Order the steps on purpose
+
+You get to choose the order of steps, and it matters a lot.
+
+**Do the cheap, likely-to-fail, easy-to-undo things first.** Holding a seat is cheap to undo and fails often (someone else got it). Charging a card is expensive to undo: refunds take days to reach the fan and cost fees. So hold seats before charging, never the other way round.
+
+**Find the point of no return.** Somewhere in the chain is the **pivot**, the step after which the saga will never compensate. For Gatepass it is issuing the ticket. Before the pivot, steps must be compensatable. After it, steps must be **retriable**: they are guaranteed to succeed eventually if you keep trying. Sending the confirmation SMS is after the pivot. If the SMS provider times out, you don't refund a valid booking, you retry. Inject "SMS timeout" above and see the saga retry rather than unwind.
+
+**Put things that can't be undone last.** An email can't be unsent. If you must email before the pivot, your compensation is a second email, "sorry, your booking was cancelled", which is far worse than just waiting.
+
+## Living without isolation
+
+Database transactions hide work in progress: nobody sees your half-finished booking. Sagas don't. Each step commits, so other users see intermediate states. In the visual, while the charge is pending, seat A12 shows as taken to everyone, then becomes free again if the saga unwinds. A fan who refreshed at the wrong moment saw a seat vanish and reappear.
+
+Usually that is fine, but sometimes it is a real bug: a reporting job could count the held seat as sold, or a second saga could act on a value the first is about to undo. The usual countermeasures are:
+
+- **Semantic locks.** Mark records as in-flight, such as a seat `HELD_PENDING` or a booking `PENDING`, so other code knows the value may change. The seat map shows held seats differently, and reports ignore them.
+- **Expiry.** A hold carries a timeout, so a saga that dies silently doesn't keep a seat forever. Gatepass holds seats for 10 minutes.
+- **Commutative updates.** Prefer changes that give the same result in any order, such as "add 2 to sold" and "subtract 2", over "set sold to 148".
+
+<Callout tone="warn" title="Compensations must not give up">
+A compensation that fails leaves the system broken: money taken, no ticket. So compensations are retried until they succeed, with backoff, and must be idempotent, because a retry after a timeout may run them twice. Tick "Refund times out once" in the visual: the retry carries the same idempotency key so the fan can't be refunded twice. If retries keep failing, the saga parks and pages a human. That is rare, but it needs a runbook.
+</Callout>
+
+<Quiz
+  id="saga-order"
+  question="Which ordering of booking steps is best for a saga?"
+  options={[
+    "Charge card → hold seats → issue ticket → send SMS",
+    "Send SMS → hold seats → charge card → issue ticket",
+    "Hold seats → charge card → issue ticket → send SMS",
+    "Issue ticket → charge card → hold seats → send SMS"
+  ]}
+  answer={2}
+  explain={<>Holding seats fails most often and is the cheapest to undo, so it goes first. Charging comes once seats are secured. Issuing the ticket is the pivot. The SMS can't be unsent, so it goes after the pivot, where it is retried rather than compensated.</>}
+/>
+
+<YourTurn
+  id="saga-upgrade"
+  prompt="Gatepass adds seat upgrades: a fan with a ₹900 ticket pays ₹600 more to move to a ₹1,500 seat. Write the saga steps, each step's compensation, and where the pivot is."
+  fields={4}
+  hint="Think about which seat you hold, when the old seat is given up, and what the fan sees if the charge fails."
+>
+1. **Hold the new seat** (compensate: release it). Cheap and the most likely to fail.
+2. **Charge the ₹600 difference** (compensate: refund ₹600). Use the upgrade id as the idempotency key.
+3. **Reissue the ticket for the new seat and void the old one** in the tickets service, as one local transaction. This is the pivot: once the fan holds the new ticket, the saga won't turn back.
+4. **Release the old seat** for sale. After the pivot, so it must be retriable, and it is.
+5. **Send "you've been upgraded"**. Retriable, and last.
+
+Note the old seat is released *after* the pivot. If you released it first and the charge failed, someone else could buy it before the compensation tried to give it back.
+</YourTurn>
+
+## Key takeaways
+
+- A saga is a chain of local transactions, each with a compensating action that semantically undoes it.
+- Orchestration keeps the flow in one state machine with a saga log; choreography spreads it across event subscriptions. Prefer orchestration for long or changing flows.
+- Order steps on purpose: likely-to-fail and cheap-to-undo first, a clear pivot, retriable and irreversible steps last.
+- Sagas give up isolation, so use pending states, expiries and commutative updates.
+- Compensations must be idempotent and retried until they succeed.

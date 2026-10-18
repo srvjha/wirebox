@@ -1,0 +1,86 @@
+At 2 a.m. every night, Gatepass needs answers that no live system gives cheaply: revenue per organiser for the finance team, the 50 fans most likely to buy a comedy ticket, a recount of every sale to check the live dashboard. These questions read millions of rows once and nobody is waiting. That is batch processing, and the idea behind it fits on a postcard.
+
+## Why batch is still everywhere
+
+A **batch job** takes a bounded input, say yesterday's 9 million sales, runs to completion and writes an output. It has no latency requirement, only a throughput one: finish before the finance team wakes up.
+
+That freedom buys you real things. The input is fixed, so the job is **repeatable**: run it twice and you get the same answer. If it breaks halfway, you fix the bug and rerun it from scratch. Because nothing is waiting, you can use cheap machines and run them at full load. And batch is the natural home of **derived data**: search indexes, recommendation tables and reports are all built by a job and swapped in when done.
+
+The opposite of "just read it with SQL" is size. A query that scans 2 TB cannot run on one machine in reasonable time. You need to spread the work across many machines, and that is the problem MapReduce solved.
+
+## MapReduce: split, shuffle, combine
+
+Take a concrete question: **revenue per organiser** from a file of sales, each line `organiser_id, show_id, amount`. MapReduce solves it in three steps, and you write only two small functions.
+
+1. **Map.** The input file is cut into chunks, and each chunk goes to a machine. For every line, your `map` function emits a key and a value: `(organiser_7, 1800)`. Maps are independent, so 1,000 machines can each handle their own chunk.
+2. **Shuffle.** The framework groups the output by key. All the `organiser_7` pairs, from every machine, are sent to the same place. This is the expensive step: it moves data across the network and sorts it.
+3. **Reduce.** Each reducer receives a key with all its values, `(organiser_7, [1800, 900, 2700, …])`, and your `reduce` function sums them into one result.
+
+<Diagram w={700} h={260} caption="Map runs where the data lives. The shuffle routes every pair with the same key to one reducer. Reduce combines each key's values.">
+  <Box x={16} y={28} w={120} h={44} label="chunk 1" sub="sales 0-3M" icon="storage" />
+  <Box x={16} y={108} w={120} h={44} label="chunk 2" sub="sales 3-6M" icon="storage" />
+  <Box x={16} y={188} w={120} h={44} label="chunk 3" sub="sales 6-9M" icon="storage" />
+  <Box x={200} y={28} w={110} h={44} label="map" icon="worker" tone="accent" />
+  <Box x={200} y={108} w={110} h={44} label="map" icon="worker" tone="accent" />
+  <Box x={200} y={188} w={110} h={44} label="map" icon="worker" tone="accent" />
+  <Wire points={[[136, 50], [200, 50]]} />
+  <Wire points={[[136, 130], [200, 130]]} />
+  <Wire points={[[136, 210], [200, 210]]} />
+  <Group x={336} y={8} w={96} h={244} label="shuffle" tone="warn" />
+  <Wire points={[[310, 50], [360, 50], [360, 80], [440, 80]]} tone="req" />
+  <Wire points={[[310, 50], [360, 50], [360, 170], [440, 170]]} tone="req" dashed />
+  <Wire points={[[310, 130], [380, 130], [380, 80], [440, 80]]} tone="req" />
+  <Wire points={[[310, 210], [400, 210], [400, 170], [440, 170]]} tone="req" />
+  <Box x={440} y={58} w={110} h={44} label="reduce" sub="org 1-50" icon="worker" tone="res" />
+  <Box x={440} y={148} w={110} h={44} label="reduce" sub="org 51-100" icon="worker" tone="res" />
+  <Wire points={[[550, 80], [590, 80]]} tone="res" />
+  <Wire points={[[550, 170], [590, 170]]} tone="res" />
+  <Box x={590} y={102} w={100} h={52} label="output" sub="revenue per org" icon="db" tone="res" />
+</Diagram>
+
+You never wrote code to distribute work, retry failures or move data. If a map task's machine dies, the framework reruns that chunk elsewhere. Map and reduce functions are deterministic with no side effects, so rerunning is always safe. That property is the whole trick: pure functions over immutable input can be retried without fear.
+
+## A small trick: combiners and skew
+
+Notice the shuffle cost. If every map task sent a pair per sale, 9 million pairs would cross the network. A **combiner** runs a mini-reduce on each mapper's output before the shuffle: the first machine sums its own `organiser_7` sales and sends one pair instead of 40,000. It only works when the operation can be applied in pieces (sums, counts, max; not medians).
+
+The other classic failure is **skew**. If one organiser has 60% of all sales, the reducer that owns that key gets 60% of the data and the job waits for it while the other reducers sit idle. A job is only as fast as its slowest task. Fixes include splitting hot keys ("organiser_7#0", "organiser_7#1", …) and combining in two rounds, or handling the few hot keys in a separate pass.
+
+## The descendants: Hadoop to Spark
+
+The original MapReduce wrote everything to disk between steps. It was reliable and slow, and real questions need many steps: join sales with shows, then group by city, then rank. Each step was a separate job, with a full disk write and read in between.
+
+Later systems fix that. **Spark** keeps intermediate data in memory where it can, and describes the whole pipeline as a graph of operations before running it, so it can plan the work and skip waste. If a partition is lost, Spark recomputes it from the recorded steps, instead of storing every intermediate result. You write `sales.join(shows).groupBy("city").sum("amount")` and the engine decides how to split and shuffle it. Modern warehouses such as BigQuery and Snowflake go further and accept plain SQL, planning the same map, shuffle and reduce stages behind the query.
+
+The core idea survived every rewrite: **move the computation to the data, group by key with a shuffle, and keep each step retryable.** Even streaming engines borrow it. A windowed count in the previous lesson is a reduce over a key and a window.
+
+## Putting batch in the architecture
+
+Real systems rarely pick batch or stream; they use both.
+
+- The stream job gives the live dashboard in seconds, with approximate answers.
+- The nightly batch job recomputes the same totals from the immutable log, and its output replaces the approximations. Corrections for late events and bugs come free, because rerunning on fixed code over the same input repairs the past.
+- Batch outputs such as search indexes and recommendations are written to a new location and then **swapped in atomically**, so readers never see a half-built result.
+
+A good batch job is a function of its input. Keep it idempotent: write to a path that includes the run date, never append to shared tables, and a rerun after a failure cannot double count.
+
+<Quiz
+  id="batch-skew"
+  question="A nightly revenue-per-organiser job has 200 reducers. 199 finish in 4 minutes, and the last takes 55. What is the most likely cause?"
+  options={[
+    "The cluster is too small, so add more machines",
+    "Skew: one organiser's key has most of the data and a single reducer must process it all",
+    "The map functions are not deterministic",
+    "The shuffle ran before the map step finished"
+  ]}
+  answer={1}
+  explain={<>Extra machines do not help when one key must go to one reducer. The fix is to spread the hot key: add a random suffix so its values go to several reducers, then merge the partial sums in a second step. A combiner on the map side also shrinks the data that reaches that reducer.</>}
+/>
+
+## Key takeaways
+
+- Batch jobs read bounded input and aim for throughput and repeatability, not latency. A failed job is fixed and rerun.
+- MapReduce splits work into map (per record, parallel), shuffle (group by key across the network) and reduce (combine each key's values).
+- Pure, side-effect-free functions are what make automatic retries safe.
+- Combiners shrink the shuffle; skewed keys make one task the bottleneck and need to be split.
+- Spark and SQL warehouses keep the model but plan whole pipelines and use memory. Pair batch with streaming: fast approximate answers now, exact recounts overnight.

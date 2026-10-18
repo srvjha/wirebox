@@ -1,0 +1,108 @@
+At 21:14 on fest night, an SMS consumer is killed mid-batch by a deploy. When it comes back, 40 fans get their ticket text twice. On a different night, with a different setting, 40 fans get no text at all. Neither is a bug in Kafka. Both are the delivery guarantee you chose, whether you chose it on purpose or not.
+
+## Where messages go missing or double up
+
+A message travels through three hand-offs, and each one can fail at the worst moment.
+
+1. **Producer to broker.** The booking service sends `BookingCreated` and waits for an acknowledgement. If the ack is lost on the way back, the producer can't tell "not stored" from "stored, but I never heard". Retrying may store it twice. Not retrying may lose it.
+2. **Inside the broker.** If the broker acknowledges before the message is copied to other replicas and then dies, the message is gone. You saw the fix in the Kafka lesson: `acks=all` with several in-sync replicas.
+3. **Broker to consumer to side effect.** The consumer reads a message, does something in the outside world (sends an SMS), and records its progress (commits the offset). These are two separate actions, and a crash can land between them.
+
+The third hand-off is where most real trouble lives, and the order of those two actions defines the guarantee.
+
+<Diagram w={680} h={300} caption="The same crash, two orders of operations. Commit first and a crash loses the message. Process first and a crash repeats it.">
+  <Text x={20} y={30} anchor="start" tone="muted" mono size={11}>AT-MOST-ONCE: COMMIT, THEN PROCESS</Text>
+  <Box x={20} y={44} w={140} h={46} label="read #41" icon="stream" />
+  <Box x={190} y={44} w={150} h={46} label="commit 42" sub="progress saved" tone="ok" />
+  <Box x={370} y={44} w={120} h={46} label="crash" tone="err" />
+  <Box x={520} y={44} w={140} h={46} label="restart at 42" sub="#41 never sent" tone="err" />
+  <Wire points={[[160, 67], [186, 67]]} />
+  <Wire points={[[340, 67], [366, 67]]} />
+  <Wire points={[[490, 67], [516, 67]]} />
+  <Text x={20} y={170} anchor="start" tone="muted" mono size={11}>AT-LEAST-ONCE: PROCESS, THEN COMMIT</Text>
+  <Box x={20} y={184} w={140} h={46} label="read #41" icon="stream" />
+  <Box x={190} y={184} w={150} h={46} label="send SMS" sub="fan gets text" tone="res" />
+  <Box x={370} y={184} w={120} h={46} label="crash" tone="err" />
+  <Box x={520} y={184} w={140} h={46} label="restart at 41" sub="text sent again" tone="warn" />
+  <Wire points={[[160, 207], [186, 207]]} />
+  <Wire points={[[340, 207], [366, 207]]} />
+  <Wire points={[[490, 207], [516, 207]]} />
+  <Text x={340} y={270} tone="muted" size={12}>The crash lands between the two steps in both cases. Only the order differs.</Text>
+</Diagram>
+
+## At-most-once: never twice, maybe never
+
+Commit the offset first, then do the work. If the consumer crashes after committing but before finishing, the restarted consumer begins after the message. It is never processed twice, but it may not be processed at all. On the producer side, the matching choice is "send once, don't retry".
+
+This sounds careless, but it fits data where a small loss is cheaper than any extra machinery: page-view counts for the live dashboard, "someone is looking at this show" presence pings, debug logs. Losing 0.01% of page views changes nothing. Gatepass would never use it for tickets.
+
+## At-least-once: never lost, maybe twice
+
+Do the work first, then commit. If the consumer crashes after the work but before the commit, the restarted consumer reads the message again and repeats the work. Nothing is lost, but some things happen twice. On the producer side, the matching choice is "retry until acknowledged", which can also put a message in the log twice.
+
+This is the default almost everywhere, and the right one for anything that matters, *as long as repeating the work is harmless*. Every rebalance from the previous lesson, every deploy and every timeout produces a few duplicates. They are normal, not an incident.
+
+<KeyIdea>You can't avoid both loss and duplicates through delivery alone. Choose at-least-once, then make processing a message twice do no harm.</KeyIdea>
+
+## What "exactly-once" really means
+
+Vendors advertise exactly-once delivery, so it's worth being precise. Over an unreliable network, a system can't guarantee that an external action, like sending an SMS or charging a card, happens exactly once. That is the same problem as the payment timeout in module 12: when the reply goes missing, you can't know if the action happened.
+
+What you *can* build is **effectively-once processing**: the message may be delivered more than once, but its effect is applied once. There are two ingredients.
+
+**Inside Kafka**, two features do it for you. The **idempotent producer** tags each message with a producer id and a sequence number, so when a retry delivers the same message twice, the broker spots the repeated sequence number and drops the copy. **Transactions** let a consumer that reads from one topic and writes to another do both, plus its offset commit, as one atomic unit. Either the output messages and the new offset are all saved, or none are. This gives exactly-once results for pipelines that go from Kafka to Kafka, such as turning `BookingCreated` into per-show sales counts.
+
+**Outside Kafka**, the moment you touch a database, an email provider or a payment API, Kafka's transactions can't reach. There, effectively-once is your job, and the tool is the one from module 7: idempotency.
+
+## Making consumers idempotent
+
+An idempotent consumer is one where handling the same message twice leaves the world the same as handling it once. Three techniques cover nearly every case.
+
+**Make the operation naturally idempotent.** "Set seat A12 to sold for booking b_8812" can run ten times with the same result. "Increment sold count by one" can't. Prefer setting state to adding to it.
+
+**Record what you've processed, in the same transaction as the effect.** Every event carries a unique `eventId`. The consumer stores it in a `processed_events` table inside the same database transaction that applies the change. A duplicate hits the primary key and is skipped.
+
+```sql
+BEGIN;
+INSERT INTO processed_events (event_id) VALUES ('evt_7f3a');  -- fails if seen before
+UPDATE shows SET sold = sold + 2 WHERE id = 'show_17';
+COMMIT;
+```
+
+Because both writes commit together, you can't end up with the count updated but the event unrecorded, or the other way round.
+
+**Pass an idempotency key to the outside service.** Payment providers accept a key per request and return the original result if they see it again. Use something stable, like the booking id, never a fresh random value per attempt. For services without that feature, such as many SMS gateways, you record "SMS sent for booking b_8812" and check it first. A crash between sending and recording can still cause a rare duplicate. You have reduced duplicates, not eliminated them, and for a text message that is usually fine.
+
+<Callout tone="note" title="Duplicates downstream, too">
+If the email consumer publishes `TicketEmailed`, a duplicate input can produce a duplicate output. Build the new event's id from the input's id, for example `emailed:evt_7f3a`, and the next consumer can dedupe it as well.
+</Callout>
+
+<Quiz
+  id="delivery-counter"
+  question="The analytics consumer runs “UPDATE shows SET sold = sold + 1” for each BookingCreated, with at-least-once delivery. After a rebalance, the dashboard shows more tickets sold than the show has seats. What's the best fix?"
+  options={[
+    "Switch the consumer to at-most-once delivery",
+    "Commit the offset before running the update",
+    "Store each event id in the same transaction as the update, and skip ids already stored",
+    "Reduce the number of partitions so rebalances happen less often"
+  ]}
+  answer={2}
+  explain={<>The rebalance replayed events that had been processed but not committed, and <code>sold + 1</code> isn't idempotent. Recording the event id in the same transaction makes each event count once. Switching to at-most-once or committing first would trade over-counting for under-counting, and fewer rebalances only makes the bug rarer.</>}
+/>
+
+<YourTurn
+  id="delivery-choose"
+  prompt="For each Gatepass consumer, pick a guarantee and say how you'd make duplicates harmless: the seat service marking seats sold, the ticket email, the live 'people viewing this show' counter."
+  fields={3}
+>
+- **Seat service:** at-least-once. The update is naturally idempotent: set seats A12 and A13 to `sold` with `booking_id = b_8812`. Running it twice changes nothing. Reject the update if the seat is sold to a different booking.
+- **Ticket email:** at-least-once, with a `ticket_emails(booking_id)` row checked before sending and written after, plus the provider's idempotency key if it has one. A rare duplicate email is acceptable; a missing ticket is not.
+- **Viewers counter:** at-most-once is fine. It's approximate by nature, refreshed every few seconds, and a lost ping has no lasting effect.
+</YourTurn>
+
+## Key takeaways
+
+- Loss and duplication happen at three hand-offs: producer to broker, inside the broker, and consumer to side effect.
+- Commit then process is at-most-once (may lose). Process then commit is at-least-once (may repeat).
+- "Exactly-once" means effectively-once: at-least-once delivery plus idempotent processing. Kafka provides it end-to-end only for Kafka-to-Kafka pipelines.
+- Make consumers idempotent: set state rather than increment, record event ids in the same transaction, and pass stable idempotency keys to outside services.

@@ -1,0 +1,131 @@
+import { PubSubFanout } from "@/components/visuals/pub-sub-fanout"
+
+When a fan books a seat, five Gatepass services need to know: payments, seats, email, SMS and analytics. Right now the booking service calls them one after another, so the slowest and least reliable of the five decides whether anyone can buy a ticket at all. This lesson replaces that chain with one message that everyone can hear.
+
+## The chain that breaks
+
+Here is the booking request today. The booking service saves the booking, then makes five calls in a row before it answers the phone that is waiting.
+
+<Diagram w={640} h={330} caption="Booking calls five services in turn. The user waits for all of them, and any one failing fails the booking.">
+  <Box x={20} y={139} w={150} h={52} label="Booking" sub="POST /bookings" icon="service" tone="req" />
+  <Box x={440} y={14} w={180} h={46} label="Payments" sub="120 ms" icon="service" />
+  <Box x={440} y={77} w={180} h={46} label="Seats" sub="40 ms" icon="service" />
+  <Box x={440} y={140} w={180} h={46} label="Email" sub="180 ms" icon="service" />
+  <Box x={440} y={203} w={180} h={46} label="SMS" sub="4,000 ms today" icon="service" tone="err" />
+  <Box x={440} y={266} w={180} h={46} label="Analytics" sub="60 ms" icon="service" />
+  <Wire points={[[170, 158], [300, 37], [436, 37]]} label="1" labelAt={[300, 37]} />
+  <Wire points={[[170, 162], [320, 100], [436, 100]]} label="2" labelAt={[320, 100]} />
+  <Wire points={[[170, 165], [436, 163]]} label="3" labelAt={[340, 164]} />
+  <Wire points={[[170, 168], [320, 226], [436, 226]]} label="4" labelAt={[320, 226]} tone="err" />
+  <Wire points={[[170, 172], [300, 289], [436, 289]]} label="5" labelAt={[300, 289]} />
+</Diagram>
+
+Three things go wrong with this shape, and they get worse as Gatepass grows.
+
+**Latency adds up.** The user waits for the sum of every call. On a good day that is about 400 ms. On fest night, when the SMS provider slows to four seconds, every booking takes four seconds, and the load balancer starts timing requests out.
+
+**Availability multiplies.** If each of the five services is up 99.9% of the time, the chance that all five are up at once is 0.999 multiplied by itself five times, about 99.5%. That is roughly 3.6 hours a month in which bookings fail because of a service that only had to send a text.
+
+**Every new listener is a code change.** When marketing asks for a loyalty-points service, someone has to edit the booking service, add a sixth call, decide what happens if it fails, and redeploy the most important code path in the company.
+
+The root problem is that booking is doing work that isn't booking. Email, SMS and analytics don't change whether the booking happened. They only need to *hear* that it did.
+
+## Publish a fact, not a command
+
+Pub/sub (publish/subscribe) flips the arrows around. The booking service publishes a single message, `BookingCreated`, to a named channel called a **topic**. Services that care **subscribe** to the topic, and the messaging system, the **broker**, gives each subscriber its own copy.
+
+<Diagram w={640} h={330} caption="Booking publishes one event. The broker hands every subscriber its own copy, and nobody waits for the slow ones.">
+  <Box x={20} y={139} w={140} h={52} label="Booking" sub="saves + publishes" icon="service" tone="req" />
+  <Box x={20} y={20} w={140} h={52} label="Payments" sub="sync, before save" icon="service" />
+  <Wire points={[[90, 135], [90, 76]]} label="charge" labelAt={[90, 105]} />
+  <Box x={225} y={139} w={150} h={52} label="booking-events" sub="topic" icon="queue" tone="info" />
+  <Box x={450} y={14} w={170} h={46} label="Seat map" sub="subscriber" icon="service" tone="res" />
+  <Box x={450} y={94} w={170} h={46} label="Email" sub="subscriber" icon="service" tone="res" />
+  <Box x={450} y={174} w={170} h={46} label="SMS" sub="subscriber, slow" icon="service" tone="warn" />
+  <Box x={450} y={254} w={170} h={46} label="Analytics" sub="subscriber" icon="service" tone="res" />
+  <Wire points={[[160, 165], [221, 165]]} tone="req" />
+  <Wire points={[[375, 158], [410, 37], [446, 37]]} tone="info" />
+  <Wire points={[[375, 162], [410, 117], [446, 117]]} tone="info" />
+  <Wire points={[[375, 168], [410, 197], [446, 197]]} tone="info" />
+  <Wire points={[[375, 172], [410, 277], [446, 277]]} tone="info" />
+  <Packet points={[[160, 165], [225, 165]]} dur={2.4} />
+  <Packet points={[[375, 158], [410, 37], [450, 37]]} dur={2.4} delay={0.8} tone="info" />
+  <Packet points={[[375, 162], [410, 117], [450, 117]]} dur={2.4} delay={0.8} tone="info" />
+  <Packet points={[[375, 168], [410, 197], [450, 197]]} dur={2.4} delay={0.8} tone="info" />
+  <Packet points={[[375, 172], [410, 277], [450, 277]]} dur={2.4} delay={0.8} tone="info" />
+</Diagram>
+
+Notice the event's name. `BookingCreated` is in the past tense. It states a fact: this booking exists. It does not say "send an email", because the booking service no longer knows or cares who is listening. Commands have one intended receiver. Facts can have any number.
+
+Notice also what stayed a direct call: payments. The fan needs to know, before we say "booked", whether their card was charged. Anything the response depends on stays synchronous. Anything that only reacts to the result can listen instead. Sorting your calls into those two piles is most of the design work.
+
+<KeyIdea>Call what the answer depends on. Publish everything else as a fact, and let the services that care subscribe.</KeyIdea>
+
+## Topics, subscriptions and queues
+
+In module 7 you met the work queue: many workers share one queue, and each job goes to exactly one of them. That is the **competing consumers** pattern, and it is how you spread load.
+
+Pub/sub is the other direction. Each *subscription* is its own lane. Email has one, SMS has one, analytics has one. A message published to the topic is copied into every lane, and each lane is read at its own pace. Inside a lane you can still run several workers that compete for messages, so email can scale to ten workers without SMS noticing.
+
+That separation is what makes the system resilient. If SMS is down, its lane fills up. The broker keeps the messages until SMS comes back and works through the backlog. Booking never noticed. Try it below: switch a service off, keep publishing, then switch it back on.
+
+<PubSubFanout />
+
+Run the same experiment in "Direct calls" mode. One service down turns every booking into a failure, and the user waits two seconds to find that out. In pub/sub mode the user waits about 30 ms, the time to save the booking and hand one message to the broker.
+
+<Callout tone="warn" title="The broker is now critical">
+You removed four dependencies from the booking path and added one: the broker. If it is down, booking can't publish. So brokers run as replicated clusters, and the next lessons look at how Kafka does that. In the outbox lesson you'll also see how to keep a booking from being saved while its event is lost.
+</Callout>
+
+## What goes in the event
+
+A subscriber can only act on what the event carries, so its contents are a contract, just like an API.
+
+A **thin event** carries an id: `{ "type": "BookingCreated", "bookingId": "b_8812" }`. Every subscriber then calls the booking service to fetch the details, which puts load back on booking and brings back the coupling you were trying to remove.
+
+A **fat event** carries what subscribers usually need: booking id, show, seats, amount, the fan's email and phone, and when it happened. Subscribers can work on their own, even when booking is down. The cost is size and the risk of exposing fields some subscribers shouldn't see.
+
+Most teams land in the middle: enough for the common subscribers, ids for the rest. Give every event a unique `eventId`, a timestamp and a version number. Then treat the schema like a public API: adding a field is safe, but renaming or removing one breaks a subscriber you may not even know exists.
+
+<Quiz
+  id="pubsub-sync-or-async"
+  question="Which part of booking should stay a direct, synchronous call rather than a subscriber to BookingCreated?"
+  options={[
+    "Sending the confirmation email",
+    "Charging the card and checking it succeeded",
+    "Updating the live sales dashboard",
+    "Adding loyalty points to the fan's account"
+  ]}
+  answer={1}
+  explain={<>The response to the fan depends on the payment result: you can't say "booked" until you know the card was charged. Email, the dashboard and loyalty points all react to a booking that already happened, so they can hear about it a few seconds later.</>}
+/>
+
+## What you give up
+
+Pub/sub is not free. Be honest about the costs before you reach for it.
+
+- **No answer comes back.** The publisher can't know whether the email went out. If it matters, the subscriber publishes its own event, such as `TicketEmailed`, and someone watches for missing ones.
+- **Things happen later.** For a few seconds the booking exists but the email hasn't been sent and the dashboard doesn't show it. That is eventual consistency, and every screen that reads a subscriber's data has to tolerate it.
+- **The flow is harder to see.** In the call chain you could read the booking code top to bottom. Now the behaviour is spread across subscribers, and you need tracing and a list of who subscribes to what.
+- **Duplicates and ordering.** Most brokers deliver at least once, so a subscriber may see the same event twice. Events can also arrive in a different order than they were published. Both have answers, and they are the subject of the rest of this module.
+
+<YourTurn
+  id="pubsub-gatepass-events"
+  prompt="Gatepass also lets fans cancel bookings and lets organisers change a show's time. List the events you would publish and which services would subscribe to each."
+  fields={3}
+  hint="Name each event as a past-tense fact, then ask which services would have to react if it happened."
+>
+- **BookingCancelled**: seats (release the seats), payments (start the refund), email and SMS (tell the fan), analytics (adjust sales), loyalty (take the points back).
+- **ShowRescheduled**: email and SMS (tell every ticket holder), seat map (refresh the cached show page), search (re-index the new time), analytics.
+- **RefundIssued**, published by payments once the money moves: email (send the receipt) and analytics. Note that payments publishes this one, not booking: whoever owns the fact publishes it.
+
+A good check: none of these events tells a subscriber what to do. Each one says what happened, and each subscriber decides its own reaction.
+</YourTurn>
+
+## Key takeaways
+
+- A chain of calls adds latencies and multiplies failure rates. Five services at 99.9% give you about 99.5%.
+- Keep the calls the response depends on. Publish everything else as a past-tense fact on a topic.
+- Every subscription is its own lane. A slow or dead subscriber builds a backlog and catches up later, without slowing the publisher.
+- Events are a contract. Include an id, a timestamp and a version, and only ever add fields.
+- You trade a simple call chain for eventual consistency, a critical broker, and duplicates and ordering to deal with.

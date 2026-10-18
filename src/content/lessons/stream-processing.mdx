@@ -1,0 +1,92 @@
+import { StreamWindows } from "@/components/visuals/stream-windows"
+
+On the night a big comedy show goes on sale, the Gatepass ops screen should say "412 tickets in the last minute", not "412 tickets in the last minute, as of an hour ago". Computing that from the database every few seconds would hammer it. Stream processing computes it as the events flow past, and the hard part is deciding when a minute is over.
+
+## Aggregating something that never ends
+
+A **batch** job reads a finite pile of data, computes, and stops. A **stream** has no end. Ticket sales keep arriving, so "total sales" is never final. A stream processor is a program that reads events from a log such as Kafka, keeps some **state** in memory, and emits results continuously.
+
+Some work is easy to stream. Filtering ("only sales above ₹5,000") and transforming ("convert to rupees") look at one event at a time and keep nothing. Counting is harder, because you need memory: a counter per show, per city, per minute. That counter is state, and state is what makes stream processing interesting. If the processor crashes, the counters must come back. Engines handle this by checkpointing state periodically and recording the log offset it covers, so after a restart they reload the checkpoint and replay from that offset. This is the same idea as snapshots in the event sourcing lesson.
+
+<Diagram w={680} h={190} caption="A stream job reads partitions of a log, keeps windowed counters as state, and writes results out. State is checkpointed so a crash resumes from an offset.">
+  <Box x={16} y={62} w={130} h={52} label="sales topic" sub="Kafka, 6 partitions" icon="stream" tone="info" />
+  <Wire points={[[146, 88], [196, 88]]} tone="req" />
+  <Group x={196} y={24} w={290} h={140} label="stream processor" tone="accent" />
+  <Box x={212} y={52} w={120} h={44} label="window + count" icon="worker" />
+  <Box x={352} y={52} w={120} h={44} label="state store" sub="per show, per window" icon="db" tone="warn" />
+  <Wire points={[[332, 74], [352, 74]]} />
+  <Box x={352} y={112} w={120} h={36} label="checkpoint" sub="state + offset" dim />
+  <Wire points={[[412, 96], [412, 112]]} dashed />
+  <Wire points={[[486, 88], [536, 88]]} tone="res" />
+  <Box x={536} y={62} w={128} h={52} label="ops dashboard" sub="412 / minute" icon="client" tone="res" />
+</Diagram>
+
+## Windows: slicing time into buckets
+
+To count "per minute" you cut the stream into **windows** and keep one counter per window. There are three common shapes.
+
+- **Tumbling windows** are fixed-size and don't overlap: 12:00 to 12:01, then 12:01 to 12:02. Each event lands in exactly one window. Use them for "sales per minute".
+- **Sliding windows** have a size and a hop: "the last 5 minutes, updated every minute". They overlap, so each event is counted in several windows. Use them for smooth trends and alerts, such as "more than 800 failed payments in any 5-minute stretch".
+- **Session windows** have no fixed size. A session grows as long as events keep arriving and closes after a quiet **gap**. They fit user behaviour: a fan browsing a show, clicking around, then leaving for 10 minutes is one session.
+
+Switch between them in the visual below. Notice that sliding windows count a single sale more than once, and that session windows can merge when a late event fills a gap.
+
+<StreamWindows />
+
+## Two clocks: event time and processing time
+
+Here is the catch. Each ticket sale has an **event time**, when it happened on the phone or the payment server. It also has a **processing time**, when your job sees it. They differ by network delay, retries, a phone that was in a lift, or a partition that was backed up.
+
+If you window by processing time, you count what arrived in each minute. That is simple and fast, and it is wrong whenever delays vary: a burst of sales from 12:00:50 that arrives at 12:01:10 is counted in the wrong minute, and replaying the same log tomorrow gives different numbers. If you window by event time, you count when things actually happened, and the answer is the same on every replay. That is what you want for money and for anything you will compare across days.
+
+The price is that you can never be sure a window is complete. The sale for 12:00:58 might still be on its way.
+
+## Watermarks: deciding when a window is done
+
+A **watermark** is the processor's claim about progress: "I believe I have seen every event with event time up to W." It's usually computed as the largest event time seen so far, minus a **delay** you choose. With a 5-second delay, once an event stamped 12:01:05 arrives, the watermark is 12:01:00, and the 12:00 to 12:01 window can close and emit its result.
+
+The delay is the central tradeoff:
+
+- A **short delay** gives fast results, but stragglers arrive after their window closed.
+- A **long delay** catches almost everything, but every result is late by that delay, and the processor holds more windows open in memory.
+
+Drag the delay slider in the visual with the full stream loaded. With a wait of 0 seconds, two events are dropped. At about 10 seconds they are all counted, but the first windows close much later on the arrival slider.
+
+<KeyIdea>A watermark trades latency for completeness: wait longer and your answers get more right and arrive later.</KeyIdea>
+
+## Late events: drop, update or side-channel
+
+What happens to an event that arrives after its window has closed? You have three honest options.
+
+1. **Drop it**, and count how many you dropped. Fine for a live dashboard where the tenth decimal does not matter.
+2. **Allow lateness**: keep the window's state for some extra time and emit a corrected result when a straggler arrives. Downstream consumers must then handle updates, not just one final value, so the sink should upsert by window key.
+3. **Send it to a side output**, a "late" topic, so a separate batch job can reconcile the totals overnight.
+
+Many production systems combine all three: a tight watermark for the live screen, some allowed lateness, and a nightly batch recount as the source of truth. That pairing is old enough to have a name, the lambda architecture, and the next lesson covers the batch half.
+
+## Delivery guarantees and what you can't stream
+
+Stream processors depend on the delivery guarantees from the messaging module. A job that reads, updates state, writes results and commits the offset must do those steps atomically, or a crash between them double counts or loses events. Engines like Flink and Kafka Streams do this with checkpoints or transactions, which is how they can offer exactly-once results for state they manage. Writing to an outside database is only safe if the write is idempotent, such as an upsert keyed by `(show, window)`.
+
+Streaming also has limits. Joining two streams needs windows too ("a payment within 10 minutes of a hold"), and holding both sides in state gets expensive. Questions that need all the data, like "median spend across all fans ever", belong in batch.
+
+<Quiz
+  id="sp-watermark-delay"
+  question="Gatepass's live dashboard is accurate but 30 seconds behind the real sales. Ops wants it faster and can tolerate a few missing sales. What should you change?"
+  options={[
+    "Switch to processing-time windows so results are exact",
+    "Shorten the watermark delay and send late events to a side output for later reconciliation",
+    "Lengthen the watermark delay so more events are counted",
+    "Make the windows sliding instead of tumbling"
+  ]}
+  answer={1}
+  explain={<>The 30-second lag is the watermark waiting for stragglers. Shortening it makes results arrive sooner at the cost of more late events, and a side output plus a nightly recount repairs the totals. Processing-time windows would be faster but make the numbers depend on network luck.</>}
+/>
+
+## Key takeaways
+
+- A stream job keeps state (counters per window) and emits results continuously; state is checkpointed with the log offset so it can recover.
+- Tumbling windows don't overlap, sliding windows overlap and count events several times, and session windows close after a quiet gap.
+- Window by event time for repeatable, correct results; processing time is simpler but depends on delivery delays.
+- A watermark decides when a window is complete. A longer delay means fewer late events and slower answers.
+- Handle late events deliberately: drop and count, allow lateness with upserts, or route them to a side output for batch repair.

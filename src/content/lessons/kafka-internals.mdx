@@ -1,0 +1,101 @@
+import { KafkaLogExplorer } from "@/components/visuals/kafka-log-explorer"
+
+Gatepass now publishes `BookingCreated`, and it needs a broker to carry it. The team picks Kafka, and the first surprise is that Kafka doesn't delete a message when someone reads it. That one design choice explains almost everything else about how Kafka works.
+
+## A queue forgets, a log remembers
+
+The job queue from module 7 behaves like a to-do list. A worker takes a job, finishes it, and the job is gone. That is perfect for "generate this PDF", where exactly one worker should do the work once.
+
+Kafka is built around a different structure: an **append-only log**. A log is a file you only ever add to at the end. Every message gets the next number in line, called its **offset**: 0, 1, 2, 3 and so on. Nothing in the middle is ever changed, and reading doesn't remove anything.
+
+Keeping messages after they are read sounds wasteful, but it buys three things a queue can't give you:
+
+- **Many independent readers.** Email, SMS and analytics each read the same log at their own pace. The broker doesn't make a copy per subscriber, because each reader only needs to remember a number.
+- **Replay.** If analytics shipped a bug that miscounted sales for two days, you fix the code and send its reader back to the offset from two days ago. The events are still there.
+- **New consumers can start from history.** When the fraud team builds a new service next year, it can read every booking event still on disk before it handles live ones.
+
+<KeyIdea>A queue hands each message to one worker and forgets it. A log keeps every message in order and lets each reader keep its own bookmark.</KeyIdea>
+
+## Partitions: one log is not enough
+
+One log on one machine has limits: one disk, one network card, and a single sequence that only one reader in a group can work through in order. At Gatepass's peak, 8,000 booking events a second, that is too much for one log.
+
+So a Kafka **topic** is split into **partitions**. Each partition is its own independent log with its own offsets, and different partitions live on different machines, called **brokers**. A topic with 12 partitions can spread its writes over 12 disks and be read by up to 12 consumers in parallel.
+
+<Diagram w={680} h={300} caption="The bookings topic has three partitions. The producer picks a partition from the key; each consumer group keeps its own offset in every partition.">
+  <Box x={16} y={124} w={130} h={52} label="Booking" sub="producer" icon="service" tone="req" />
+  <Group x={200} y={22} w={300} h={256} label="topic: bookings" tone="info" />
+  <Box x={218} y={40} w={264} h={50} label="P0  ▮▮▮▮▮▮" sub="offsets 0–5" icon="stream" />
+  <Box x={218} y={125} w={264} h={50} label="P1  ▮▮▮▮" sub="offsets 0–3" icon="stream" />
+  <Box x={218} y={210} w={264} h={50} label="P2  ▮▮▮▮▮▮▮" sub="offsets 0–6" icon="stream" />
+  <Wire points={[[146, 145], [180, 65], [214, 65]]} tone="req" />
+  <Wire points={[[146, 150], [214, 150]]} tone="req" label="hash(key)" labelAt={[178, 150]} />
+  <Wire points={[[146, 155], [180, 235], [214, 235]]} tone="req" />
+  <Box x={540} y={60} w={128} h={52} label="Email" sub="at 6 · 4 · 7" icon="worker" tone="res" />
+  <Box x={540} y={188} w={128} h={52} label="Analytics" sub="at 2 · 1 · 3" icon="worker" tone="warn" />
+  <Wire points={[[482, 150], [512, 150], [512, 86], [536, 86]]} tone="res" />
+  <Wire points={[[482, 150], [512, 150], [512, 214], [536, 214]]} tone="warn" />
+</Diagram>
+
+How does the producer pick a partition? If the message has a **key**, Kafka hashes it: `partition = hash(key) % number_of_partitions`. The same key always lands in the same partition. If there is no key, the producer spreads messages across partitions to balance them.
+
+That choice matters because **Kafka only orders messages within a partition**. Offsets 3 and 4 in partition 1 are always read in that order. A message in partition 0 and one in partition 2 have no order at all relative to each other. So you pick the key to be the thing whose events must stay in order. For Gatepass that is usually the booking id: `BookingCreated`, `PaymentCaptured` and `TicketIssued` for booking `b_8812` all go to one partition, and every reader sees them in sequence.
+
+<Callout tone="warn" title="Changing the partition count moves keys">
+`hash(key) % 3` and `hash(key) % 4` give different answers. Add a partition to a live topic and new events for an old key can land in a different partition than its earlier ones, breaking per-key order across the change. Pick a generous partition count up front. Partitions are cheap; re-keying a busy topic is not.
+</Callout>
+
+## Offsets: the reader keeps its place
+
+Because the log never changes, a consumer only has to remember one number per partition: the offset of the next message it will read. Periodically it **commits** that offset back to Kafka (into an internal topic), so that after a crash or a restart it picks up where it left off.
+
+This makes the broker simple and the reader in charge. Kafka doesn't track which message was delivered to whom. It stores logs and remembers each group's bookmark. Two groups reading one topic never interfere with each other, and a slow group only falls behind, it doesn't slow anyone down. How far behind a group is, the newest offset minus its committed offset, is called **consumer lag**, and it is the first number you put on a dashboard.
+
+Try it below. Produce events with different keys and watch where they land. Read with one group but not the other. Then rewind a group and see that it can read everything again.
+
+<KafkaLogExplorer />
+
+## Retention: how long the past lasts
+
+A log that grows forever would fill every disk, so each topic has a **retention** rule. The common one is time: delete messages older than seven days. You can also cap by size. Kafka stores each partition as a series of files called **segments** and deletes whole old segments at once, which is cheap.
+
+Notice what retention does *not* depend on: whether anyone has read the messages. In the visual, let a few hours pass without reading with the analytics group. Once its unread messages expire, it skips ahead and those events are gone for it. Retention is your recovery window. If a consumer can be broken for a weekend, seven days is comfortable. Two hours is not.
+
+There is a second mode, **log compaction**, for topics where only the latest value per key matters, such as "current price of each show". Kafka keeps at least the last message for every key and removes older ones, so the topic becomes a compact snapshot you can rebuild a table from.
+
+## Replication and why it's fast
+
+Each partition is copied to several brokers, usually three. One copy is the **leader**, which takes all writes for that partition. The others are **followers** that copy the leader's log, exactly like the leader-follower replication from module 13. The followers that are fully caught up form the **in-sync replicas**. A producer that sets `acks=all` gets its acknowledgement only when every in-sync replica has the message, so losing one broker loses nothing. If the leader dies, an in-sync follower takes over.
+
+Kafka handles hundreds of thousands of messages a second per broker, mostly because a log is the friendliest thing you can ask a disk to do. Appends are sequential writes. Reads are mostly sequential too, often served straight from the operating system's page cache. Producers and consumers move messages in batches, and the broker can send file bytes to the network without copying them through the application.
+
+<Quiz
+  id="kafka-replay"
+  question="Analytics had a bug and miscounted ticket sales for the last two days. The topic keeps seven days of events. What's the cleanest fix?"
+  options={[
+    "Ask the booking service to republish two days of events",
+    "Deploy the fix, then reset the analytics group's offsets to two days ago and let it re-read",
+    "Delete the topic and create it again",
+    "Nothing can be done, because analytics already consumed those messages"
+  ]}
+  answer={1}
+  explain={<>Reading doesn't delete anything in Kafka. The events are still in the log for five more days, so the fixed analytics service can rewind its offsets and recompute. Other groups, like email, are untouched, so nobody gets a duplicate email. (Analytics must overwrite its old totals rather than add to them, or it will count twice.)</>}
+/>
+
+<YourTurn
+  id="kafka-partition-key"
+  prompt="Gatepass publishes BookingCreated, PaymentCaptured and TicketIssued to one bookings topic. Which key would you use, and what would go wrong with show id or no key at all?"
+  fields={3}
+>
+- **Key by booking id.** All events for one booking land in one partition and are read in order, and with millions of bookings the load spreads evenly over partitions.
+- **Show id** keeps a show's events together, which is handy for per-show counters, but one huge show (the band's stadium night) puts most of the traffic on one partition. That's the hot-key problem from module 14, now inside Kafka.
+- **No key** spreads load perfectly but gives no order at all: a consumer could see `TicketIssued` before `PaymentCaptured` for the same booking.
+</YourTurn>
+
+## Key takeaways
+
+- Kafka is an append-only log. Reading doesn't delete; each consumer group keeps its own offset.
+- A topic is split into partitions for scale. The key picks the partition, and order is guaranteed only within a partition.
+- Choose the key to be the thing whose events must stay in order, usually an entity id like the booking id.
+- Retention is time- or size-based and ignores readers. It is your window for replay and recovery.
+- Each partition is replicated with a leader and in-sync followers; `acks=all` trades a little latency for not losing writes.

@@ -1,0 +1,77 @@
+import { NinesBudget } from "@/components/visuals/nines-budget"
+
+The Gatepass sales team wants to promise organisers "100% uptime" in the contract. You know that is a promise nobody can keep, and a promise nobody can price. The sensible question is not "how do we never go down?" but "how much downtime can we afford, and what do we do with the allowance?"
+
+## SLI, SLO, SLA: three different words
+
+People use these loosely. Pin them down.
+
+- An **SLI** (service level indicator) is a measurement. "The fraction of checkout requests that returned a non-error response in under 800 ms." It's a ratio of good events to all events, which you compute from your metrics.
+- An **SLO** (service level objective) is your internal target for an SLI. "99.9% of checkouts are good, measured over 30 days."
+- An **SLA** (service level agreement) is a contract with a customer, with consequences: refunds or credits if you miss it. SLAs should be looser than SLOs, so you notice and fix trouble before you owe anybody money. If your SLA is 99.9%, your SLO might be 99.95%.
+
+Measure what users feel. A server that is up but returns errors counts as down, and a page that loads in 12 seconds is down for the fan staring at it. Counting requests is better than counting minutes of "up" pings, because a one-minute outage at 3 a.m. matters much less than one at 12:00 when the Friday sale opens.
+
+## What the nines mean
+
+Availability is quoted in nines. Choose a target below and see what it allows.
+
+<NinesBudget />
+
+Some numbers worth memorising. 99% is about 3.7 days a year, which sounds fine until you realise it is 7 hours a month, all in one go. 99.9% is 8.8 hours a year, or 43 minutes a month. 99.99% is 52 minutes a year, just 4.3 minutes a month. 99.999% is five and a bit minutes a year, a figure that is smaller than the time it takes a human to be paged, open a laptop and log in.
+
+That last point is the lesson. Each extra nine cuts allowed downtime by 10x, and costs far more than 10x. At 99.9% a human can respond, find the cause and roll back. At 99.99% there is no time for a human: failover must be automatic, deploys must be gradual with automatic rollback, and every dependency must be as good. At 99.999% you are building a different company.
+
+## Error budgets: downtime as an allowance
+
+The gap between 100% and your SLO is the **error budget**. For 99.9% over 30 days, it is about 43 minutes of failure you're allowed. This turns a fuzzy argument ("is it stable enough to ship?") into arithmetic.
+
+- If you've used 10% of the budget, ship freely. Risk is cheap.
+- If you've used 80%, slow down: smaller releases, no Friday deploys.
+- If you've blown it, freeze feature launches and spend the next sprint on reliability until the window recovers.
+
+This also protects the product from the opposite mistake. If the budget is untouched at the end of every month, you're too careful: you could ship faster or take a cheaper, less redundant design. Perfect reliability is a sign of wasted money.
+
+**Burn rate** is how fast you're spending. A 43-minute monthly budget burned at 1x lasts the full month. A bug failing 10% of checkouts burns it at 100x, so it's gone in about seven hours, and you should be paged within minutes, not at the end of the day. Good alerts fire on burn rate over a short window ("budget burning 14x faster than allowed for 5 minutes") rather than on a single failed request.
+
+<KeyIdea>An SLO is a budget for failure. You spend it on releases, experiments and incidents, and you stop spending when it runs out.</KeyIdea>
+
+## Your system is weaker than its parts
+
+A checkout request in Gatepass touches the API, the seat service, the payment gateway, the database and the notification queue. Say each is 99.9% available. If every one must work for the request to succeed, they are in **series**, and availabilities multiply: 0.999 to the fifth power is about 99.5%. Five good dependencies add up to roughly 1.8 days of downtime a year, five times what any one of them has on its own. Add more and it gets worse. This is why a microservice sprawl quietly destroys uptime: every new hop in the critical path subtracts from the total.
+
+The way out is **redundancy**, or components in **parallel**. Two independent replicas fail together only if both are down: 1 minus 0.001 x 0.001 = 99.9999%. The word to watch is *independent*. Two replicas on the same host, the same power feed, running the same buggy build or reading the same overloaded database are not independent, and the calculation is fiction. Real redundancy needs separate machines, zones and, for the worst failures, regions, which the next lesson covers.
+
+Two other tools shrink the series chain without more replicas. **Make dependencies optional**: if the recommendations service is down, checkout should still work, with the section hidden (graceful degradation). **Take things off the critical path**: send the confirmation email through a queue so the SMS provider's bad day does not fail a purchase.
+
+<Quiz
+  id="slo-series"
+  question="Checkout calls 4 services in sequence, each 99.95% available. About what availability can you promise for checkout, assuming independent failures?"
+  options={[
+    "99.95%, the same as each service",
+    "99.8%, since the four availabilities multiply",
+    "99.99%, because there is redundancy",
+    "Cannot be computed"
+  ]}
+  answer={1}
+  explain={<>In series, you multiply: 0.9995^4 is about 0.998. The checkout is down whenever any one of the four is, so each added hop eats into the total. To do better, remove hops from the critical path or add independent replicas to the weakest ones.</>}
+/>
+
+<YourTurn
+  id="slo-gatepass-slis"
+  prompt="Propose two SLIs and SLOs for Gatepass: one for fans buying tickets and one for organisers scanning tickets at the door. What would you measure, and what target?"
+  fields={2}
+>
+- **Buying:** the fraction of `POST /checkout` requests that return success (not a 5xx) within 1 second, measured at the load balancer. Target 99.9% over 30 days, which is a budget of about 43 minutes of failure. Sales peaks matter most, so also alert on short-window burn rate during on-sale events.
+- **Scanning:** the fraction of door scans validated in under 300 ms. Target 99.95%, because a failing scanner means a queue of angry fans at the gate and no good retry later. Make the scanner app work offline with a cached ticket list, so this SLI is less coupled to the main system.
+
+Notice that both count requests from the user's point of view, and that the stricter target goes where failure is hardest to hide.
+</YourTurn>
+
+## Key takeaways
+
+- An SLI measures good events over all events, an SLO is your internal target, and an SLA is a contract set looser than the SLO.
+- Each nine allows 10x less downtime and costs much more than 10x as much. 99.9% is 43 minutes a month; 99.99% is 4.
+- The error budget (100% minus the SLO) makes release speed a number: spend it freely, slow down as it burns, freeze when it's gone.
+- Dependencies in series multiply and drag availability down; independent replicas in parallel raise it.
+- Pick targets from what users need and what you can afford, not from "as high as possible".
