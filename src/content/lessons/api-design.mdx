@@ -1,0 +1,118 @@
+import { RestDesigner } from "@/components/visuals/rest-designer"
+
+The Gatepass app and the Gatepass server are written by different people, shipped on different days, and updated on different schedules. The only thing holding them together is the API: the list of requests the server accepts and what it sends back. Get it right and both sides can change freely. Get it wrong and every change breaks someone.
+
+## The API is a contract
+
+Once the app is in students' phones, you can't update it whenever you like. Some students won't update for months. So every endpoint the app calls is a promise: this URL, with these inputs, returns this shape. Break the promise and old apps crash.
+
+That's why API design deserves care up front. Internal code can be refactored any afternoon. A public API is closer to a database schema: easy to add to, painful to change.
+
+<KeyIdea>Design the API from the client's point of view: what does the screen need, in as few requests as possible, in a shape that won't need to change?</KeyIdea>
+
+## Resources and methods
+
+Most web APIs follow **REST** conventions. The idea is simple: the URL names a *thing* (a resource), and the HTTP method says what to do with it.
+
+- `GET` reads. It must not change anything, so it's safe to retry and to cache.
+- `POST` creates something new, where the server picks the id.
+- `PUT` replaces a thing at a known URL, entirely.
+- `PATCH` changes some fields of a thing.
+- `DELETE` removes it.
+
+Resources come in **collections** (plural nouns) and **items** (a collection plus an id):
+
+```http
+GET    /events            list events
+GET    /events/42         one event
+POST   /events/42/bookings   book a pass for event 42
+GET    /bookings/981      one booking
+DELETE /bookings/981      cancel it
+```
+
+The most common beginner mistake is putting verbs in the path: `/getEvents`, `/createBooking`, `/cancelBooking?id=981`. It works, but every endpoint becomes a one-off that clients must memorise, and you lose what HTTP gives you for free: caches know `GET` is safe, clients know `DELETE` is safe to retry, and everyone can guess `/events/42` without reading docs.
+
+<Callout tone="note" title="REST isn't the only style">
+GraphQL lets the client ask for exactly the fields a screen needs in one request. gRPC uses typed, binary messages and is popular between internal services. Both are good tools. REST is the default for public APIs because every client, proxy and cache already understands it, and the design thinking carries over to the others.
+</Callout>
+
+## Status codes that mean something
+
+The response's status code is the first thing the client checks, so use it honestly:
+
+<Diagram w={680} h={230} caption="One booking request, three possible outcomes. The client handles each differently, so each needs its own code.">
+  <Box x={10} y={89} w={130} label="Gatepass app" icon="phone" />
+  <Box x={250} y={89} w={140} label="API server" icon="server" tone="accent" />
+  <Wire points={[[140, 115], [250, 115]]} tone="req" label="POST" />
+  <Packet points={[[140, 115], [250, 115]]} dur={1.8} />
+  <Box x={480} y={14} w={190} label="201 Created" sub="booking + QR in body" tone="ok" />
+  <Box x={480} y={89} w={190} label="409 Conflict" sub="sold out" tone="warn" />
+  <Box x={480} y={164} w={190} label="401 Unauthorized" sub="not signed in" tone="err" />
+  <Wire points={[[390, 105], [435, 105], [435, 40], [480, 40]]} tone="ok" />
+  <Wire points={[[390, 115], [480, 115]]} tone="warn" />
+  <Wire points={[[390, 125], [435, 125], [435, 190], [480, 190]]} tone="err" />
+</Diagram>
+
+- **2xx: it worked.** `200 OK` for reads, `201 Created` when something new exists, `204 No Content` when there's nothing to return.
+- **4xx: the client got something wrong.** `400` malformed input, `401` not signed in, `403` signed in but not allowed, `404` doesn't exist, `409` conflicts with the current state (sold out, already booked), `429` too many requests.
+- **5xx: the server got something wrong.** `500` a bug, `503` overloaded or down for a moment.
+
+The 4xx/5xx split matters more than it looks. A client should **not** retry a `400`; sending the same bad input again won't help. It **may** retry a `503` after a pause. Returning `500` for "sold out" tells every client to keep retrying a request that can never succeed, and on sale day that's thousands of pointless requests a second.
+
+## Design the Gatepass API
+
+Your turn. Here are six things the Gatepass app needs to do. Choose a method and write a path for each, then check your answers. Several actions have more than one good answer, and the notes explain the tradeoffs.
+
+<RestDesigner />
+
+## Shaping requests and responses
+
+The URL is half the contract. The bodies are the other half. A few habits keep them easy to live with:
+
+**Return objects, not bare arrays.** `{ "events": [ … ], "next": "cursor123" }` leaves room to add fields like pagination later. A bare `[ … ]` doesn't.
+
+**Paginate every list.** Today there are 12 events. In a year there are 12,000, and `GET /events` returns a 9 MB response. Use a limit and a cursor from day one: `GET /events?limit=20&after=cursor123`.
+
+**Return what the screen needs.** If the event page always shows the venue's name, include it in the event response so the app doesn't need a second request:
+
+```json
+{
+  "id": 42,
+  "title": "Battle of Bands",
+  "startsAt": "2026-02-14T18:00:00+05:30",
+  "venue": { "id": 7, "name": "Open Air Theatre" },
+  "passesLeft": 113
+}
+```
+
+**Use clear, consistent names and formats.** Pick one case style (camelCase is common in JSON), send times in ISO 8601 with a time zone, and send money as integers in the smallest unit (`49900` paise) so nobody rounds a float.
+
+## Changing an API without breaking it
+
+You will need to change the API. The safe rule: **additive changes are fine, everything else needs a new version.**
+
+- Adding a new endpoint or a new optional field: safe. Old apps ignore what they don't know.
+- Renaming a field, removing one, changing its type or meaning: breaking. Old apps read the old name and crash or, worse, quietly show wrong data.
+
+For breaking changes, run a second version (`/v2/events`) alongside the first, move clients over, and only remove v1 when nobody calls it. That's slow and expensive, which is the strongest argument for thinking hard about the first version.
+
+<Quiz
+  id="api-design-1"
+  question="A student tries to book a pass for an event that just sold out. Which response is best?"
+  options={[
+    "200 OK with { \"success\": false }",
+    "409 Conflict with { \"error\": \"sold_out\" }",
+    "500 Internal Server Error",
+    "404 Not Found",
+  ]}
+  answer={1}
+  explain={<>The request was valid, but it conflicts with the current state of the event. 409 says that, so the client shows "sold out" and doesn't retry. 200 with an error body hides the failure from caches, monitoring and clients; 500 invites retries; 404 claims the event doesn't exist.</>}
+/>
+
+## Key takeaways
+
+- An API is a contract with clients you can't update on demand; design it carefully up front.
+- In REST, paths name resources (plural nouns, ids for items) and methods are the verbs.
+- Use status codes honestly: 2xx success, 4xx client mistakes (don't retry), 5xx server trouble (maybe retry).
+- Wrap lists in objects, paginate from day one, and return what the screen needs.
+- Additive changes are safe; renames and removals need a new version.

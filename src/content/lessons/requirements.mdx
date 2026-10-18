@@ -1,0 +1,124 @@
+Two teams get the same brief: "a ticketing app for the college fest". One ships something that handles fest day without a hiccup. The other's app melts at 10:00:01. Usually the difference isn't skill. It's that the first team wrote down how good the app had to be before they built it.
+
+## Two kinds of requirement
+
+Every requirement answers one of two questions.
+
+**Functional requirements: what does the system do?** They're features, best written as things a user can do:
+
+- A student can see this year's events and pass types.
+- A student can buy a pass and get a QR code.
+- A volunteer can scan a QR code and see if it's valid.
+- An organiser can see how many passes have sold.
+
+**Non-functional requirements: how well does it do it?** They're qualities, and they only mean something with a number attached:
+
+- **Latency:** the event page loads in under 300 ms for 95% of requests.
+- **Throughput:** handle 50 purchases per second at peak.
+- **Availability:** up 99.9% of fest week.
+- **Correctness:** never sell more passes than the venue holds.
+- **Durability:** a paid booking is never lost.
+
+<Diagram w={680} h={200} caption="Functional requirements decide which boxes exist. Non-functional ones decide how big, how many and how careful.">
+  <Group x={10} y={30} w={300} h={150} label="functional: what" tone="accent" />
+  <Group x={370} y={30} w={300} h={150} label="non-functional: how well" tone="info" />
+  <Text x={30} y={64} anchor="start" size={13}>list events</Text>
+  <Text x={30} y={92} anchor="start" size={13}>buy a pass</Text>
+  <Text x={30} y={120} anchor="start" size={13}>scan at the gate</Text>
+  <Text x={30} y={148} anchor="start" size={13}>see sales</Text>
+  <Text x={390} y={64} anchor="start" size={13} mono>p95 &lt; 300 ms</Text>
+  <Text x={390} y={92} anchor="start" size={13} mono>50 buys/s at peak</Text>
+  <Text x={390} y={120} anchor="start" size={13} mono>99.9% fest week</Text>
+  <Text x={390} y={148} anchor="start" size={13} mono>0 oversold</Text>
+  <Wire points={[[310, 105], [370, 105]]} tone="muted" arrow={false} dashed />
+</Diagram>
+
+A useful test: if you can't imagine a load test or a check that would *fail* the requirement, it isn't written well enough yet. "The app should be fast" can't fail. "95% of event page loads under 300 ms" can.
+
+## Why the non-functional ones matter more
+
+Here's the uncomfortable truth: functional requirements rarely change the architecture. Nearly any architecture can "let a student buy a pass". It's the non-functional numbers that decide whether you need one server or twenty, one database or a primary with replicas, a cache, a queue.
+
+Take the same feature with two different numbers:
+
+- **"Buy a pass", 2 per second.** One server, one database, a transaction. Done.
+- **"Buy a pass", 20,000 per second for the first minute of a stadium sale.** Now you need a waiting room, a fast way to hold seats, payments in the background, and a database that won't lock up on one hot row.
+
+Same verb, completely different system. That's why experienced designers spend their requirement time on the adjectives.
+
+<KeyIdea>Functional requirements tell you what to build. Non-functional requirements tell you how hard it will be.</KeyIdea>
+
+## Writing them down for Gatepass
+
+Let's write Gatepass's real list for the first fest. Notice the scope line at the end; it's as important as anything above it.
+
+**Functional**
+1. Students browse events and pass types without signing in.
+2. Students sign in with their college email and buy passes.
+3. A purchase returns a QR code that also arrives by email.
+4. Volunteers scan passes at two gates; each pass works once.
+5. Organisers see live sales numbers.
+
+**Non-functional**
+1. 4,000 students; expect 2,000 purchases, most in the first hour.
+2. Browsing: p95 under 300 ms. Purchase: p95 under 2 s (payment is slow anyway).
+3. The sale window (first two hours) must not go down. Outside it, a few minutes of downtime is fine.
+4. Zero overselling, zero lost payments.
+5. Gate scanning keeps working without internet for up to 30 minutes.
+
+**Out of scope for now:** refunds, seat maps, transfers between students, multiple colleges.
+
+<Callout tone="tip" title="Requirements have different weights">
+"Never oversell" and "browsing under 300 ms" aren't equally important. If you had to pick, you'd accept a slow page over a double-sold pass. Ranking your requirements tells you which way to lean when two of them fight.
+</Callout>
+
+## Hidden requirements
+
+Some requirements nobody says out loud, but everybody expects:
+
+- **Security:** students can't see other students' passes or forge a QR code.
+- **Privacy:** phone numbers and emails aren't exposed.
+- **Operability:** when something goes wrong at 10:02 on sale day, someone can tell what happened from the logs.
+- **Cost:** the committee's budget is a few thousand rupees a month, not a few lakh.
+
+You won't always design deeply for these on day one, but you should name them. Interviewers and reviewers notice when you do.
+
+<Quiz
+  id="requirements-1"
+  question="Which of these is a well-written non-functional requirement?"
+  options={[
+    "The booking page should be fast and reliable",
+    "Students can cancel a booking",
+    "99% of booking requests complete in under 1.5 seconds at 50 requests per second",
+    "Use Redis for caching",
+  ]}
+  answer={2}
+  explain={<>It has a measurable target, a percentile, and the load it applies at, so a test can pass or fail it. "Fast and reliable" can't fail. Cancelling is functional. "Use Redis" is a design decision, not a requirement.</>}
+/>
+
+## Percentiles, not averages
+
+You'll see "p95" and "p99" everywhere in this course, so let's pin them down. If you sort 100 response times from fastest to slowest, p95 is the 95th one: 95% of requests were at least that fast.
+
+Why not the average? Because averages hide pain. Imagine 99 requests at 100 ms and one at 10 seconds. The average is about 200 ms, which sounds fine. But one student in a hundred stared at a spinner for ten seconds, and on fest day that's twenty angry people in the group chat. The p99 (10 s) tells you that; the average doesn't.
+
+<YourTurn
+  id="requirements-scanner"
+  prompt="Write two non-functional requirements for the gate scanner that a test could fail."
+  fields={2}
+  minAnswers={2}
+  hint="Think about how long a volunteer waits per scan, and what happens with no internet."
+>
+- **Speed:** a scan shows valid / already used in under 500 ms for 99% of scans, with or without internet.
+- **Offline:** the scanner keeps validating for at least 30 minutes with no connection, and syncs all scans within 1 minute of reconnecting.
+
+Other good answers: "a pass scanned at gate A is rejected at gate B within 10 seconds when both are online", or "the scanner app works on a 4-year-old Android phone".
+</YourTurn>
+
+## Key takeaways
+
+- Functional requirements are what the system does; non-functional ones are how well, with numbers.
+- Non-functional requirements drive the architecture; the same feature at 2/s and 20,000/s are different systems.
+- Write requirements a test could fail, and rank them so you know which wins in a conflict.
+- Use percentiles (p95, p99), not averages, for latency.
+- Write down what's out of scope. It's a decision too.

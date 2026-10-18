@@ -1,0 +1,96 @@
+import { RequestJourney } from "@/components/visuals/request-journey"
+
+A student taps "Inter-college Battle of Bands" in the Gatepass app and, a moment later, the event page appears. In that moment the phone has asked for directions, shaken hands twice, agreed on secret keys, sent a request, and waited for a server and a database to answer. Knowing these steps tells you where time goes, and where you can win it back.
+
+## Finding the server: DNS
+
+The app knows a name, `api.gatepass.app`. The internet routes by numbers, IP addresses like `203.0.113.7`. **DNS** (the Domain Name System) turns the first into the second.
+
+The phone asks a **resolver**, usually run by the mobile network or a service like 1.1.1.1. If the resolver doesn't already know the answer, it asks a chain of servers: the root, then the servers for `.app`, then the servers for `gatepass.app`. Each answer comes with a TTL (time to live), saying how long it may be cached.
+
+A cold lookup can take 20–100 ms. A cached one, on the phone or at the resolver, takes about nothing. That's why DNS barely shows up for an app you use daily, and why the first request after installing feels slower.
+
+<Callout tone="note" title="DNS is also a design tool">
+Because DNS answers can differ by who's asking, they're used to send users to the nearest data centre, or away from a broken one. You'll use this in the module on going global. The catch is the TTL: change an answer, and some clients keep the old one until it expires.
+</Callout>
+
+## Opening a connection: TCP
+
+Now the phone knows where to go. Before sending anything, it opens a **TCP connection**, which guarantees bytes arrive complete and in order. Opening one takes a three-step handshake:
+
+<Diagram w={640} h={330} caption="The handshakes before the first byte of your request. Each round trip is a full trip to the server and back.">
+  <Box x={20} y={10} w={120} h={40} label="Phone" icon="phone" />
+  <Box x={500} y={10} w={120} h={40} label="API server" icon="server" tone="accent" />
+  <Wire points={[[80, 50], [80, 320]]} tone="muted" arrow={false} dashed />
+  <Wire points={[[560, 50], [560, 320]]} tone="muted" arrow={false} dashed />
+  <Text x={320} y={68} size={10} mono tone="muted">TCP</Text>
+  <Wire points={[[80, 80], [560, 100]]} tone="req" label="SYN" labelAt={[320, 90]} />
+  <Wire points={[[560, 112], [80, 132]]} tone="res" label="SYN-ACK" labelAt={[320, 122]} />
+  <Wire points={[[80, 144], [560, 152]]} tone="req" label="ACK" labelAt={[320, 148]} />
+  <Text x={320} y={176} size={10} mono tone="muted">TLS 1.3</Text>
+  <Wire points={[[80, 186], [560, 204]]} tone="info" label="ClientHello + key share" labelAt={[320, 195]} />
+  <Wire points={[[560, 214], [80, 232]]} tone="res" label="ServerHello + cert" labelAt={[320, 223]} />
+  <Text x={320} y={256} size={10} mono tone="muted">HTTP</Text>
+  <Wire points={[[80, 266], [560, 284]]} tone="req" label="GET /events/42" labelAt={[320, 275]} />
+  <Wire points={[[560, 294], [80, 312]]} tone="res" label="200 OK + JSON" labelAt={[320, 303]} />
+  <Text x={600} y={126} size={10} mono tone="muted" anchor="start">1 RTT</Text>
+  <Text x={600} y={222} size={10} mono tone="muted" anchor="start">1 RTT</Text>
+  <Text x={600} y={302} size={10} mono tone="muted" anchor="start">1 RTT</Text>
+</Diagram>
+
+The phone says "let's talk" (SYN), the server says "sure" (SYN-ACK), and the phone confirms (ACK). The phone can send right after its ACK, so the handshake costs one **round trip time** (RTT): the time for a message to reach the server and a reply to come back.
+
+RTT is set mostly by distance. Light in fibre covers about 200 km per millisecond, and real routes zigzag. Same city: 5–20 ms. Mumbai to Frankfurt: around 120 ms. Mumbai to California: 200–250 ms. You can't optimise the speed of light; you can only do fewer round trips or move closer.
+
+## Making it private: TLS
+
+Next, **TLS** encrypts the connection so nobody on the café Wi-Fi can read the student's session token. The phone and server agree on keys, and the server proves it really is `api.gatepass.app` with a certificate.
+
+With TLS 1.3 this takes one more round trip (older TLS 1.2 took two). So before the app has sent a single byte of its actual request, a fresh connection has spent **two round trips** on handshakes. Same city, that's ~25 ms. Across an ocean, ~400 ms, before the server even knows what you want.
+
+## The HTTP request itself
+
+Finally the app sends its request:
+
+```http
+GET /events/42 HTTP/1.1
+Host: api.gatepass.app
+Authorization: Bearer eyJhbGciOi…
+Accept: application/json
+```
+
+That's another half round trip to get there, the server's own time to answer, and half a round trip back. The server's part is usually the smallest: routing the request, checking the token, running one database query, turning rows into JSON. For a simple page, 5–20 ms.
+
+<KeyIdea>For most simple requests, the network takes longer than your code. Fewer round trips beat faster code.</KeyIdea>
+
+## Inside the data centre
+
+The server and database usually sit in the same data centre, often the same rack. A round trip between them is around half a millisecond, so a query that hits an index might take 1–5 ms in total. That changes once you have many queries per request: twenty queries in a row is twenty round trips, and suddenly the database hop matters. Keep that in mind; it's the reason "N+1 queries" is a famous performance bug.
+
+## Watch it end to end
+
+Here's the whole journey as a timeline. Start with the server in the same city, then move it to another continent and watch the handshakes balloon. Then turn on the two toggles and see what reuse saves.
+
+<RequestJourney />
+
+Three lessons hide in this visual:
+
+1. **Distance multiplies.** Every round trip pays the distance again. A request that needs four round trips is four times as sensitive to where your server is.
+2. **Connection reuse is huge.** HTTP keep-alive (and HTTP/2, which runs many requests over one connection) lets every request after the first skip TCP and TLS. Apps that open a fresh connection per request throw away hundreds of milliseconds.
+3. **Your code is the small bar.** Optimising server code from 8 ms to 4 ms is invisible next to a 190 ms round trip. Moving closer to users, or caching at the edge, is where big wins live.
+
+<Quiz
+  id="request-travels-1"
+  question="Gatepass expands to students abroad, 200 ms round trip from the server. A first request on a fresh connection needs DNS (cached), TCP, TLS 1.3 and the HTTP exchange. Roughly how long before the response arrives, ignoring server time?"
+  options={["About 200 ms", "About 400 ms", "About 600 ms", "About 1 second"]}
+  answer={2}
+  explain={<>Three round trips: TCP (1), TLS 1.3 (1), and the request and response (1). 3 × 200 ms = 600 ms. With a reused connection only the last one remains, about 200 ms.</>}
+/>
+
+## Key takeaways
+
+- A fresh HTTPS request costs DNS, a TCP handshake (1 RTT), a TLS handshake (1 RTT with TLS 1.3), then the request itself (1 RTT).
+- Round trip time is set by distance; same city is ~10 ms, across an ocean ~150–250 ms.
+- Keep-alive and HTTP/2 reuse connections so later requests skip both handshakes.
+- Server and database time is often the smallest part; fewer round trips usually beat faster code.
+- DNS answers are cached for their TTL, which makes them fast and also slow to change.

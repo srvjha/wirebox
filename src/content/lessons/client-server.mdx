@@ -1,0 +1,92 @@
+Gatepass has three kinds of program: the app on the student's phone, the API server, and the database. Each one has a job, and much of good design is keeping each job in the right place. Put logic in the wrong one and you get apps that can be cheated, servers that can't scale, or data that quietly goes wrong.
+
+## Three roles
+
+<Diagram w={680} h={210} caption="Clients ask, servers decide, the database remembers.">
+  <Group x={10} y={30} w={170} h={160} label="untrusted" tone="err" />
+  <Group x={220} y={30} w={450} h={160} label="your data centre" tone="ok" />
+  <Box x={30} y={60} w={130} label="Phone app" sub="client" icon="phone" />
+  <Box x={30} y={124} w={130} label="Web app" sub="client" icon="client" />
+  <Box x={260} y={92} w={150} label="API server" sub="stateless code" icon="server" tone="accent" />
+  <Box x={500} y={92} w={150} label="Database" sub="the source of truth" icon="db" />
+  <Wire points={[[160, 86], [210, 86], [210, 112], [260, 112]]} tone="req" />
+  <Wire points={[[160, 150], [210, 150], [210, 124], [260, 124]]} tone="req" />
+  <Wire points={[[410, 112], [500, 112]]} tone="req" label="SQL" />
+  <Wire points={[[500, 128], [410, 128]]} tone="res" />
+  <Packet points={[[160, 86], [210, 86], [210, 112], [260, 112]]} dur={2} />
+  <Packet points={[[410, 112], [500, 112]]} dur={2} delay={1} />
+  <Packet points={[[500, 128], [410, 128]]} dur={2} delay={1.6} tone="res" />
+</Diagram>
+
+**The client** is whatever the user holds: the phone app, a browser tab, the volunteer's scanner. It shows things and collects input. It asks; it never decides anything that matters.
+
+**The server** runs your code. It receives requests, checks who's asking and whether they're allowed, applies the business rules ("is this event on sale?", "is this student already holding a pass?"), and talks to the database.
+
+**The database** stores the data and keeps it correct when many requests arrive at once. It's the **source of truth**: when the app and the database disagree about how many passes are left, the database is right.
+
+## Never trust the client
+
+The client runs on a device you don't control. Anyone can open the browser's developer tools, or replay the app's requests with a script, and send anything they like. So every rule that protects money or fairness must run on the server.
+
+Suppose the Gatepass app sends this to book a pass:
+
+```json
+{ "event": 42, "passType": "day", "price": 0 }
+```
+
+If the server charges whatever `price` the app sent, someone will set it to zero within a day of launch. The server must look up the price itself. Same for "is this student allowed a second pass?" and "is this event still on sale?". The app can check those too, for a nicer experience, but the server's check is the one that counts.
+
+<KeyIdea>The client is for showing and collecting. Every decision that matters is made, again, on the server.</KeyIdea>
+
+## Why the database is a separate process
+
+You could keep Gatepass's data in a JSON file next to the server code. Lots of prototypes do. It breaks in three ways as soon as the app is real:
+
+1. **Concurrency.** Two booking requests at the same moment both read "1 pass left", both write "0 left", and you've sold two. Databases have transactions and locks so this can't happen.
+2. **Durability.** If the server crashes halfway through writing the file, you can end up with half a file. Databases write to a log first, so after a crash they come back to the last complete state.
+3. **More than one server.** The day you run two API servers, each has its own file. A database is one shared place every server talks to over the network.
+
+That last point shapes the whole course. Because the data lives in the database, the API servers can be **stateless**: any server can handle any request, because nothing important is kept in the server's memory between requests. Stateless servers are easy to add, remove and restart. Stateful ones are not.
+
+<Callout tone="warn" title="Hidden state">
+State sneaks into servers in small ways: a login session kept in memory, an uploaded file saved to local disk, an in-memory counter of tickets sold. Each works perfectly with one server and breaks the moment you add a second. Module 4 hunts all of these down.
+</Callout>
+
+## Who does what in a booking
+
+Let's walk "book a day pass" through the three roles:
+
+1. **Client:** the student picks a pass type and taps Pay. The app disables the button so a double tap doesn't send two requests, and sends `POST /events/42/bookings` with the pass type and a payment token.
+2. **Server:** checks the session token (who is this?), checks the event is on sale, looks up the real price, and asks the payment provider to charge it.
+3. **Database:** in one transaction, decrements the remaining passes if any are left and inserts the booking. If nothing's left, the transaction does nothing and the server refunds and returns "sold out".
+4. **Server → client:** returns `201 Created` with the booking and QR data.
+5. **Client:** shows the pass and saves it locally so it works offline at the gate.
+
+The client's double-tap protection is nice to have, but the server must still cope with duplicate requests: a flaky network can make the app retry. You'll learn the proper fix, idempotency keys, in Module 7.
+
+<Quiz
+  id="client-server-1"
+  question="The Gatepass app hides the 'Buy' button once a student owns a pass. Is that enough to enforce one pass per student?"
+  options={[
+    "Yes, the button is the only way to buy",
+    "No, the server must check too, because anyone can send the request without the app",
+    "Yes, as long as the app is from the official store",
+    "No, it should be checked in the database only, not the server",
+  ]}
+  answer={1}
+  explain={<>Requests can come from scripts, modified apps or replayed traffic. The server (often helped by a database constraint, like a unique index on student and event) must enforce the rule. Hiding the button just makes the honest experience nicer.</>}
+/>
+
+## Thin client, thick client
+
+How much should the client do? There's a spectrum. A **thin** client, like a basic web page, asks the server for everything and does little itself. A **thick** client, like a modern phone app, caches data, works offline, and validates input before sending it.
+
+Gatepass's scanner is deliberately thick: it downloads the list of valid passes and checks them locally, because the gate Wi-Fi is unreliable. The tradeoff: two gates can each accept the same pass before they sync. That's acceptable for a fest. It wouldn't be for a bank.
+
+## Key takeaways
+
+- Clients show and collect, servers decide, databases store and keep data correct.
+- Never trust the client: re-check prices, permissions and limits on the server.
+- A database is a separate process because it handles concurrency, survives crashes and is shared by every server.
+- Keeping state out of API servers makes them stateless, which makes them easy to scale.
+- Thick clients can work offline, at the cost of decisions made without the latest data.

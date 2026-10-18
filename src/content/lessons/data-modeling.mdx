@@ -1,0 +1,116 @@
+import { GatepassSchema } from "@/components/visuals/gatepass-schema"
+
+Code is easy to change. Data isn't. Once Gatepass has a few thousand tickets in the database, every mistake in how they're stored is a migration you'll run at midnight. A little care now, deciding what the tables are and how they connect, saves a lot of that.
+
+## Start from the questions
+
+Beginners model data by listing nouns. That's a fine start, but the better starting point is the **questions the app will ask**. A schema is good if it answers its common questions quickly and correctly. For Gatepass:
+
+1. Show one event with its venue. (Every event page view, thousands a minute on sale day.)
+2. Book a ticket without overselling. (Hundreds a minute, must be correct.)
+3. Show a student their tickets. (Every time they open the app.)
+4. List this week's events in a city. (The home screen.)
+5. Count sales per event. (The organiser dashboard, once a minute.)
+
+Keep this list next to you. Every table and column should help answer one of these, and every one of these should be answerable without contortions.
+
+## Entities become tables
+
+The nouns in those questions are your **entities**: venues, events, tickets, users. Each becomes a table. Each row is one thing, and each column is one fact about it.
+
+<Diagram w={680} h={170} caption="Gatepass's four tables. Read the lines as “one venue has many events”, “one event has many tickets”, “one user has many tickets”.">
+  <Box x={10} y={60} w={130} label="venues" sub="id, name, city" icon="db" />
+  <Box x={190} y={60} w={130} label="events" sub="id, venue_id, …" icon="db" tone="accent" />
+  <Box x={370} y={60} w={130} label="tickets" sub="id, event_id, user_id" icon="db" />
+  <Box x={550} y={60} w={120} label="users" sub="id, email" icon="db" />
+  <Wire points={[[190, 86], [140, 86]]} tone="info" />
+  <Wire points={[[370, 86], [320, 86]]} tone="info" />
+  <Wire points={[[500, 86], [550, 86]]} tone="info" />
+  <Text x={150} y={78} size={11} mono tone="muted">1</Text>
+  <Text x={182} y={78} size={11} mono tone="muted">∗</Text>
+  <Text x={330} y={78} size={11} mono tone="muted">1</Text>
+  <Text x={362} y={78} size={11} mono tone="muted">∗</Text>
+  <Text x={510} y={78} size={11} mono tone="muted">∗</Text>
+  <Text x={542} y={78} size={11} mono tone="muted">1</Text>
+  <Text x={340} y={145} size={11} tone="muted">arrows point from a foreign key to the row it references</Text>
+</Diagram>
+
+Notice what's *not* a table: "bookings" and "tickets" are the same thing for Gatepass, so there's one table, not two. And "price" is a column on events, not its own table, until pass types (early bird, VIP) force it out. Model what you need now; tables are easy to add later.
+
+## Keys and relationships
+
+Every table gets a **primary key**: a column (usually `id`) that uniquely identifies each row and never changes. Use a meaningless number or UUID, not something from the real world. Emails change. Phone numbers get recycled. Event titles get typos fixed.
+
+Relationships are stored as **foreign keys**: a column in one table that holds the primary key of a row in another. `events.venue_id` holds a venue's `id`. `tickets.event_id` and `tickets.user_id` link each ticket to its event and its owner.
+
+The foreign key always lives on the "many" side. One venue has many events, so the event carries `venue_id`; the venue doesn't carry a list of event ids. This is what lets the database **join**: "give me event 42 and the venue whose id matches its venue_id" in a single query.
+
+<Callout tone="tip" title="Many-to-many needs a table in the middle">
+If an event could have several organisers and an organiser several events, neither table can hold one foreign key. You add a join table, `event_organisers (event_id, user_id)`, with one row per pair. `tickets` is actually a join table too, between users and events, that happens to carry its own facts (status, time booked).
+</Callout>
+
+## Explore the schema
+
+Here's the full Gatepass schema. Click through the five questions from earlier and watch which tables and columns each one uses. Pay attention to which ones touch a single row by its key, and which ones have to scan many rows.
+
+<GatepassSchema />
+
+A few things are worth noticing:
+
+- **The event page** joins two tables, but both lookups use primary keys. It stays fast no matter how many events exist.
+- **Booking** writes to two tables inside one transaction. That's what makes "decrement the count and create the ticket" all-or-nothing.
+- **My tickets** filters by `user_id`, which isn't a primary key. With 500 tickets that's instant; with 50 million it's slow unless there's an index, which is the next-but-one lesson.
+- **Sales per event** reads every paid ticket. That's fine for a dashboard refreshed once a minute, and a bad idea for a number shown on every page view.
+
+## Constraints are free bug fixes
+
+A database can enforce rules for you, and it never forgets to check them. Use that:
+
+- `NOT NULL` on columns that must exist: an event without a `starts_at` is a bug.
+- `FOREIGN KEY` so a ticket can't point to an event that doesn't exist (or that someone deleted).
+- `UNIQUE` on facts that must be unique: `users.email`, or `(event_id, user_id)` if each student may hold only one pass per event.
+- `CHECK (passes_left >= 0)` as a last line of defence against overselling.
+
+```sql
+CREATE TABLE tickets (
+  id         bigserial PRIMARY KEY,
+  event_id   bigint NOT NULL REFERENCES events(id),
+  user_id    bigint NOT NULL REFERENCES users(id),
+  status     text   NOT NULL CHECK (status IN ('paid', 'cancelled')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (event_id, user_id)
+);
+```
+
+Application code has bugs, runs on many servers and gets rewritten. Constraints sit next to the data and hold no matter which code path writes it. When two requests race to book the same student a second pass, the `UNIQUE` constraint is what stops it.
+
+<KeyIdea>Put every rule that must never be broken into the schema as a constraint. The database checks it on every write, from every server, forever.</KeyIdea>
+
+## Normalise first, then copy on purpose
+
+**Normalising** means storing each fact once. The venue's name lives in `venues`, not copied into every event row. Change it once, and every event shows the new name.
+
+**Denormalising** means copying a fact on purpose to make a read faster. `events.passes_left` is a denormalised value: you *could* compute it as capacity minus count of paid tickets, every time. You store it instead, because the event page needs it thousands of times a minute, and you keep it correct by updating it in the same transaction as each booking.
+
+The order matters. Start normalised, and copy a fact only when a measured query needs it. Every copy is a promise to keep two places in sync.
+
+<Quiz
+  id="data-modeling-1"
+  question="Each student may hold only one pass per event. Two booking requests for the same student arrive at the same instant. What reliably prevents two tickets?"
+  options={[
+    "The app checks the student's tickets before showing the Buy button",
+    "The server runs SELECT to check for an existing ticket, then INSERTs",
+    "A UNIQUE (event_id, user_id) constraint on tickets",
+    "Storing the student's ticket ids in a list on the users row",
+  ]}
+  answer={2}
+  explain={<>Both requests can run the SELECT before either INSERTs, see nothing, and both insert. The unique constraint makes the database reject the second insert, whatever the timing. The server then turns that error into a 409.</>}
+/>
+
+## Key takeaways
+
+- Start from the questions the app asks; a schema is good if it answers them quickly and correctly.
+- Entities become tables; every table gets a meaningless, unchanging primary key.
+- Relationships are foreign keys on the "many" side; many-to-many needs a join table.
+- Constraints (NOT NULL, FOREIGN KEY, UNIQUE, CHECK) enforce rules on every write, from every server.
+- Normalise by default; denormalise a value only when a hot query needs it, and update it in the same transaction.

@@ -1,3 +1,105 @@
-Placeholder lesson used to verify the MDX pipeline. Replaced in feat/learn.
+Your friend runs the cultural committee at their college, and this year they want to sell fest passes through an app instead of a spreadsheet and a queue outside the canteen. They ask you to build it. Before you open an editor, you have about fifty decisions to make, and most of them never show up in the code.
 
-<Callout tone="key">System design is the set of decisions behind the diagram.</Callout>
+That set of decisions is what this course calls system design.
+
+## The diagram is the receipt
+
+Search for "system design" and you'll find thousands of diagrams: boxes labelled *load balancer*, *cache*, *queue*, arrows between them, maybe a cylinder for the database. It's tempting to think the diagram *is* the design. It isn't. The diagram is the receipt you get after the decisions are made.
+
+Here is the smallest possible diagram for the fest app, which we'll call **Gatepass**:
+
+<Diagram w={640} h={170} caption="Gatepass on day zero: one phone, one server, one database.">
+  <Box x={20} y={60} label="Student" sub="phone app" icon="phone" />
+  <Box x={256} y={60} label="API server" sub="1 machine" icon="server" tone="accent" />
+  <Box x={492} y={60} label="Database" sub="Postgres" icon="db" />
+  <Wire points={[[148, 78], [256, 78]]} tone="req" label="book" />
+  <Wire points={[[256, 98], [148, 98]]} tone="res" />
+  <Wire points={[[384, 78], [492, 78]]} tone="req" label="INSERT" />
+  <Wire points={[[492, 98], [384, 98]]} tone="res" />
+  <Packet points={[[148, 78], [256, 78]]} dur={1.6} />
+  <Packet points={[[384, 78], [492, 78]]} dur={1.6} delay={0.8} />
+  <Packet points={[[492, 98], [384, 98]]} dur={1.6} delay={1.6} tone="res" />
+  <Packet points={[[256, 98], [148, 98]]} dur={1.6} delay={2.4} tone="res" />
+</Diagram>
+
+Three boxes. Anyone could draw it. But each box hides questions that decide whether the app survives fest day:
+
+- Why one server and not three? What happens when it restarts during the pass sale?
+- Why a relational database? What stops two students from buying the last pass at the same moment?
+- What does "book" actually send, and what comes back when it fails?
+
+Two engineers can draw the exact same three boxes and build systems that behave completely differently under load. The difference lives in the answers, not the shapes.
+
+<KeyIdea>System design is choosing what to build and how it should behave, under real limits, and being able to say why.</KeyIdea>
+
+## What a design decides
+
+Every design, from a fest app to a global payments network, answers the same handful of questions. You'll meet each one properly later in the course, but it helps to see the whole list once:
+
+1. **What the system must do.** List events, sell passes, show a QR code at the gate. These are the *functional requirements*.
+2. **How well it must do it.** How many students, how fast a page must load, how much downtime is acceptable. These are the *non-functional requirements*, and they drive almost every hard choice.
+3. **Where the data lives.** Which database, what tables, which queries must be fast.
+4. **How the parts talk.** The API between the app and the server, and between servers later on.
+5. **What happens when something breaks.** A server dies, the network drops, a payment provider times out.
+6. **What it costs.** In money, in engineering time, and in complexity you'll have to maintain.
+
+Notice that only one of these (the API) is close to "writing code". The rest are about trade-offs between speed, cost, correctness and effort. That's why system design is a skill of its own: you can be an excellent programmer and still build something that falls over at 10:00:01 on sale day.
+
+## Gatepass, day zero
+
+Let's put numbers on it. The college has 4,000 students. The committee expects about half to buy a pass, almost all of them in the first hour after sales open. The app needs to:
+
+- show the fest's events and pass types,
+- let a student pay and get a pass,
+- never sell more passes than the venue holds,
+- show a QR code that volunteers scan at the gate.
+
+With 2,000 purchases in an hour, that's well under one purchase per second on average. Even if half of them land in the first five minutes, it's around three or four per second. A single modest server and a single database handle that comfortably. So the right design today really is the three boxes above.
+
+<Callout tone="tip" title="Start small on purpose">
+The best first design is usually the simplest one that meets the requirements. Every extra box is something that can fail, something to monitor, and something to pay for. Add boxes when numbers force you to, not before.
+</Callout>
+
+That last line is the thread of this whole course. Gatepass will grow: other colleges, then comedy clubs, then stadium concerts in forty cities. At each step a specific problem will force a specific change. You'll see the problem first, then the fix, so every box you add has a reason you can explain.
+
+## Good designs are boring on purpose
+
+New engineers often reach for the most impressive architecture they've read about: microservices, Kafka, five kinds of database. Experienced engineers tend to do the opposite. They pick well-understood tools, keep the number of moving parts low, and spend their creativity on the one or two places that really are hard.
+
+For Gatepass, the hard part on day zero isn't scale. It's correctness: **never selling the same seat twice**. A design that spends its effort there, and keeps everything else plain, is a good design, even if the diagram looks dull.
+
+Here's a useful habit for the rest of the course. Whenever you see a box on a diagram, ask three questions:
+
+- **What problem does this solve?** If you can't name one, it probably shouldn't be there.
+- **What does it cost?** Money, latency, a new way to fail, a new thing to learn.
+- **What would we do without it?** Sometimes the answer is "the same thing, slightly slower", and that's fine.
+
+<Quiz
+  id="what-is-sd-1"
+  question="Gatepass expects about 4 purchases per second at peak on fest day. What's the best first design?"
+  options={[
+    "Three API servers behind a load balancer, so it never goes down",
+    "One server and one database, with care spent on not overselling passes",
+    "A queue for purchases and a separate payments microservice",
+    "A NoSQL database, because it scales better",
+  ]}
+  answer={1}
+  explain={<>Four requests a second is small for one server. The real risk is correctness, two people buying the last pass, so that's where effort should go. You add servers, queues and services when a measured problem asks for them.</>}
+/>
+
+## How this course works
+
+Each module follows Gatepass into a new problem. Lessons come in three kinds:
+
+- **Read** lessons explain one idea with a story and a diagram.
+- **Interactive** lessons give you a visual to poke: sliders, timelines, small simulations.
+- **Labs** hand you a real product to design, then load-test your design and show you where it breaks.
+
+You don't need an account. Your progress saves in this browser, and if you sign in it follows you to other devices. Next up: the process you'll use to turn a vague idea like "an app for the fest" into a design you can defend.
+
+## Key takeaways
+
+- A system design is a set of decisions; the diagram only records them.
+- Every design answers the same questions: what it does, how well, where data lives, how parts talk, what happens on failure, and what it costs.
+- Start with the simplest design that meets the requirements, and add parts only when numbers force you to.
+- For every box, be able to say what it solves, what it costs, and what you'd do without it.

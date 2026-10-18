@@ -1,0 +1,88 @@
+import { LatencyLadder } from "@/components/visuals/latency-ladder"
+
+Should Gatepass cache event pages in memory? Is one extra database call per request a problem? Is it worth running a server in Europe for students abroad? Each of these is a question about time, and you can answer most of them in your head if you know roughly how long a handful of basic operations take.
+
+## Why bother memorising
+
+You've already seen that a request across an ocean spends most of its time in handshakes, and that an index turns a 2-second scan into a millisecond lookup. Both of those insights come from the same skill: knowing the *rough* cost of each step, so you can add them up and spot the expensive one.
+
+You don't need precise numbers. Hardware changes every year, and the exact figure depends on the machine. What stays stable is the **ratios**: memory is about a thousand times faster than an SSD, which is several times faster than a network round trip in the same building, which is hundreds of times faster than a round trip across the world.
+
+<KeyIdea>Learn the ladder, not the decimals. Most design decisions come down to which rung each step of a request is on.</KeyIdea>
+
+## The ladder
+
+Here are the rungs worth knowing, rounded to easy numbers:
+
+- **L1 cache read: ~1 ns.** Data already on the CPU core.
+- **Main memory (RAM) read: ~100 ns.** Anything in your process's memory, or in Redis on the same machine.
+- **SSD random read: ~100 µs.** Reading a page from disk that isn't cached in memory. A thousand times slower than RAM.
+- **Round trip within a data centre: ~0.5 ms.** Your server asking the database or cache on another machine.
+- **Spinning disk seek: ~5 ms.** Rare for databases now, but still around for cheap bulk storage.
+- **Round trip between continents: 100–250 ms.** Mumbai to Frankfurt is about 130 ms, Mumbai to California about 230 ms.
+
+Units first, since they trip everyone up: a millisecond (ms) is a thousand microseconds (µs), and a microsecond is a thousand nanoseconds (ns).
+
+## See it at human scale
+
+Nanoseconds are impossible to feel. So stretch time: pretend one nanosecond lasts one full second, and keep every ratio the same. Flip the toggle and watch what happens to the bottom of the ladder.
+
+<LatencyLadder />
+
+In stretched time, a memory read takes under two minutes. A database round trip in the same data centre takes almost six days. A request from Mumbai to a server in California takes over seven years. Every rung down is a different world.
+
+## What this means for Gatepass
+
+Lay one Gatepass "event page" request along the ladder:
+
+<Diagram w={680} h={230} caption="Where the time goes in one event page view for a student in Pune, server in Mumbai. The network dwarfs everything inside the data centre.">
+  <Box x={10} y={20} w={150} label="Phone → server" sub="~12 ms round trip" icon="phone" tone="req" />
+  <Box x={190} y={20} w={150} label="App code" sub="~1 ms" icon="server" />
+  <Box x={370} y={20} w={150} label="DB query" sub="~0.5 ms + ~1 ms" icon="db" />
+  <Box x={550} y={20} w={120} label="RAM cache" sub="~0.1 ms" icon="cache" tone="ok" />
+  <Wire points={[[160, 46], [190, 46]]} />
+  <Wire points={[[340, 46], [370, 46]]} />
+  <Wire points={[[520, 46], [550, 46]]} dashed />
+  <rect x={10} y={120} width={560} height={22} rx={6} fill="var(--req)" opacity={0.3} />
+  <rect x={570} y={120} width={50} height={22} rx={6} fill="var(--fg-subtle)" opacity={0.4} />
+  <rect x={620} y={120} width={50} height={22} rx={6} fill="var(--info)" opacity={0.5} />
+  <Text x={290} y={135} size={11} mono>network ≈ 12 ms</Text>
+  <Text x={595} y={160} size={10} mono tone="muted">code</Text>
+  <Text x={645} y={160} size={10} mono tone="muted">db</Text>
+  <Text x={340} y={200} size={12} tone="muted">same request from California: the orange bar grows ~20×, the rest stays put</Text>
+</Diagram>
+
+Reading this ladder answers the questions from the start:
+
+- **Should event pages be cached in memory?** A cache hit saves the 1.5 ms database trip. For a single student, that's invisible next to 12 ms of network. The real win is *load*: on sale day, the database stops answering the same query thousands of times a second. That's Module 3.
+- **Is one extra database call a problem?** One, no: half a millisecond. Fifty in a loop, yes: 25 ms of pure waiting, more than the network. This is the N+1 query bug, and the ladder tells you exactly why it hurts.
+- **Should there be a server in Europe?** For students in Germany, every round trip to Mumbai is ~130 ms, and a fresh connection needs three of them. A nearby server (or at least a nearby edge that terminates TLS) cuts hundreds of milliseconds. Nothing you do to the code comes close.
+
+<Callout tone="warn" title="Round trips multiply">
+The single biggest latency mistake is doing things one after another that could happen together. Five sequential calls to a service 0.5 ms away cost 2.5 ms; to a service 130 ms away, 650 ms. Batch requests, run independent calls in parallel, and keep chatty conversations inside the data centre.
+</Callout>
+
+## Rules of thumb
+
+A few rules fall straight out of the ladder:
+
+1. **Memory beats disk beats network.** If something is read often, keep it as far up the ladder as you can.
+2. **Avoid round trips before optimising code.** Shaving 10% off code that takes 1 ms saves 0.1 ms. Removing one cross-continent round trip saves 130.
+3. **Distance is physics.** Light in fibre needs about 5 ms per 1,000 km each way. No software fixes that; only moving the work closer does.
+4. **Sequential reads are cheap, random ones aren't.** Reading 1 MB in a row from an SSD is fast; reading 256 scattered 4 KB pages is slow. Databases, logs and Kafka are all designed around this.
+
+<Quiz
+  id="latency-numbers-1"
+  question="The booking endpoint makes 20 sequential calls to Postgres in the same data centre. Roughly how much time do the round trips alone add?"
+  options={["About 0.01 ms", "About 1 ms", "About 10 ms", "About 1 second"]}
+  answer={2}
+  explain={<>20 round trips × ~0.5 ms ≈ 10 ms, before the database does any work. Combining them into one or two queries (with a join, or a batch) removes most of it.</>}
+/>
+
+## Key takeaways
+
+- Learn the ratios: RAM ~100 ns, SSD ~100 µs, same data centre ~0.5 ms, across continents 100–250 ms.
+- Each rung down is roughly 10–1,000× slower than the one above.
+- In most requests, network round trips dominate; count them before tuning code.
+- Sequential round trips multiply; batch them or run them in parallel.
+- Distance costs about 5 ms per 1,000 km each way, and only moving closer reduces it.

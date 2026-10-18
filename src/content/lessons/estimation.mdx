@@ -1,0 +1,95 @@
+import { EstimationCalculator } from "@/components/visuals/estimation-calculator"
+
+Does Gatepass need one server or fifty? A cache? A bigger database? You can't answer any of that until you know roughly how much traffic and data you're dealing with. Five minutes of rough arithmetic, done before you draw anything, settles most of these questions.
+
+## Why estimate at all
+
+Estimates aren't predictions. Nobody knows exactly how many students will open the app at 10:00 on sale day. What you *can* know is the **order of magnitude**: is it 5 requests a second, 500, or 50,000? Each of those is a different architecture:
+
+- **~5/s:** one small server, one database. Most apps live here forever.
+- **~500/s:** still one database, probably a cache, a couple of servers for safety.
+- **~50,000/s:** many servers, caches everywhere, and a database plan that's a module of its own.
+
+Getting the magnitude right stops two expensive mistakes: building a cluster for a college fest, and building a hobby app for a stadium sale.
+
+<KeyIdea>An estimate only needs to be right to within a factor of ten. That's precise enough to choose an architecture.</KeyIdea>
+
+## A few numbers worth memorising
+
+You'll redo the same conversions constantly, so learn a handful by heart:
+
+- **A day is about 100,000 seconds** (86,400, really). So 1 million requests a day is about 10 per second.
+- **A month is about 2.5 million seconds**; a year about 30 million.
+- **1 KB × 1 million = 1 GB.** 1 KB × 1 billion = 1 TB.
+- **A single ordinary server** handles hundreds to a few thousand simple requests per second, depending on what each one does.
+- **A single Postgres or MySQL** handles thousands of simple queries a second, and fewer writes than reads.
+
+Rounding 86,400 to 100,000 is a 15% error. That's nothing next to the uncertainty in "how many users will we have?", so round freely and keep the numbers easy.
+
+## From users to requests per second
+
+The basic chain goes: users → actions → requests per day → requests per second.
+
+<Diagram w={680} h={150} caption="The estimation chain. Each arrow is one multiplication or division you can do in your head.">
+  <Box x={0} y={50} w={112} label="Users/day" sub="4,000" icon="user" />
+  <Box x={142} y={50} w={112} label="× requests" sub="30 each" />
+  <Box x={284} y={50} w={112} label="= per day" sub="120K" />
+  <Box x={426} y={50} w={112} label="÷ 100K s" sub="≈ 1.2/s avg" />
+  <Box x={568} y={50} w={112} label="× peak" sub="≈ 25/s" tone="accent" />
+  <Wire points={[[112, 76], [142, 76]]} />
+  <Wire points={[[254, 76], [284, 76]]} />
+  <Wire points={[[396, 76], [426, 76]]} />
+  <Wire points={[[538, 76], [568, 76]]} tone="accent" />
+</Diagram>
+
+For Gatepass on fest day: 4,000 students, each opening the app and tapping around maybe 30 times (event list, event page, pass types, checkout, their pass). That's 120,000 requests. Spread over a day, it's barely more than one per second.
+
+Then split reads from writes. Almost everything is a read (looking at events); the only writes are bookings. If each student buys one pass, that's ~2,000 writes against ~118,000 reads, a ratio around 50 to 1. Read-heavy systems lean on caching; write-heavy ones lean on the database. You'll use this ratio a lot.
+
+## Peaks, not averages
+
+Nobody books a fest pass at 3 a.m. Traffic bunches up. The sale opens at 10:00, the link goes out in every class group, and the first ten minutes see more traffic than the rest of the day combined.
+
+So you multiply the average by a **peak factor**: how much busier the busiest second is than the average second. For everyday apps, 2× to 3× is common. For a ticket sale with a fixed start time, 20× or more is realistic.
+
+Gatepass: 1.2 requests per second on average × 20 ≈ **25 requests per second at peak**. Still comfortable for one server. Good: the day-zero design from the first lesson holds.
+
+<Callout tone="warn" title="Design for the peak">
+Servers don't fail at the average; they fail at the peak. A system that is 5% busy over the day can still be 100% busy at 10:00:01. Every capacity number you quote should be a peak number.
+</Callout>
+
+## Storage and bandwidth
+
+Two more quick calculations finish the picture.
+
+**Storage** comes from writes: writes per day × size of each write × how long you keep it. Gatepass writes ~2,000 bookings on fest day. Call each booking 2 KB with its QR data and payment reference. That's 4 MB for the whole fest. Even if every day of the year looked like fest day, it would be under 2 GB, less than a phone's photo library. Storage is not Gatepass's problem.
+
+**Bandwidth** comes from reads: requests per second × size of each response. 25 requests per second × 2 KB is 50 KB/s at peak, nothing for any network. (Images are a different story: a 300 KB event poster loaded 25 times a second is 7.5 MB/s. That's why posters will go to a CDN later.)
+
+## Try it yourself
+
+Start with the fest-day preset, then move the sliders. Notice which inputs change the verdict and which barely matter. Then try the other presets: Gatepass after it expands to forty cities, and a URL shortener with tens of millions of daily users.
+
+<EstimationCalculator />
+
+A few things to try:
+
+- Raise the peak factor from 20 to 50. Peak load jumps, storage doesn't move at all. Peaks are about *timing*, not volume.
+- Drag the reads per write down to 1:1. Storage climbs fast, because every action is now a write.
+- Pick the forty-cities preset. Hundreds of requests a second at peak: still one database, but caching now earns its place.
+
+<Quiz
+  id="estimation-1"
+  question="A photo app has 1 million daily users who each upload 2 photos of 500 KB. Roughly how much new storage per year?"
+  options={["About 3.6 GB", "About 36 GB", "About 365 TB", "About 3.6 PB"]}
+  answer={2}
+  explain={<>2 million photos a day × 500 KB = 1 TB a day. Times 365 is about 365 TB a year. That's a number that changes the design: photos go to object storage, not the database.</>}
+/>
+
+## Key takeaways
+
+- Estimate to the nearest order of magnitude; that's enough to choose an architecture.
+- Memorise a few conversions: a day ≈ 100,000 s, 1 KB × 1 M = 1 GB.
+- Users × actions ÷ 100,000 gives average requests per second; multiply by a peak factor for the number that matters.
+- Split reads from writes: the ratio tells you whether to lean on caching or on the database.
+- Storage comes from writes, bandwidth from reads. Check both before deciding they don't matter.
