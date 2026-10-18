@@ -1,0 +1,92 @@
+Gatepass has a limiter and it works. Then a support ticket arrives: "Our whole college can't book. We keep getting 429." The limiter is fine. The problem is the question it asks: limit *whom*?
+
+## The key decides who gets hurt
+
+A rate limiter counts requests per **key**. The key is the answer to "who is this request from?" Choose it badly and you either block innocent people or let abusers walk through. The common candidates:
+
+- **IP address.** Available on every request, even before login.
+- **User ID.** Known after authentication.
+- **API key or token.** Identifies an app or partner, not a person.
+- **Route.** The endpoint being called, alone or combined with one of the above.
+
+None of them is "the right one". Each answers a different question, and real systems stack several.
+
+<Diagram w={640} h={230} caption="The same request can be counted under several keys at once. The tightest limit that applies wins.">
+  <Box x={20} y={90} w={110} label="Request" sub="POST /book" icon="client" tone="req" />
+  <Box x={250} y={20} w={150} h={46} label="per IP" sub="300 / min" icon="limiter" />
+  <Box x={250} y={92} w={150} h={46} label="per user" sub="60 / min" icon="limiter" />
+  <Box x={250} y={164} w={150} h={46} label="per route" sub="book: 10 / min" icon="limiter" />
+  <Box x={510} y={90} w={110} label="Booking API" icon="server" />
+  <Wire points={[[132, 112], [190, 112], [190, 43], [248, 43]]} tone="req" />
+  <Wire points={[[132, 116], [248, 116]]} tone="req" />
+  <Wire points={[[132, 120], [190, 120], [190, 187], [248, 187]]} tone="req" />
+  <Wire points={[[402, 43], [450, 43], [450, 108], [508, 108]]} tone="res" />
+  <Wire points={[[402, 116], [508, 116]]} tone="res" />
+  <Wire points={[[402, 187], [450, 187], [450, 124], [508, 124]]} tone="res" />
+</Diagram>
+
+## IP address: easy, but a poor stand-in for a person
+
+The IP is the only identity you have before login, so it protects the login page, signup and password reset. For those routes it is the right key. For almost everything else it is a rough guess, in both directions.
+
+**Too many people behind one IP.** A college hostel, an office, a café, a mobile carrier using carrier-grade NAT: thousands of people can share one public address. Gatepass sells a fest to 4,000 students on the campus Wi-Fi. They all arrive from the same IP. A limit of 300 requests a minute per IP lets about 75 students make their four requests, then blocks everyone else. The first 75 get tickets; 3,900 get a 429 and a bad opinion of Gatepass.
+
+**One person behind many IPs.** A scalper with a pool of 2,000 rented residential proxies stays under any per-IP limit while hammering the checkout. Per-IP limits stop clumsy abuse, not determined abuse.
+
+Two more IP traps:
+
+- **Behind a load balancer, the IP you see is the balancer's.** Every request looks like it came from one address, so you throttle the whole world together. Read the client address from `X-Forwarded-For`, but only trust the entries your own proxy added. A client can send a fake header, and if you trust it blindly an attacker picks their own identity.
+- **IPv6.** One home gets a whole /64 block, billions of addresses. Counting per single address is useless; count per /64 prefix.
+
+<KeyIdea>An IP identifies a network location, not a person. Use it where you have nothing better, and set it loose enough that a shared network doesn't trip it.</KeyIdea>
+
+## User ID: fair, but only after login
+
+Once a user is authenticated, limiting by user ID is much fairer. The college student has their own bucket, and the scalper's thousand proxies don't help if all thousand requests carry the same session. This is the default key for most authenticated API routes.
+
+Its weaknesses:
+
+- **Free accounts are cheap.** If signup is easy, an attacker creates 10,000 accounts, each with a full allowance. Pair user limits with IP limits on signup, and with email or phone verification.
+- **Unauthenticated routes have no user.** Login, signup and "forgot password" must fall back to IP, or to the thing being attacked, such as the target email address.
+- **Cost of the lookup.** You must verify the token before you can count. Do a cheap check first, and reject obvious floods by IP before spending effort on authentication.
+
+## API keys: limits as a product
+
+When partners call Gatepass, for instance a venue's own website embedding the booking widget, each partner gets an API key. Limiting by key lets you sell tiers: 60 requests a minute on the free plan, 600 on the paid one. The key is also a handle for support: "your key was throttled at 14:02 because you sent 900 requests in a minute."
+
+Return the state in headers so well-behaved clients can slow down on their own: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `Retry-After` on the 429. A client that can see its budget rarely hits the wall.
+
+## Route: protect what is expensive
+
+A single global allowance treats `GET /events` (a cached read costing microseconds) and `POST /bookings` (a transaction that locks seats) as equal. They aren't. Add a **per-route** dimension, usually combined with the user or IP:
+
+| Route | Key | Limit | Why |
+| --- | --- | --- | --- |
+| `POST /login` | IP + target email | 10 / 15 min | Guessing passwords |
+| `POST /bookings` | user | 10 / min | Locks seats, hits payments |
+| `GET /events` | IP | 600 / min | Cheap, cached |
+| `POST /sms/otp` | phone number | 3 / hour | Each one costs real money |
+
+The last row shows a useful idea: the key doesn't have to be *the caller*. It can be the **resource being targeted**. Limiting OTP texts per phone number stops someone from using Gatepass to spam a stranger, however many accounts they use.
+
+## Layering, and what to answer
+
+In practice you combine keys in layers, cheapest first: a coarse, generous per-IP limit at the edge to absorb floods; a per-user or per-key limit in the API; a tight per-route or per-resource limit on expensive actions. A request must pass all of them.
+
+When you do block, be precise. Answer `429 Too Many Requests` with `Retry-After`, never a `500`, and log which key and which rule fired. Without that log, the college's complaint takes a day to diagnose. With it, you see "ip:203.0.113.7 hit per-IP rule, 4,000 distinct users" and raise the limit for that network.
+
+<Quiz
+  id="limit-key-choice"
+  question="Gatepass's login endpoint is being hit with passwords from a leaked list, trying one email at a time across thousands of rotating IPs. Which key best stops it?"
+  options={["Per IP only", "Per target email (account being attacked)", "Per route, globally", "Per API key"]}
+  answer={1}
+  explain={<>The attacker controls the IPs but not the victim, so every attempt shares the <strong>target email</strong>. Limit attempts per account (plus a looser per-IP limit) and rotating IPs no longer helps.</>}
+/>
+
+## Key takeaways
+
+- A limiter's key decides who is throttled together. Pick it by asking what you are protecting and from whom.
+- IP is the only key before login, but offices, campuses and mobile carriers share one, and attackers rent many. Keep per-IP limits generous and read the real client address safely.
+- User ID is fairer after login; API keys let you sell tiers; routes protect expensive work.
+- The key can be the target, such as an email or phone number, which attackers cannot rotate.
+- Stack layers (IP, then user, then route), return 429 with `Retry-After`, and log which rule fired.
