@@ -1,7 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { and, count, eq, gte } from "drizzle-orm";
 import { z } from "zod";
+import { getProvider } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { postmortem } from "@/lib/db/app-schema";
 import { getServerSession } from "@/lib/session";
@@ -60,7 +60,8 @@ export async function POST(req: Request) {
     return Response.json({ text: hit.response, source: hit.model === "rules" ? "rules" : "ai", cached: true });
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const provider = getProvider();
+  if (!provider) {
     return Response.json({ text: rulesAnswer(result), source: "rules" });
   }
 
@@ -72,24 +73,15 @@ export async function POST(req: Request) {
     return Response.json({ error: "You have asked the mentor a lot this hour. Try again later." }, { status: 429 });
   }
 
-  const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5-5";
+  const model = `${provider.id}:${provider.model}`;
   try {
-    const client = new Anthropic();
-    const response = await client.messages.create({
-      model,
-      max_tokens: 400,
-      system: SYSTEM,
-      messages: [
-        {
-          role: "user",
-          content: `Scenario:\n${scenario}\n\nLearner's design:\n${design}\n\nLoad test result:\n${result}`,
-        },
-      ],
-    });
-    const text = response.content
-      .flatMap((b) => (b.type === "text" ? [b.text] : []))
-      .join("\n")
-      .trim();
+    const text = (
+      await provider.complete({
+        system: SYSTEM,
+        prompt: `Scenario:\n${scenario}\n\nLearner's design:\n${design}\n\nLoad test result:\n${result}`,
+        maxTokens: 400,
+      })
+    ).trim();
     if (!text) throw new Error("empty response");
     await db.insert(postmortem).values({ userId, labSlug: lab, step, designHash, response: text, model });
     return Response.json({ text, source: "ai" });
