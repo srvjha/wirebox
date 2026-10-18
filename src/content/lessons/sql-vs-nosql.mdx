@@ -1,0 +1,89 @@
+Someone on the Gatepass team reads that a famous company moved to a NoSQL database and "scaled to millions". Should you? The honest answer is "probably not yet", but to say *why*, you need to know what each kind of database is actually good at.
+
+## What a relational database gives you
+
+Relational (SQL) databases, like PostgreSQL and MySQL, store data in tables with a fixed set of columns, and let you ask almost any question of it with SQL. Their strengths are exactly what Gatepass needed in the last lesson:
+
+- **Joins.** Event plus venue plus tickets in one query.
+- **Transactions.** Decrement the count and insert the ticket, all or nothing. The usual name for this bundle of guarantees is **ACID**: atomic, consistent, isolated, durable.
+- **Constraints.** Unique, foreign key and check rules enforced on every write.
+- **Flexible querying.** Questions you didn't plan for (sales by city by hour) are one new query, not a new data model.
+
+The cost: one SQL database usually runs on one primary machine for writes. You can go a long way with a big machine and read copies, but spreading *writes* across many machines is hard and needs careful design.
+
+## What "NoSQL" actually means
+
+"NoSQL" isn't one thing. It's a family of databases that each give up some relational features to be very good at something specific. The main kinds:
+
+<Diagram w={680} h={250} caption="Four NoSQL families. Each trades away general-purpose querying for one access pattern it does extremely well.">
+  <Box x={10} y={20} w={320} h={60} label="Key-value" sub="get(key) / put(key, value) · Redis, DynamoDB" icon="cache" tone="accent" />
+  <Box x={350} y={20} w={320} h={60} label="Document" sub="JSON per record · MongoDB, Firestore" icon="storage" tone="info" />
+  <Box x={10} y={100} w={320} h={60} label="Wide-column" sub="huge write volumes · Cassandra, ScyllaDB" icon="stream" tone="ok" />
+  <Box x={350} y={100} w={320} h={60} label="Graph" sub="relationships first · Neo4j" icon="service" tone="warn" />
+  <Text x={170} y={200} size={12}>fast because it only answers</Text>
+  <Text x={170} y={218} size={12}>questions planned in advance</Text>
+  <Text x={510} y={200} size={12}>scales out because it gives up</Text>
+  <Text x={510} y={218} size={12}>joins and most transactions</Text>
+</Diagram>
+
+- **Key-value stores** are giant dictionaries: give a key, get a value. Ridiculously fast, but you can only look things up by key. Perfect for sessions and caches.
+- **Document stores** keep each record as a JSON-like document. Good when records vary in shape and are usually read whole, like a product with dozens of optional attributes.
+- **Wide-column stores** are built for enormous write volumes spread over many machines: sensor readings, activity logs, messages.
+- **Graph databases** make "friends of friends who like this band" fast, where SQL would need many joins.
+
+What most of them share: they **partition** data across many machines from the start, so they can grow writes and storage almost without limit. To make that work, they give up joins, cross-record transactions or flexible queries, or all three.
+
+## The real tradeoff: query flexibility vs scale
+
+With SQL you design tables around the *data*, then write whatever queries you need. With most NoSQL stores you design around the *queries*: decide every access pattern up front, and shape the data so each one is a single fast lookup.
+
+Take "my tickets" in a key-value store like DynamoDB. You'd store tickets under a key like `user#7`, so one read returns them all. Fast and scalable. Now the organiser asks for "all tickets for event 42". The data isn't keyed that way, so you either scan everything or store every ticket a second time under `event#42`, and keep both copies in sync yourself.
+
+<KeyIdea>SQL makes new questions cheap and huge scale hard. Most NoSQL stores make huge scale cheap and new questions hard.</KeyIdea>
+
+## Choosing for Gatepass
+
+Run through the Gatepass requirements:
+
+- **Bookings must never oversell**, and a ticket must exist exactly when the payment does. That's transactions, a SQL strength.
+- **Data is relational**: venues, events, tickets, users, all pointing at each other.
+- **The organisers keep asking new questions.** Flexible querying is valuable.
+- **Scale is modest**: even across forty cities, a few hundred writes a second at peak, well within one good SQL primary.
+
+So Gatepass stays on PostgreSQL. That's the answer for most products, most of the time: start relational, and reach for a specialised store when a specific workload outgrows it.
+
+<Callout tone="tip" title="It's usually both, not either">
+Big systems tend to use a relational database as the source of truth and add specialised stores beside it: Redis for caching and rate limits, a search engine for full-text search, a wide-column store for a firehose of events. Each store does one job. You'll add several of these to Gatepass as the course goes on.
+</Callout>
+
+## When NoSQL is the right call
+
+There are real cases where a NoSQL store is the better primary database:
+
+- **Write volume beyond one machine.** Millions of writes a second, like chat messages or IoT readings, where partitioning is needed from day one.
+- **Simple access by key at huge scale.** Shopping carts, sessions, user preferences: always read and written by one id.
+- **Truly variable record shapes.** A catalogue where every product type has different attributes, read whole by id.
+- **Global, always-writable data** where you'd rather accept conflicts than reject writes during a network split.
+
+Note what's not on the list: "it's more modern", "it's schemaless so it's faster to build", "it scales better" with no numbers. A schemaless database still has a schema; it just lives in your application code, unenforced, where every bug can write a slightly different shape.
+
+<Quiz
+  id="sql-nosql-1"
+  question="Which Gatepass feature is the strongest candidate for a key-value store beside Postgres?"
+  options={[
+    "Bookings, because they're the most important data",
+    "Venues, because there are few of them",
+    "Login sessions, looked up by session id on every request",
+    "Sales reports, because organisers run them often",
+  ]}
+  answer={2}
+  explain={<>Sessions are always fetched by one key, read on every request, short-lived, and don't need joins or transactions. That's the ideal key-value workload. Bookings need transactions; reports need flexible queries.</>}
+/>
+
+## Key takeaways
+
+- Relational databases offer joins, transactions, constraints and flexible queries; scaling writes across machines is their hard part.
+- NoSQL is a family (key-value, document, wide-column, graph), each trading general querying for one access pattern at scale.
+- With NoSQL you design around queries up front; new questions often mean storing data again in a new shape.
+- Default to a relational database; add specialised stores for specific workloads beside it.
+- Choose NoSQL as the primary store for a reason with numbers: write volume, key-only access, or global writes.
