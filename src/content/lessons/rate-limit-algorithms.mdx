@@ -1,0 +1,105 @@
+import { RateLimitAlgorithms } from "@/components/visuals/rate-limit-algorithms"
+
+“Ten booking attempts per user per minute” sounds like one rule. Implement it and you have to decide what *per minute* means. The minute on the clock? Any sixty seconds? Can someone use all ten in the first second? Should extra requests be refused or made to wait? Each answer is a different algorithm, and each behaves differently in exactly the moments you care about: bursts.
+
+## One limit, five meanings
+
+Every algorithm here needs a small amount of state per key (per user, per IP), updated on every request, and a yes-or-no answer. They differ in what the state is:
+
+- **Token bucket:** a number of tokens and a timestamp.
+- **Leaky bucket:** a queue of waiting requests.
+- **Fixed window:** a counter for the current clock window.
+- **Sliding log:** a list of recent request times.
+- **Sliding window counter:** counters for the current and previous windows.
+
+We'll use one limit throughout: **5 requests per 2 seconds**, the same rate as 2.5 a second.
+
+## Token bucket and leaky bucket
+
+A **token bucket** holds up to 5 tokens and refills at 2.5 tokens a second. Each request takes a token. No token, no entry. A client that has been quiet has a full bucket and can make 5 requests at once, then settles to 2.5 a second. You don't need a timer to refill: store the token count and the last update time, and on each request add `elapsed × rate` before checking.
+
+<Diagram w={640} h={200} caption="Token bucket: tokens drip in at a steady rate; each request spends one; a full bucket allows a burst.">
+  <Box x={20} y={20} w={150} label="Refill" sub="+2.5 tokens / s" icon="worker" tone="ok" />
+  <Group x={240} y={30} w={150} h={150} label="bucket · max 5" tone="accent" />
+  <circle cx={280} cy={155} r={10} fill="var(--accent)" />
+  <circle cx={315} cy={155} r={10} fill="var(--accent)" />
+  <circle cx={350} cy={155} r={10} fill="var(--accent)" />
+  <circle cx={297} cy={128} r={10} fill="var(--accent)" opacity={0.4} />
+  <Text x={315} y={95} size={11} mono tone="accent">3.4 tokens</Text>
+  <Wire points={[[170, 46], [205, 46], [205, 70], [238, 70]]} tone="ok" />
+  <Box x={470} y={40} w={150} label="Request" sub="takes 1 token" icon="client" tone="req" />
+  <Box x={470} y={120} w={150} label="No token" sub="429, try later" tone="err" />
+  <Wire points={[[468, 66], [392, 100]]} tone="req" />
+  <Wire points={[[392, 140], [468, 146]]} tone="err" dashed />
+</Diagram>
+
+Token buckets are the most common choice for APIs, because bursts are normal. A fan opening the app fires five requests at once; that shouldn't be punished as long as the average stays reasonable. You tune two numbers independently: the **bucket size** (how big a burst) and the **refill rate** (how fast on average).
+
+A **leaky bucket** looks similar but treats bursts the opposite way. Requests go into a queue of size 5 and leave it at a fixed rate, one every 0.4 seconds, like water dripping from a hole. A burst isn't refused; it's **smoothed**: the first request goes through now, the next ones wait their turn, and only when the queue is full are requests refused. That's what you want in front of something that hates bursts, like a payment provider that allows 2.5 calls a second. It's wrong for user-facing requests, because a request that waits three seconds in a queue just looks like a slow app.
+
+## Fixed windows and the boundary problem
+
+A **fixed window** counter is the simplest: one counter per key per clock-aligned window. `INCR limit:user81:10:00:00`, set it to expire after the window, reject when the count passes 5. One integer, one operation.
+
+Its flaw is at the edges. A client can send 5 requests at 10:00:01.9 (the end of one window) and 5 more at 10:00:02.1 (the start of the next). Both windows see only 5. The server saw **10 requests in 0.2 seconds**, twice the limit, in exactly the kind of burst you were trying to prevent. For coarse limits (“1,000 a day”) that rarely matters. For tight ones, it does.
+
+<KeyIdea>Fixed windows can let through twice the limit in a short burst that straddles a window boundary.</KeyIdea>
+
+## Sliding windows
+
+A **sliding log** fixes the boundary problem exactly. Store the timestamp of every allowed request. On each new request, drop timestamps older than 2 seconds and count what's left. Fewer than 5? Allow it. This enforces “at most 5 in **any** 2-second span”. The cost is memory: a key with a limit of 1,000 a minute stores up to 1,000 timestamps. In Redis, it's a sorted set per key.
+
+A **sliding window counter** gets most of that accuracy for the cost of two integers. Keep counters for the current window and the previous one, and estimate the last 2 seconds by weighting the previous count by how much of it still overlaps:
+
+```
+estimate = previous_count × (1 − elapsed_fraction) + current_count
+```
+
+Half a second into a window (25% elapsed) with 4 requests last window and 2 so far: `4 × 0.75 + 2 = 5`, so the next request is refused. It assumes the previous window's requests were spread evenly, so it's an approximation, but a good one, and it removes the double burst at the boundary.
+
+## Try it: fire the same requests at all five
+
+Every lane below gets exactly the same requests. Start with a single request, then a burst of 8, then the steady 4-a-second stream, and finally the boundary burst. Watch the fixed window lane on the boundary burst, and the leaky bucket on everything.
+
+<RateLimitAlgorithms />
+
+What to notice:
+
+- **Burst of 8:** the token bucket lets 5 through instantly and refuses 3. The leaky bucket sends one now, queues 5 and refuses 2. The window algorithms behave like the token bucket.
+- **Steady 4 a second:** after the first burst is used up, the token bucket and leaky bucket settle at exactly 2.5 a second. The fixed window and sliding log let requests through until 5 are used, then refuse everything until the window moves on, so what gets through arrives in clumps.
+- **Boundary burst:** the fixed window allows all 10. The sliding log allows 5. The sliding counter allows about 5.
+
+## Which one to use
+
+<div className="overflow-x-auto">
+<table>
+  <thead>
+    <tr><th>Algorithm</th><th>State per key</th><th>Bursts</th><th>Good for</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Token bucket</td><td>2 numbers</td><td>Allowed up to bucket size</td><td>Most API limits</td></tr>
+    <tr><td>Leaky bucket</td><td>A queue</td><td>Smoothed, delayed</td><td>Calling a fragile downstream at a steady rate</td></tr>
+    <tr><td>Fixed window</td><td>1 counter</td><td>Up to 2× at edges</td><td>Coarse quotas: per day, per month</td></tr>
+    <tr><td>Sliding log</td><td>Every timestamp</td><td>Exact</td><td>Low limits that must be exact (OTP, login)</td></tr>
+    <tr><td>Sliding counter</td><td>2 counters</td><td>Approximately exact</td><td>High-volume limits at scale</td></tr>
+  </tbody>
+</table>
+</div>
+
+Gatepass uses a token bucket for general API limits (bucket 20, 5 a second per user), a sliding log for OTP and login (they're low-volume and must be exact), a leaky bucket in front of the SMS provider's 50-a-second contract, and a fixed window for partners' monthly quotas.
+
+<Quiz
+  id="algo-boundary"
+  question="A partner may make 100 calls per minute, enforced with a fixed window. What's the most calls they can make in any 10-second period?"
+  options={["100", "About 17", "200", "Unlimited"]}
+  answer={2}
+  explain={<>They can make 100 in the last seconds of one window and 100 more in the first seconds of the next: <strong>200</strong> in a few seconds. A sliding window or token bucket would cap a short burst much closer to the intended rate.</>}
+/>
+
+## Key takeaways
+
+- “N per period” needs an algorithm, and each one treats bursts differently.
+- Token buckets allow bursts up to a size you choose, then enforce an average rate. They're the default for APIs.
+- Leaky buckets queue and smooth traffic, which suits a fragile downstream but adds delay for users.
+- Fixed windows are cheapest but can allow twice the limit across a boundary.
+- Sliding logs are exact but store every timestamp; sliding counters approximate them with two integers.

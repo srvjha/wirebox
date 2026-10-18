@@ -1,0 +1,108 @@
+import { RetryBackoffJitter } from "@/components/visuals/retry-backoff-jitter"
+
+Gatepass's SMS workers call the provider, and sometimes the call fails. Most failures are brief: a dropped connection, a provider deploy, a two-second hiccup. Trying again fixes them. But at 21:04 on fest night the provider goes down for eight seconds, two thousand workers retry as fast as they can, and when the provider comes back it is flattened by the very clients that are waiting for it.
+
+## Why retry at all
+
+Distributed systems fail in small, temporary ways all the time. A packet is lost, a server restarts mid-request, a database fails over in three seconds. For these **transient** failures, the same request a moment later usually succeeds. Retrying turns a 99.5% success rate into 99.99% without anyone noticing.
+
+Retrying only helps with transient failures, though. Before retrying, sort the error:
+
+- **Retry:** timeouts, connection resets, `502`, `503`, `504`, and `429 Too Many Requests` (after waiting as long as `Retry-After` says).
+- **Don't retry:** `400 Bad Request`, `401`, `403`, `404`, `422`. The request itself is wrong. Sending it again gets the same answer and wastes a call.
+
+And only retry operations that are safe to repeat. A timed-out “send SMS” may have actually sent it. That's the idempotency lesson next. For now, assume the job can run twice safely.
+
+## The retry storm
+
+The naive retry loop is `while (!ok) send()`. Picture 2,000 workers running it against a provider that is down. Each worker retries every 100 ms, so the provider receives 20,000 calls a second instead of its normal few hundred. That is fine while it's down (they all fail fast). The problem is the moment it recovers. It comes back with capacity for, say, 400 calls a second, and it immediately gets 20,000. It rejects or times out almost all of them, and in many real systems that overload knocks it straight back over.
+
+This is a **retry storm**: clients turn a short outage into a long one by retrying in a way that adds load exactly when the system is weakest. Retries multiply, too. If the API retries 3 times, and each call to the worker service retries 3 times, and each call to the provider retries 3 times, one user action can become 27 calls to the provider.
+
+<KeyIdea>Retries are extra load aimed at a system that's already failing. Spread them out, limit them, and stop when they aren't working.</KeyIdea>
+
+## Exponential backoff
+
+The first fix is to wait longer after each failure: 0.5 s, then 1 s, 2 s, 4 s, 8 s, capped at some maximum such as 16 or 30 seconds. This is **exponential backoff**. A short glitch is retried almost immediately. A long outage gets fewer and fewer retries, so the load on the failing system falls off quickly.
+
+But backoff alone has a nasty side effect. All 2,000 workers failed at the same moment, so they all compute the same schedule. They all retry at 0.5 s, then all at 1.5 s, then all at 3.5 s, 7.5 s and 15.5 s. The load arrives in perfectly synchronized spikes of 2,000 calls, and the gaps between spikes are wasted. The provider comes back at 8 s, but nobody calls until 15.5 s, and then everyone calls in the same 100 ms.
+
+## Jitter breaks the synchronization
+
+The second fix is randomness. Instead of waiting exactly the backoff time, each worker waits a random time between zero and the backoff time. This is **full jitter**:
+
+```
+sleep = random_between(0, min(cap, base * 2 ** attempt))
+```
+
+<Diagram w={640} h={230} caption="Same clients, same backoff. Without jitter the retries arrive as walls; with jitter they arrive as a stream the provider can serve.">
+  <Text x={20} y={22} anchor="start" mono size={11}>BACKOFF, NO JITTER</Text>
+  <Wire points={[[20, 100], [620, 100]]} arrow={false} tone="muted" />
+  <rect x={36} y={40} width={10} height={60} rx={2} fill="var(--err)" />
+  <rect x={66} y={40} width={10} height={60} rx={2} fill="var(--err)" />
+  <rect x={126} y={40} width={10} height={60} rx={2} fill="var(--err)" />
+  <rect x={246} y={40} width={10} height={60} rx={2} fill="var(--err)" />
+  <rect x={486} y={40} width={10} height={60} rx={2} fill="var(--warn)" />
+  <Text x={491} y={34} size={10.5} mono tone="warn">2,000 at once</Text>
+  <Text x={20} y={142} anchor="start" mono size={11}>BACKOFF + FULL JITTER</Text>
+  <Wire points={[[20, 210], [620, 210]]} arrow={false} tone="muted" />
+  <path d="M30 210 L30 190 L60 186 L90 192 L120 194 L160 197 L200 199 L240 200 L280 201 L320 202 L360 203 L400 204 L440 205 L480 206 L520 207 L560 208 L600 209 L600 210 Z" fill="var(--ok)" opacity={0.6} />
+  <Wire points={[[300, 230], [300, 30]]} arrow={false} dashed tone="info" />
+  <Text x={306} y={170} anchor="start" size={10.5} mono tone="info">provider back</Text>
+</Diagram>
+
+The workers that failed together now retry at different moments. The spikes become a smooth, lower load that the provider can serve as soon as it's back. Jitter feels like it should make things slower; in practice it finishes the backlog sooner, because the provider is never idle in a gap or swamped in a spike.
+
+## Try it: four retry strategies
+
+Start with “Retry at once” and look at the number of calls and the height of the bars. Then try “Exponential” and find the synchronized spikes. Finish with “Exponential + jitter”. Change the outage length and capacity and compare the table.
+
+<RetryBackoffJitter />
+
+Look at the totals. The immediate retrier makes hundreds of thousands of calls to deliver 2,000 messages, and keeps the provider so overloaded after it recovers that most messages still aren't delivered 40 seconds later. Exponential backoff cuts the calls to a few per job, but every retry lands in the same 100 ms, so each wall overloads the provider again. Jitter delivers everything, with the fewest calls, soon after the outage ends.
+
+## Limits and budgets
+
+Backoff and jitter shape the load. You also need to cap it:
+
+- **Max attempts.** Give up after a fixed number of tries (say 6 to 8 for a background job) and send the job somewhere a human or a later process can deal with it. That's the dead-letter queue, two lessons from now.
+- **Retry at one layer.** In a chain of services, let one layer own retries (usually the one closest to the user, or the job runner) and have the others fail fast. That stops 3 × 3 × 3 multiplication.
+- **A retry budget.** Allow retries to add at most, say, 10% extra load. When more than 10% of recent calls are retries, stop retrying and fail. A healthy system barely touches the budget; a dying one gets protected from its clients.
+- **Respect `Retry-After`.** If the server tells you when to come back, that beats any formula.
+
+<Callout tone="tip" title="Users need jitter too">
+The same storm happens with people and apps. When Gatepass's WebSocket servers restart, 40,000 phones reconnect. Without jitter, they all reconnect in the same second. A random delay of up to a few seconds turns that wall into a ramp.
+</Callout>
+
+<Quiz
+  id="retry-jitter"
+  question="Gatepass's workers use exponential backoff (1, 2, 4, 8 s) without jitter. After a 5-second provider outage, what's the main problem?"
+  options={[
+    "Workers retry too slowly to ever succeed",
+    "Workers that failed together retry together, so the provider gets synchronized spikes and idle gaps",
+    "Exponential backoff increases the total number of calls",
+    "The provider can't tell retries from first attempts",
+  ]}
+  answer={1}
+  explain={<>Backoff spreads retries out over <em>time</em> but not across <em>clients</em>. Everyone who failed at the same moment computes the same schedule. Jitter adds randomness so they spread out.</>}
+/>
+
+<YourTurn
+  id="retry-policy"
+  prompt="Write the retry policy for Gatepass's SMS worker. Which errors, how many attempts, what delays, and what happens at the end?"
+  fields={4}
+  hint="Separate errors that will never succeed from ones that might, and remember the provider's 429 responses."
+>
+- **Retry on:** timeouts, connection errors, 5xx responses, and 429 (waiting at least `Retry-After`).
+- **Fail immediately on:** 400/422 (bad phone number, message too long) and 401/403 (our credentials are wrong; alert someone). Retrying can't fix these.
+- **Schedule:** full jitter with base 1 s, doubling, capped at 60 s, for up to 8 attempts. That covers about 4 minutes of outage, which is longer than most provider blips.
+- **At the end:** move the job to a dead-letter queue, mark the ticket's SMS as failed so the app can show it, and rely on the email that was sent separately. Alert if the dead-letter queue grows faster than a few jobs a minute.
+</YourTurn>
+
+## Key takeaways
+
+- Retry transient errors (timeouts, 5xx, 429). Don't retry requests that are wrong (4xx).
+- Immediate retries from many clients create a retry storm that can keep a recovering system down.
+- Exponential backoff reduces load during long outages; jitter stops clients that failed together from retrying together.
+- Cap attempts, retry at only one layer, and set a retry budget so retries can't multiply the load.
+- Every retried operation must be safe to repeat.

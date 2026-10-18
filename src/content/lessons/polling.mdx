@@ -1,0 +1,127 @@
+import { PollingVsPush } from "@/components/visuals/polling-vs-push"
+
+Gatepass's seat map shows every seat in the hall, and a seat should turn grey on every phone the moment someone else books it. Right now each phone asks the server “anything new?” once a second. During a big on-sale, almost all of Gatepass's traffic is that one question, and almost every answer is “no”.
+
+## The question every phone keeps asking
+
+The simplest way to get updates is to ask for them. The app calls the same endpoint on a timer, and the server answers with whatever is current. This is **short polling**.
+
+<Diagram w={640} h={300} caption="Short polling: the phone asks on a timer, whether or not anything changed.">
+  <Box x={56} y={8} label="Phone" sub="seat map open" icon="phone" />
+  <Box x={456} y={8} label="API server" icon="server" />
+  <Wire points={[[120, 62], [120, 292]]} arrow={false} dashed tone="muted" />
+  <Wire points={[[520, 62], [520, 292]]} arrow={false} dashed tone="muted" />
+  <Wire points={[[124, 84], [514, 96]]} tone="req" label="GET /seats?since=1832" />
+  <Wire points={[[516, 110], [126, 122]]} tone="res" label="304 no change" />
+  <Wire points={[[124, 160], [514, 172]]} tone="req" label="GET /seats?since=1832" />
+  <Wire points={[[516, 186], [126, 198]]} tone="res" label="304 no change" />
+  <Wire points={[[124, 236], [514, 248]]} tone="req" label="GET /seats?since=1832" />
+  <Wire points={[[516, 262], [126, 274]]} tone="res" label="200 C14 taken (v1833)" />
+  <Text x={40} y={146} anchor="middle" mono size={10.5} tone="muted">1 s</Text>
+  <Text x={40} y={222} anchor="middle" mono size={10.5} tone="muted">1 s</Text>
+</Diagram>
+
+Notice the `since=1832`. The phone sends the version of the seat map it already has, so the server can reply with only the changes (or with nothing at all). Without a version cursor, every poll would download all 400 seats again.
+
+Polling has real strengths. It is plain HTTP, so it passes through every proxy, firewall and CDN. The server keeps no state about who is watching. If a server dies, the next poll goes to another one and nobody notices. It's the right default for many screens.
+
+## What short polling costs
+
+Do the arithmetic for a big show. Ten thousand fans have the seat map open and each phone polls once a second. That's **10,000 requests a second**, all reading the same seat map. Actual bookings during the same minute might be 50 a second. You built a system that spends 99.5% of its effort answering “no”.
+
+The interval is a dial between two bad things:
+
+- **Poll often** and you pay in requests. Halving the interval doubles the load.
+- **Poll rarely** and the map goes stale. With a 10-second interval, a seat taken right after a poll stays green on screen for up to 10 seconds, about 5 seconds on average. Fans tap seats that are already gone and get an error at checkout.
+
+You can make each poll cheaper. Cache the seat map for a second, answer `304 Not Modified` when the version hasn't moved, keep the response tiny. Those tricks cut the cost per request, not the number of requests. The server still accepts 10,000 connections a second, parses 10,000 requests and runs 10,000 auth checks.
+
+<KeyIdea>Short polling ties freshness to cost. You can't make it fresher without making it more expensive.</KeyIdea>
+
+## Long polling: let the server wait
+
+What if the server didn't answer until it had something to say? With **long polling**, the phone sends the same request, but the server holds it open. When a seat changes, the server replies right away. If nothing happens for, say, 30 seconds, it replies “nothing new” and the phone asks again.
+
+<Diagram w={640} h={300} caption="Long polling: the request waits on the server until there's news or a timeout.">
+  <Box x={56} y={8} label="Phone" icon="phone" />
+  <Box x={456} y={8} label="API server" icon="server" />
+  <Wire points={[[120, 62], [120, 292]]} arrow={false} dashed tone="muted" />
+  <Wire points={[[520, 62], [520, 292]]} arrow={false} dashed tone="muted" />
+  <Wire points={[[124, 84], [514, 96]]} tone="req" label="GET /seats?since=1832" />
+  <Wire points={[[520, 100], [520, 196]]} arrow={false} tone="warn" width={5} />
+  <Text x={534} y={152} anchor="start" mono size={10.5} tone="warn">held</Text>
+  <Box x={548} y={180} w={84} h={34} label="C14 sold" tone="accent" />
+  <Wire points={[[548, 197], [526, 197]]} tone="accent" />
+  <Wire points={[[516, 204], [126, 216]]} tone="res" label="200 C14 taken (v1833)" />
+  <Wire points={[[124, 240], [514, 252]]} tone="req" label="GET /seats?since=1833" />
+  <Wire points={[[520, 256], [520, 290]]} arrow={false} tone="warn" width={5} />
+</Diagram>
+
+The phone learns about the change within one round trip instead of half an interval. And when nothing happens, a phone sends two requests a minute instead of sixty.
+
+Long polling has its own catches, and they show up at exactly the wrong moment:
+
+- **Every held request is an open connection.** Ten thousand phones means ten thousand requests sitting on your servers. A server that uses one thread per request runs out of threads long before it runs out of CPU. You need an event-loop server (Node, Go, async Python) that can park idle connections cheaply.
+- **Proxies hang up on quiet connections.** Load balancers often close a connection with no traffic after 60 seconds. Keep the server's timeout well under the shortest idle timeout on the path.
+- **One change wakes everyone at once.** When seat C14 sells, all 10,000 held requests complete in the same millisecond, and 10,000 new requests arrive a moment later. Long polling turns a steady trickle into synchronized waves.
+- **There's a gap between replies.** After the reply and before the next request arrives, a change can happen with nobody listening. The `since` cursor covers this: the next request asks for everything after version 1833, so nothing is lost.
+
+## Try it: polling vs long polling vs push
+
+Below is one phone's minute, drawn three ways, and what the server sees across every phone. Start with 10,000 phones, 6 seat changes a minute and a 2-second interval. Then push the interval to 10 seconds and watch staleness, and raise the seat changes to 60 a minute to see where long polling stops looking cheap.
+
+<PollingVsPush />
+
+A few things to notice:
+
+- Short polling's request rate depends only on phones and interval. The amount of news makes no difference.
+- Long polling's request rate rises with the update rate. At one change a second, it's as busy as short polling with a 1-second interval, plus the cost of holding every request open.
+- Push sends exactly one message per change per phone and receives no requests at all. That's the next lesson.
+
+## When polling is the right answer
+
+Polling is not a beginner's mistake. It is the right tool when updates are rare, a few seconds of staleness is fine, or the client only cares for a short time.
+
+<table>
+  <thead>
+    <tr><th>Gatepass screen</th><th>Choice</th><th>Why</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Payment status after checkout</td><td>Short poll every 2 s, for 60 s</td><td>Short-lived, one user, simple</td></tr>
+    <tr><td>“My tickets” page</td><td>Fetch on open, no polling</td><td>Changes only when the user acts</td></tr>
+    <tr><td>Event list for a city</td><td>Short poll every 60 s</td><td>Changes slowly, cacheable on a CDN</td></tr>
+    <tr><td>Seat map during an on-sale</td><td>Push</td><td>Many viewers, many changes, seconds matter</td></tr>
+  </tbody>
+</table>
+
+<Callout tone="tip" title="Design the endpoint for change, not for state">
+Whatever transport you pick, give the client a version cursor (`since=1833`) and let the server return only what changed. The same endpoint then works for polling, for long polling and for catching up after a dropped push connection.
+</Callout>
+
+<Quiz
+  id="polling-staleness"
+  question="Gatepass short-polls the seat map every 4 seconds. On average, how long after a seat is booked does a viewer see it turn grey?"
+  options={["About 0.1 seconds", "About 2 seconds", "About 4 seconds", "About 8 seconds"]}
+  answer={1}
+  explain={<>A booking lands at a random moment between two polls, so the wait until the next poll is anywhere from 0 to 4 seconds, about <strong>2 seconds</strong> on average (half the interval). The worst case is the full 4 seconds.</>}
+/>
+
+<YourTurn
+  id="polling-choose"
+  prompt="Gatepass wants a live “tickets left” counter on each event page: 30,000 people view the page during an on-sale, and the count changes about 20 times a second. List what you'd consider before choosing short polling, long polling or push."
+  fields={3}
+  hint="Think about how stale the number can be, how many viewers there are, and whether every change matters."
+>
+- **Does every change matter?** A counter can be approximate. Nobody needs to see 1,204 tick to 1,203. Updating every 2–5 seconds is fine, which makes **short polling** a real option.
+- **Can the response be shared?** Every viewer sees the same number, so put it behind a CDN or cache with a 2-second TTL. 30,000 viewers polling every 5 s is 6,000 requests a second, but almost all of them hit the edge cache and never reach Gatepass.
+- **Long polling is the worst fit here.** At 20 changes a second, every held request completes almost immediately, so you get the request rate of fast polling plus the cost of holding connections.
+- Push only makes sense if the page already has a push connection open (for example, for the seat map). Then send a throttled update every few seconds instead of every change.
+</YourTurn>
+
+## Key takeaways
+
+- Short polling is simple and stateless, but freshness and cost are tied: halve the interval, double the requests.
+- Average staleness under short polling is half the poll interval.
+- Long polling replies the moment something changes, but holds a connection per viewer and turns each change into a wave of reconnects.
+- Always poll with a version cursor so the server returns only what changed and nothing is missed between requests.
+- Polling is the right choice for rare updates, short-lived waits and data you can cache. The live seat map needs push.

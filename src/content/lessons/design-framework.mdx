@@ -1,0 +1,116 @@
+Faced with a blank whiteboard and "design a ticketing system", most people either freeze or start drawing boxes. Both end badly. Experienced designers do something duller and far more reliable: they follow the same sequence every time. This lesson gives you that sequence, the time to spend on each step and what to say out loud.
+
+## Why a framework at all
+
+A design problem is open-ended: no right answer, no obvious start, endless detail available. Without a structure you spend 25 minutes on a cache nobody needed, forget to ask how many users there are, and never reach the database. A framework doesn't make the design for you. It makes sure you consider the things that matter, in an order where each step feeds the next:
+
+- Requirements tell you what you're building, so estimates have something to measure.
+- Estimates tell you whether you need one server or fifty, so the architecture is justified.
+- The API and data model make the system concrete before you draw boxes.
+- Only then do you draw, and only then do you zoom into the risky parts.
+
+This applies to an interview and to a real design document. The time boxes below assume a 45-minute session; scale them for a longer meeting.
+
+<Diagram w={680} h={150} caption="Seven steps, in order. The numbers are minutes in a 45-minute session.">
+  <Box x={8} y={50} w={86} h={50} label="1 Needs" sub="5 min" tone="accent" />
+  <Box x={104} y={50} w={86} h={50} label="2 Numbers" sub="5 min" />
+  <Box x={200} y={50} w={86} h={50} label="3 API" sub="5 min" />
+  <Box x={296} y={50} w={86} h={50} label="4 Data" sub="5 min" />
+  <Box x={392} y={50} w={86} h={50} label="5 Design" sub="8 min" tone="info" />
+  <Box x={488} y={50} w={86} h={50} label="6 Dive" sub="12 min" tone="info" />
+  <Box x={584} y={50} w={86} h={50} label="7 Wrap" sub="5 min" tone="ok" />
+  <Wire points={[[94, 75], [102, 75]]} tone="muted" />
+  <Wire points={[[190, 75], [198, 75]]} tone="muted" />
+  <Wire points={[[286, 75], [294, 75]]} tone="muted" />
+  <Wire points={[[382, 75], [390, 75]]} tone="muted" />
+  <Wire points={[[478, 75], [486, 75]]} tone="muted" />
+  <Wire points={[[574, 75], [582, 75]]} tone="muted" />
+</Diagram>
+
+## 1. Requirements (about 5 minutes)
+
+Ask before you design. Split what you hear into two lists.
+
+**Functional**: what users can do. For Gatepass: browse events, see seats, hold seats, pay, receive a ticket, scan at the door. Agree on a short list and explicitly park the rest ("organiser payouts: out of scope for now").
+
+**Non-functional**: how well it must do it. These decide the architecture more than the features do:
+
+- Scale: how many users, events, peak on-sale traffic?
+- Latency: is 300 ms fine or must it feel instant?
+- Availability vs consistency: what happens if two people want the last seat? (Consistency matters. A double-sold seat is worse than a brief error.)
+- Durability: can a paid booking ever be lost? (Never.)
+
+Say it out loud: "I'll assume reads dominate writes, except during on-sales, where both spike. Correct me if that's wrong." Stated assumptions are cheap to fix now and expensive to discover at step 6.
+
+## 2. Estimates (about 5 minutes)
+
+Do rough arithmetic, not precise arithmetic. You want the order of magnitude, since 100 requests a second and 100,000 are different designs.
+
+- Users and activity: 5 million monthly users, 10% active on a given day, 20 page views each is 10 million views a day, about 115 a second on average and maybe 1,000 at peak.
+- Writes: 200,000 bookings a day is about 2 a second on average, but an on-sale can put 2,000 attempts a second on a single event for a minute.
+- Storage: 200,000 bookings × 1 KB × 365 is about 73 GB a year. Small. Images dominate: 50,000 events × 5 MB is 250 GB, a job for object storage and a CDN.
+
+State the consequence: "Average load is tiny. A single database holds the data. The design problem is the on-sale spike, not the volume." That sentence is what the estimate is *for*.
+
+## 3. API (about 5 minutes)
+
+List the main calls the client makes. Resource, verb, key parameters:
+
+```
+GET  /events?city=pune&date=…        → list
+GET  /events/{id}/seats              → seat map
+POST /events/{id}/holds              → hold seats (idempotency key)
+POST /bookings                       → pay for a hold
+GET  /me/tickets                     → my tickets
+```
+
+Doing this early catches ambiguity (what does "hold" mean?) and shows which calls are read-heavy, write-heavy or retried. Mention pagination, auth and idempotency where they matter.
+
+## 4. Data model (about 5 minutes)
+
+Name the main entities, their key fields and the relationships: `events`, `seats`, `holds`, `bookings`, `users`. Then answer the questions that shape storage: which queries must be fast, what needs a transaction (hold-then-book), and how it grows. Choose the store with a reason ("relational: the seat-inventory transaction needs strong consistency"), not by habit.
+
+## 5. High-level design (about 8 minutes)
+
+Now draw the simple version that satisfies steps 1–4: clients, load balancer, API servers, database, plus the pieces your numbers justify, such as a CDN for images and a cache for the event list. Trace one request for each main API call through the picture.
+
+Resist adding anything the numbers haven't asked for. A first diagram with five boxes you can defend beats one with fifteen you can't.
+
+## 6. Deep dives (about 12 minutes)
+
+Pick the two or three places where the design is hardest, and go deep. Usually these are the places where your estimates and requirements collide: for Gatepass, selling the last seats without double-booking under a 2,000-requests-a-second spike. Discuss the options, compare tradeoffs, name the failure modes and what you'd monitor. This is where earlier lessons are used: queues, rate limits, caching, idempotency, sharding.
+
+If you're being interviewed, the interviewer often steers this step. Follow their interest, but still say what the tradeoff is.
+
+## 7. Wrap-up (about 5 minutes)
+
+Summarise in thirty seconds: what you built, the biggest risk and what you'd do next. Then list **bottlenecks and what changes at 10×**: "At ten times the traffic the database becomes the constraint; I'd add replicas first, then shard by event." Finish with what you'd monitor: latency, error rate, queue depth, oldest job age.
+
+## Saying it out loud
+
+A framework only helps if the other person can follow it. Habits that work:
+
+- **Announce each step.** "Let me start with requirements" tells everyone where you are.
+- **Explain tradeoffs in one sentence.** "I'm choosing a relational database because the inventory update needs a transaction; the cost is that scaling writes later takes more work."
+- **State assumptions, then proceed.** Don't wait for approval on every detail.
+- **Keep a visible list** of parked topics ("payouts, refunds, fraud") so nothing looks forgotten.
+- **Checkpoint.** At the end of each step ask: "Does that match what you had in mind?"
+
+<YourTurn
+  id="framework-first-minutes"
+  prompt="You're asked to design a food-delivery app. Write the first things you would ask or state in the Requirements and Estimates steps."
+  fields={3}
+  minAnswers={3}
+  examples={["How many restaurants and daily orders?", "Is live driver tracking in scope?"]}
+  hint="Think of functional features, scale, and the one non-functional need that will shape the design."
+>
+Good answers: scope the features (browse, order, pay, track; park promotions and ratings). Ask scale (orders a day, peak lunch and dinner multiplier). Ask what matters most: low latency on search, never losing a paid order, accurate driver location. Estimate peak orders a second and location updates (drivers × one update every few seconds is often the largest traffic of all). State the consequence: for example, "location updates dominate writes, so they need a cheap store separate from orders."
+</YourTurn>
+
+## Key takeaways
+
+- Follow the same order every time: requirements, estimates, API, data model, high-level design, deep dives, wrap-up.
+- Requirements and estimates exist to justify the architecture. End each with a consequence for the design.
+- Define the API and data model before drawing boxes, so the picture has something to be true to.
+- Draw the simplest design the numbers justify, then spend the most time on the two or three hardest parts.
+- Narrate: announce steps, state assumptions, name tradeoffs and checkpoint with the listener.

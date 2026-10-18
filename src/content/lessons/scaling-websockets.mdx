@@ -1,0 +1,99 @@
+import { WebSocketFanout } from "@/components/visuals/websocket-fanout"
+
+The live seat map works perfectly on your laptop. In production, Gatepass runs ten API servers behind a load balancer, and fans start reporting that seats “sold out of nowhere”. A booking on server 3 updates the phones connected to server 3, and nobody else. HTTP servers could forget each request; a WebSocket server can't forget its connections.
+
+## Why one server was easy
+
+With one server, the booking handler and every open socket live in the same process. When seat C14 sells, the handler loops over the sockets watching event 42 and writes to each one. An in-memory map from event id to connections is all you need.
+
+Add a second server and that map is split in two. The load balancer sent each phone's upgrade request to whichever server it picked, and the socket stays there for its whole life. The booking request, a separate HTTP call, lands on any server. The server that saves the booking usually doesn't hold most of the phones that need to hear about it.
+
+<Diagram w={640} h={250} caption="Without fan-out, a booking only reaches the phones connected to the server that handled it.">
+  <Box x={250} y={10} w={140} label="Load balancer" icon="lb" />
+  <Box x={40} y={110} w={140} label="Server 1" sub="handles the booking" icon="server" tone="req" />
+  <Box x={250} y={110} w={140} label="Server 2" sub="4,000 sockets" icon="server" />
+  <Box x={460} y={110} w={140} label="Server 3" sub="4,000 sockets" icon="server" />
+  <Wire points={[[300, 62], [110, 108]]} tone="req" label="POST /bookings" />
+  <Box x={50} y={190} w={120} h={44} label="Updated" tone="ok" icon="phone" />
+  <Box x={260} y={190} w={120} h={44} label="Stale" tone="warn" icon="phone" />
+  <Box x={470} y={190} w={120} h={44} label="Stale" tone="warn" icon="phone" />
+  <Wire points={[[110, 162], [110, 188]]} tone="res" flow />
+  <Wire points={[[320, 162], [320, 188]]} tone="muted" dashed arrow={false} />
+  <Wire points={[[530, 162], [530, 188]]} tone="muted" dashed arrow={false} />
+</Diagram>
+
+## Fan out through pub/sub
+
+The fix is to stop treating “who needs to know” as one server's problem. Put a **publish/subscribe** channel between the servers. Redis pub/sub is the common first choice; NATS, or a managed service, do the same job.
+
+1. When a phone subscribes to event 42, its server subscribes to the channel `event:42` (once, no matter how many of its phones watch that event).
+2. When any server commits a booking, it publishes `{seat: "C14", v: 1833}` to `event:42`.
+3. Redis delivers the message to every server subscribed to that channel.
+4. Each server writes it to its own local sockets for event 42.
+
+The booking server no longer needs to know where the phones are. Servers can come and go, and each one only cares about its own connections.
+
+<Diagram w={640} h={250} caption="With pub/sub, every server hears every booking for the events its phones watch.">
+  <Box x={40} y={110} w={140} label="Server 1" sub="publishes" icon="server" tone="req" />
+  <Box x={250} y={110} w={140} label="Server 2" icon="server" />
+  <Box x={460} y={110} w={140} label="Server 3" icon="server" />
+  <Box x={245} y={10} w={150} label="Redis pub/sub" sub="channel event:42" icon="stream" tone="info" />
+  <Wire points={[[110, 108], [110, 36], [243, 36]]} tone="req" label="PUBLISH" labelAt={[110, 70]} />
+  <Wire points={[[320, 62], [320, 108]]} tone="info" flow />
+  <Wire points={[[397, 36], [530, 36], [530, 108]]} tone="info" flow />
+  <Box x={50} y={190} w={120} h={44} label="Updated" tone="ok" icon="phone" />
+  <Box x={260} y={190} w={120} h={44} label="Updated" tone="ok" icon="phone" />
+  <Box x={470} y={190} w={120} h={44} label="Updated" tone="ok" icon="phone" />
+  <Wire points={[[110, 162], [110, 188]]} tone="res" flow />
+  <Wire points={[[320, 162], [320, 188]]} tone="res" flow />
+  <Wire points={[[530, 162], [530, 188]]} tone="res" flow />
+</Diagram>
+
+Redis pub/sub is fire-and-forget: a server that's disconnected from Redis at the moment of publishing misses the message, and nothing is stored. That's acceptable here because the seat map has a second line of defense, the version cursor. Any server or phone that notices a gap (it has v1831 and receives v1833) fetches the changes since 1831 from the database. If you can't tolerate gaps at all, publish to a durable log such as a Redis stream or Kafka instead. Module 15 covers those.
+
+## Try it: fan-out and a restart
+
+Book a few seats with pub/sub off and count the stale phones. Turn it on and book again. Then restart server 2 and watch where its phones go.
+
+<WebSocketFanout />
+
+## Sticky connections and uneven load
+
+A WebSocket is sticky by nature: once upgraded, the TCP connection is pinned to one server. You don't need session affinity settings for that. You do need to know what it does to your load.
+
+- **Load spreads at connect time, not per message.** A server that was restarted comes back empty, while the others stay full until phones naturally disconnect. Spreading connections with least-connections balancing helps new connections, not old ones.
+- **Scale on connections, not just CPU.** A WebSocket server can sit at 15% CPU and still be at its memory or file-descriptor limit. Autoscale on open connections per server.
+- **Deploys become events.** Rolling restarts drop thousands of connections at once. Drain a server by closing its sockets a few hundred at a time, and send clients a “please reconnect” message rather than letting them discover the drop.
+
+## Reconnects, done properly
+
+A dropped connection is normal, not exceptional: phones change networks, laptops sleep, servers deploy. Every client needs the same reconnect routine.
+
+1. **Wait a random delay**, growing with each failure (for example, a random time up to 1 s, then up to 2 s, 4 s, capped at 30 s). If 40,000 phones lost the same server, you don't want 40,000 upgrades in the same 100 ms. The retries lesson explains why the randomness matters.
+2. **Reconnect through the load balancer**, which picks a healthy server.
+3. **Resubscribe with the last version seen**, so the server can replay what was missed.
+4. **Fall back to a full refresh** if the gap is too old to replay (say, more than 5 minutes or 1,000 versions).
+
+<Callout tone="key" title="Same cursor, every layer">
+The version number that made polling efficient is the same thing that makes reconnects lossless and lets a server detect a missed pub/sub message. One integer per seat map, saved with every booking, carries the whole design.
+</Callout>
+
+<YourTurn
+  id="ws-scale-numbers"
+  prompt="For a big on-sale, Gatepass expects 300,000 fans with the seat map open at once, and each WebSocket server can hold 40,000 connections. Bookings peak at 400 a second, spread across 50 events. What would you check or decide?"
+  fields={3}
+  hint="Count servers, then count pub/sub messages in and out."
+>
+- **Servers:** 300,000 ÷ 40,000 = 7.5, so at least 8, and 10 or 11 for headroom and to survive losing one without the rest going over the limit.
+- **Pub/sub traffic is small:** 400 publishes a second into Redis. Each one goes to the servers subscribed to that event, at most ~11, so under 4,500 messages a second out of Redis. Easy for one Redis node.
+- **Socket writes are the real work:** each booking goes to every phone watching that event. If the biggest event has 120,000 viewers and 200 bookings a second, that's 24 million socket writes a second across the fleet. Batch updates: send one message per event every 200–500 ms containing all seats that changed.
+- **Restarts:** losing one server means 30,000+ phones reconnecting. Use jittered reconnects and make sure the other servers have room for them.
+</YourTurn>
+
+## Key takeaways
+
+- WebSocket connections are pinned to one server, but bookings can happen on any server, so a booking must be broadcast to every server.
+- A pub/sub channel per event lets each server subscribe for its own phones and lets any server publish.
+- Plain pub/sub can lose messages. A version number on every update lets servers and phones detect gaps and fetch what they missed.
+- Load balances at connect time. Scale and monitor on open connections, and drain servers gently on deploy.
+- Clients reconnect with random, growing delays and resubscribe with the last version they saw.

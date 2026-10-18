@@ -1,0 +1,115 @@
+A worker sends Priya's ticket by SMS, the provider accepts it, and then the worker's network drops before the reply arrives. The worker can't tell whether the SMS went out, so the job times out and runs again. Priya gets two texts. Annoying, but harmless. Now replace “send SMS” with “charge ₹2,400” and it's a support ticket, a refund and a lost customer.
+
+## Why “exactly once” isn't on the menu
+
+Every call over a network has three possible outcomes: it worked, it failed, or **you don't know**. A timeout is the third one. The request might never have arrived, might have been processed with the reply lost, or might still be running.
+
+When you don't know, you have two choices. Don't retry, and some work is silently lost (at-most-once). Retry, and some work happens twice (at-least-once). Queues, as you saw, choose at-least-once: a worker that crashes before acknowledging gets its job redelivered. No queue, protocol or library can turn an unknown outcome into a known one.
+
+So you don't get exactly-once delivery. What you can build is **exactly-once effect**: the work may be attempted several times, but the result is the same as doing it once. An operation with that property is **idempotent**.
+
+<KeyIdea>You can't stop a request from arriving twice. You can make the second arrival do nothing.</KeyIdea>
+
+## Some operations are idempotent already
+
+Look at what the operation does, not how often it's called:
+
+- `SET seat C14 status = 'sold'` is idempotent. Running it twice leaves the seat sold.
+- `DELETE booking 9812` is idempotent. The second delete finds nothing to delete.
+- `PUT /users/81/phone` with the full new value is idempotent.
+- `UPDATE events SET sold = sold + 1` is **not**. Run it twice and you've counted two tickets.
+- `POST /bookings` that inserts a new row is **not**. Run it twice and the fan has two bookings.
+- “Send an SMS” and “charge a card” are **not**. They have effects outside your database.
+
+The rule of thumb: operations that *set* a state are naturally idempotent; operations that *add*, *increment* or *trigger* something are not. Where you can, design the operation as a set. Instead of “add one ticket to the count”, compute the count from the tickets table, or record the booking id that was counted.
+
+## Idempotency keys
+
+For operations that can't be made naturally idempotent, give each logical operation a unique id, and remember which ids you've already done. This is an **idempotency key**.
+
+For Gatepass's booking API, the app generates a random key when the fan taps “Pay” and sends it with the request: `Idempotency-Key: 5f1c…`. If the request times out, the app retries with **the same key**. The server does this:
+
+1. Insert the key into an `idempotency_keys` table with a unique constraint, status `in_progress`.
+2. If the insert fails because the key exists: if the stored status is `done`, return the **saved response**. If it's still `in_progress`, return `409 Conflict` and let the client retry shortly.
+3. Otherwise, do the work (reserve the seat, charge the card) and save the response with the key, status `done`, in the same transaction as the booking.
+
+<Diagram w={640} h={250} caption="A retried booking with the same key gets the first response back, and nothing runs twice.">
+  <Box x={10} y={30} w={120} label="Phone" sub="key 5f1c" icon="phone" />
+  <Box x={250} y={30} w={140} label="Booking API" icon="server" />
+  <Box x={500} y={10} w={130} label="Keys table" sub="5f1c: done, 201" icon="db" tone="info" />
+  <Box x={500} y={100} w={130} label="Payments" sub="charged once" icon="service" tone="ok" />
+  <Wire points={[[132, 46], [248, 46]]} tone="req" label="1st try" />
+  <Wire points={[[392, 46], [498, 36]]} tone="info" />
+  <Wire points={[[392, 70], [498, 120]]} tone="req" />
+  <Wire points={[[248, 70], [132, 70]]} tone="err" dashed label="reply lost" />
+  <Box x={10} y={170} w={120} label="Phone" sub="same key 5f1c" icon="phone" />
+  <Box x={250} y={170} w={140} label="Booking API" sub="key seen: replay" icon="server" tone="ok" />
+  <Wire points={[[132, 186], [248, 186]]} tone="req" label="retry" />
+  <Wire points={[[392, 186], [500, 62]]} tone="info" dashed />
+  <Wire points={[[248, 210], [132, 210]]} tone="res" label="same 201" />
+</Diagram>
+
+Two details make or break this:
+
+- **The key identifies the intent, not the request.** Generate it once per tap of “Pay”, before the first try, and reuse it on every retry. A new key per retry protects nothing.
+- **Pass the key downstream.** Gatepass sends its own key (for example `booking-9812`) to the payment provider, which also supports idempotency keys. If Gatepass retries the charge, the provider replays its earlier answer instead of charging again.
+
+## Workers: dedupe on what the job means
+
+Background jobs work the same way. A `send-ticket` job carries `bookingId: 9812`. Before sending, the worker records what it's about to do, keyed by meaning:
+
+```sql
+INSERT INTO deliveries (booking_id, channel) VALUES (9812, 'sms')
+ON CONFLICT DO NOTHING
+RETURNING id;
+```
+
+If the insert returns nothing, this booking's SMS was already handled, so the worker acknowledges the job and stops. If it returns a row, the worker sends the SMS and marks the row sent.
+
+There's still a gap. The worker can crash after sending and before marking. That's the unknown outcome again, now at the provider. You shrink the gap by passing the delivery id to the provider as its idempotency key, if it accepts one. If it doesn't, you choose which failure is acceptable: an occasional duplicate text (retry) or an occasional missing text (don't). For an SMS, a duplicate is the lesser evil. For a payment, you only use providers that support keys.
+
+## Race conditions: check-then-act isn't enough
+
+A common first attempt is “check whether it's done, and if not, do it”:
+
+```
+if not already_sent(9812): send(9812); mark_sent(9812)
+```
+
+Two workers holding duplicate copies of the job can both run the check before either marks it, and both send. The check and the claim must be **one atomic step**: a unique constraint, an `INSERT … ON CONFLICT`, a conditional update (`UPDATE … SET status='sending' WHERE status='pending'`, then checking that one row changed), or Redis `SET key value NX`. Let the database decide who wins.
+
+<Callout tone="warn" title="Keys need a lifetime">
+Idempotency keys can't be stored forever, and they don't need to be. Keep them as long as a retry could plausibly arrive: Stripe keeps them for 24 hours. Gatepass keeps booking keys for 24 hours and delivery records for as long as the ticket exists.
+</Callout>
+
+<Quiz
+  id="idempotency-which"
+  question="Which of these Gatepass operations is naturally idempotent?"
+  options={[
+    "Increment the event's tickets_sold counter by 1",
+    "Insert a new row into bookings",
+    "Set seat C14's status to 'sold' for booking 9812",
+    "Send a confirmation email",
+  ]}
+  answer={2}
+  explain={<>Setting a value to a fixed state gives the same result however many times it runs. Incrementing, inserting and sending all add something new each time, so they need an idempotency key or a unique constraint to be safe.</>}
+/>
+
+<YourTurn
+  id="idempotency-refund"
+  prompt="An organiser cancels a show and Gatepass must refund 3,000 tickets via a background job per ticket. The job may run twice. How do you make sure nobody is refunded twice?"
+  fields={3}
+  hint="Think about what uniquely identifies a refund, where the atomic claim happens, and what you pass to the payment provider."
+>
+- **One refund per ticket:** a `refunds` table with a unique constraint on `ticket_id`. The job starts with `INSERT … ON CONFLICT DO NOTHING RETURNING id` with status `pending`. No row returned means another run owns it: acknowledge and stop.
+- **Downstream key:** call the provider's refund API with idempotency key `refund-<ticket_id>`. If the worker crashes after the call and the job reruns, the provider returns the original refund instead of creating a second one.
+- **Finish:** store the provider's refund id and mark the row `done`. A nightly check compares refunds against cancelled tickets and flags any stuck in `pending` for more than an hour.
+</YourTurn>
+
+## Key takeaways
+
+- A timeout means “unknown”, so retries are necessary and duplicates are inevitable. Aim for exactly-once *effect*.
+- Setting a state is naturally idempotent; adding, incrementing and triggering are not.
+- Idempotency keys identify one user intent. Store them with the result, replay the result on repeats, and pass keys to downstream providers.
+- Claim work with an atomic step (unique constraint, conditional update), never check-then-act.
+- Where a gap remains, decide consciously whether a duplicate or a miss is the smaller harm.

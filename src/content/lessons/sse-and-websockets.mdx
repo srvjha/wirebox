@@ -1,0 +1,115 @@
+import { SseWebSocketLifecycle } from "@/components/visuals/sse-websocket-lifecycle"
+
+Polling makes the server answer the same question thousands of times a second. Flip it around: let each phone open one connection and keep it open, and let the server speak first whenever a seat changes. There are two standard ways to do that on the web, and they differ in who can talk and who cleans up when things break.
+
+## Keep the connection open
+
+Every request so far has had the same shape: the client asks, the server answers, the exchange is over. For a live seat map that shape is the problem. The server knows the instant seat C14 sells, but it has no way to tell anyone until they ask.
+
+A **persistent connection** fixes that. The phone connects once when the seat map opens. The server keeps a list of who is connected and which event they are watching. When a booking commits, the server writes a message to each of those connections. No phone asks anything.
+
+<Diagram w={640} h={220} caption="One connection per phone, opened once. The server writes to it when something happens.">
+  <Box x={20} y={20} w={120} label="Phone A" sub="event 42" icon="phone" />
+  <Box x={20} y={84} w={120} label="Phone B" sub="event 42" icon="phone" />
+  <Box x={20} y={148} w={120} label="Phone C" sub="event 42" icon="phone" />
+  <Box x={300} y={84} w={150} label="API server" sub="3 open connections" icon="server" />
+  <Box x={508} y={84} w={112} label="Booking" sub="C14 sold" tone="accent" />
+  <Wire points={[[508, 110], [452, 110]]} tone="accent" />
+  <Wire points={[[300, 98], [142, 46]]} tone="res" flow />
+  <Wire points={[[300, 110], [142, 110]]} tone="res" flow />
+  <Wire points={[[300, 122], [142, 174]]} tone="res" flow />
+  <Text x={222} y={60} mono size={10.5} tone="res">C14 taken</Text>
+</Diagram>
+
+The cost moves from requests to connections. A server that held zero connections between polls now holds one per viewer for as long as the screen is open. Keep that in mind; we come back to it at the end.
+
+## Server-sent events: a response that never ends
+
+**Server-sent events (SSE)** are the smaller idea. The phone makes an ordinary `GET` with `Accept: text/event-stream`. The server replies `200 OK`, writes the headers, and then never finishes the body. Whenever there's news, it writes a few lines of text:
+
+```
+id: 1833
+event: seat
+data: {"seat":"C14","status":"taken"}
+
+```
+
+In the browser, `new EventSource("/events/42/stream")` handles the rest. Three things make SSE pleasant:
+
+- **It's just HTTP.** Your cookies, auth middleware, load balancer and logging work unchanged.
+- **Reconnects are built in.** If the connection drops, the browser waits a moment and reconnects on its own, sending a `Last-Event-ID` header with the last `id` it saw. If your ids are seat-map versions, the server replays what was missed and the map is correct again.
+- **It's text you can read.** You can watch a stream with `curl`.
+
+Its limits are just as clear. Messages only go from server to client; to hold a seat, the app sends a separate `POST`. It carries text, not binary. And over old HTTP/1.1, a browser allows about six connections per domain, so a user with several tabs can starve their own page. Serve it over HTTP/2 and that limit goes away.
+
+## WebSockets: a two-way pipe
+
+A **WebSocket** starts as an HTTP request asking to *upgrade*. The server answers `101 Switching Protocols`, and from then on the TCP connection stops being HTTP. It carries small frames in both directions, text or binary, with a couple of bytes of overhead each instead of a page of headers.
+
+That freedom has a price. Inside the socket there are no URLs, methods or status codes, so you design your own protocol: a `subscribe` message, a `seat` message, an `ack` that names which request it answers. And when the connection drops, the browser fires `onclose` and does nothing else. Reconnecting, resubscribing and catching up on missed events is code you write.
+
+<KeyIdea>SSE gives you a one-way stream with reconnects for free. WebSockets give you a two-way pipe and hand you the reconnect problem.</KeyIdea>
+
+## Try it: the life of one connection
+
+Step through both protocols. Pay attention to steps 5 to 8: what crosses the wire when the fan taps a seat, and who notices when the phone drives into a tunnel.
+
+<SseWebSocketLifecycle />
+
+Notice that both protocols need the same thing to survive a reconnect: an id or version on every message, and a server that can replay everything after a given version. That's the `since` cursor from the polling lesson again. Design it once and every transport benefits.
+
+## Choosing between them
+
+<div className="overflow-x-auto">
+<table>
+  <thead>
+    <tr><th></th><th>Server-sent events</th><th>WebSockets</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Direction</td><td>Server to client</td><td>Both ways</td></tr>
+    <tr><td>Protocol</td><td>Plain HTTP response</td><td>HTTP upgrade, then frames</td></tr>
+    <tr><td>Data</td><td>Text</td><td>Text or binary</td></tr>
+    <tr><td>Reconnect and resume</td><td>Automatic, with Last-Event-ID</td><td>You build it</td></tr>
+    <tr><td>Good for</td><td>Feeds, notifications, live scores, progress bars</td><td>Chat, games, collaborative editing, frequent client messages</td></tr>
+  </tbody>
+</table>
+</div>
+
+For a seat map that only *shows* changes, SSE is enough. Holding a seat is a normal `POST` that needs validation and a database transaction anyway.
+
+Gatepass picks WebSockets for a specific reason: the seat-map screen talks back a lot. While a fan sits in checkout, the app renews their seat hold every 10 seconds, and the next lesson's presence feature sends heartbeats. With SSE, each of those is a new HTTP request with full headers and an auth check. On one socket they're tiny frames. If your screen mostly listens, start with SSE. If it talks as much as it listens, use a WebSocket.
+
+<Callout tone="warn" title="Don't put the booking itself on the socket">
+It's tempting to send everything through the WebSocket once it's open. Keep the payment and the booking as ordinary HTTP requests. They need idempotency keys, clear status codes, retries and logs, and HTTP already gives you all of that. Use the socket for news, not for the transactions that create it.
+</Callout>
+
+## What an open connection costs
+
+Persistent connections change what “load” means. A server that handled 2,000 requests a second might now hold 40,000 idle connections. Each costs a socket, a file descriptor and some memory for buffers, often 10 to 50 KB. That is about 1 to 2 GB of RAM for 40,000 connections, before your application stores anything per user.
+
+Three practical consequences:
+
+- **Use an event-loop server.** One thread per connection doesn't survive tens of thousands of mostly idle connections.
+- **Send heartbeats.** Load balancers and mobile networks silently kill connections that look idle, often after 60 seconds. A ping every 15 to 30 seconds keeps them alive, and tells you when the other side is gone.
+- **Deploys drop everyone.** Restart a server holding 40,000 sockets and 40,000 phones reconnect at once. Drain servers slowly, and make clients reconnect after a random delay. More on that in the next lesson and in retries with jitter.
+
+<Quiz
+  id="sse-ws-reconnect"
+  question="Gatepass's WebSocket client reconnects after a drop, but fans report seats that look free yet fail at checkout. What's the most likely bug?"
+  options={[
+    "The server should use SSE instead",
+    "On reconnect, the client subscribes again but doesn't send the last version it saw, so changes during the gap are never sent",
+    "The heartbeat interval is too short",
+    "WebSocket frames are binary and lost the seat ids",
+  ]}
+  answer={1}
+  explain={<>Changes made while the phone was disconnected never reached it. The fix is the same as SSE's <code>Last-Event-ID</code>: send <code>since</code> with the last version on resubscribe, and have the server replay everything after it (or send a fresh full map if the gap is too big).</>}
+/>
+
+## Key takeaways
+
+- A persistent connection lets the server push the moment something changes. The cost moves from requests to open connections.
+- SSE is a never-ending HTTP response: one way, text only, with automatic reconnect and resume via `Last-Event-ID`.
+- WebSockets upgrade to a two-way, low-overhead pipe. You design the message protocol and write the reconnect logic yourself.
+- Put a version on every message and support “replay since version N”. Without it, every reconnect silently loses updates.
+- Keep transactions like bookings on plain HTTP. Use the socket for news.

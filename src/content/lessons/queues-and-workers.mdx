@@ -1,0 +1,91 @@
+import { QueueWorkerSim } from "@/components/visuals/queue-worker-sim"
+
+Gatepass decided the PDF, email and SMS can happen after the booking. Now someone has to do them, reliably, even when the web server that took the booking restarts a second later. The answer is a queue between the code that creates work and the code that does it, and a few numbers that tell you how many workers you need.
+
+## Producers, a queue, consumers
+
+Three roles, each with one job:
+
+- **Producers** create jobs. The booking API is a producer: after committing a booking, it adds `send-ticket {bookingId: 9812}` to the queue and replies to the fan.
+- **The queue** stores jobs durably until someone takes them. It survives restarts of the producers and the consumers.
+- **Consumers**, usually called **workers**, are separate processes that loop forever: take a job, do it, report that it's done, take the next.
+
+<Diagram w={640} h={220} caption="Producers and workers never talk directly. The queue sits between them and absorbs the difference in speed.">
+  <Group x={10} y={30} w={160} h={170} label="producers" />
+  <Box x={26} y={50} w={128} label="Booking API" icon="server" />
+  <Box x={26} y={130} w={128} label="Booking API" icon="server" />
+  <Box x={240} y={86} w={160} h={56} label="Queue" sub="send-ticket ×1,240" icon="queue" tone="info" />
+  <Group x={470} y={30} w={160} h={170} label="workers" />
+  <Box x={486} y={50} w={128} label="Worker 1" icon="worker" />
+  <Box x={486} y={130} w={128} label="Worker 2" icon="worker" />
+  <Wire points={[[156, 76], [238, 106]]} tone="req" flow />
+  <Wire points={[[156, 156], [238, 124]]} tone="req" flow />
+  <Wire points={[[402, 106], [484, 76]]} tone="info" flow />
+  <Wire points={[[402, 124], [484, 156]]} tone="info" flow />
+</Diagram>
+
+The queue buys you three things:
+
+- **Decoupling.** The booking API doesn't know or care how tickets are delivered, how many workers exist, or whether the SMS provider is up.
+- **Buffering.** When bookings arrive faster than workers can process them, jobs wait in the queue instead of being dropped or slowing the API down.
+- **Independent scaling.** Add workers when the queue grows; the API servers don't change.
+
+Common choices: a managed queue like Amazon SQS or Google Cloud Tasks, a Redis-backed library such as BullMQ or Sidekiq, RabbitMQ, or even a Postgres table using `SELECT … FOR UPDATE SKIP LOCKED` while volumes are small. They differ in features, but the model is the same.
+
+## Taking a job safely: acknowledgements
+
+What happens if a worker takes a job and then crashes halfway through sending the email? If taking the job removed it from the queue, the job is lost.
+
+So queues don't delete a job when it's handed out. They hide it. The worker gets the job with a **visibility timeout** (or lease), say 30 seconds. When the worker finishes, it **acknowledges** the job and the queue deletes it. If the worker crashes, or takes longer than 30 seconds, the job becomes visible again and another worker picks it up.
+
+This gives you **at-least-once** delivery: every job is done at least once, and occasionally twice. A worker that sent the email and then crashed before acknowledging will cause a second email. You can't avoid that with a better queue. You handle it by making jobs safe to repeat, which is the idempotency lesson.
+
+<KeyIdea>A queue guarantees a job won't be lost, not that it runs exactly once. Every job you write must be safe to run twice.</KeyIdea>
+
+## How many workers? Do the arithmetic
+
+One worker that takes 250 ms per job finishes 4 jobs a second. Six workers finish 24 a second. That's your **capacity**. Compare it with the **arrival rate**:
+
+- Arrivals below capacity: the queue stays near empty and jobs start almost immediately.
+- Arrivals above capacity: the queue grows by the difference, every second, for as long as it lasts.
+
+During a 30-second on-sale, bookings jump to 100 a second. With capacity 24 a second, the backlog grows by 76 jobs a second, reaching about 2,300 jobs. Once the rush ends and arrivals fall back to 20 a second, the queue drains at only 4 jobs a second, so it takes almost **10 minutes** to empty. The last fan in the rush waits roughly 2,300 ÷ 24 ≈ 95 seconds for their ticket, and anyone who books just after waits nearly as long.
+
+Two rules of thumb fall out of that:
+
+- **Wait time ≈ jobs ahead of you ÷ capacity.** A queue of 2,400 with capacity 24 a second is a 100-second wait. (This is Little's law in disguise.)
+- **Run well below 100% utilisation.** The spare capacity is what drains a backlog. At 95% utilisation, a burst that took 30 seconds to build takes many minutes to clear.
+
+## Try it: size the workers for an on-sale
+
+Start with the defaults: 20 jobs a second normally, 6 workers, 250 ms each. Watch the backlog during the burst. Then find the fewest workers that keep the worst wait under a minute. Finally, set time per job to 1,500 ms (the SMS provider slowed down) and see what that does to the same fleet.
+
+<QueueWorkerSim />
+
+Notice that a slow dependency and a traffic spike look identical from the queue's point of view: both lower the ratio of capacity to arrivals. That's why “queue depth” and “age of the oldest job” are the two metrics to alert on for every queue.
+
+## Scaling workers on the queue
+
+Because workers are separate processes, you can autoscale them on what actually matters: **backlog**, not CPU. A worker waiting four seconds for an SMS provider uses almost no CPU, so CPU-based autoscaling would never add workers while the queue explodes.
+
+Scale on the age of the oldest job, or on depth divided by current capacity, and put a ceiling on it. More workers mean more concurrent calls to the SMS provider and more database connections. If the provider allows 50 requests a second, 200 workers just get rate-limited faster. The bottleneck has moved, not gone.
+
+<Callout tone="tip" title="One queue per kind of work">
+Put PDF, email and SMS jobs on separate queues with separate worker pools. If the SMS provider slows down, its queue backs up, but emails and PDFs keep flowing. A single shared queue lets the slowest job type hold up everything behind it.
+</Callout>
+
+<Quiz
+  id="queue-capacity"
+  question="Each email job takes 200 ms and you run 10 workers. During a rush, 80 jobs a second arrive for 60 seconds. Roughly how big is the backlog at the end of the rush?"
+  options={["0, the workers keep up", "About 1,800 jobs", "About 4,800 jobs", "About 600 jobs"]}
+  answer={1}
+  explain={<>Capacity is 10 × (1000 ÷ 200) = 50 jobs a second. The queue grows by 80 − 50 = 30 jobs a second for 60 seconds: <strong>1,800 jobs</strong>, which is a 36-second wait at the back.</>}
+/>
+
+## Key takeaways
+
+- Producers add jobs, a durable queue holds them, and workers process them. None of them need to know about the others.
+- Queues hand jobs out with a lease and delete them only on acknowledgement, so a crashed worker's job runs again. Expect at-least-once delivery.
+- Capacity = workers × jobs per second each. When arrivals exceed capacity, the backlog grows by the difference every second.
+- Wait time is roughly backlog ÷ capacity. Keep spare capacity so bursts drain in seconds, not minutes.
+- Alert on queue depth and oldest-job age, scale workers on backlog, and separate queues by kind of work.

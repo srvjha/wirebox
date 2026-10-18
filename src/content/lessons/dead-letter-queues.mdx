@@ -1,0 +1,99 @@
+One SMS job in Gatepass's queue has a phone number with a typo: eleven digits instead of ten. The provider rejects it, the worker retries, the provider rejects it again. With unlimited retries, that job would cycle forever, using a worker slot and filling the logs. Some jobs will never succeed, and the queue needs somewhere to put them.
+
+## Poison messages
+
+A **poison message** is a job that fails every time, whatever you do. The causes are mundane:
+
+- **Bad data:** a malformed phone number, an email address with a space, a booking that was deleted before the job ran.
+- **Bugs:** the PDF renderer crashes on an event name with an emoji in it.
+- **Permanent refusals:** the provider says this number has opted out of messages.
+
+Retries with backoff help with transient failures and do nothing for these. Worse, in some queues a failing message goes back to the front, so one poison message can block everything behind it. And because jobs run at least once, a job that crashes the worker process takes a worker down on every attempt.
+
+## The dead-letter queue
+
+The fix is a limit and a side door. Each job carries an attempt count. When it reaches the maximum (say 8), instead of retrying again, the system moves the job to a separate **dead-letter queue (DLQ)**. Most managed queues do this for you: SQS has a “maximum receives” setting and a redrive policy, RabbitMQ has dead-letter exchanges, and job libraries like Sidekiq and BullMQ keep a “dead” or “failed” set.
+
+<Diagram w={640} h={230} caption="Jobs that keep failing leave the main queue after a fixed number of attempts, so they can't block it.">
+  <Box x={10} y={80} w={120} label="Booking API" icon="server" />
+  <Box x={180} y={80} w={130} label="sms queue" sub="attempt ≤ 8" icon="queue" tone="info" />
+  <Box x={370} y={80} w={120} label="SMS worker" icon="worker" />
+  <Box x={530} y={20} w={100} label="Provider" icon="service" />
+  <Box x={370} y={170} w={140} label="sms DLQ" sub="needs a human" icon="queue" tone="err" />
+  <Wire points={[[132, 106], [178, 106]]} tone="req" />
+  <Wire points={[[312, 106], [368, 106]]} tone="info" flow />
+  <Wire points={[[492, 96], [528, 52]]} tone="req" />
+  <Wire d="M430 78 C430 40 250 40 250 78" tone="warn" dashed label="retry with backoff" labelAt={[340, 42]} />
+  <Wire points={[[430, 134], [430, 168]]} tone="err" label="attempt 8 failed" labelAt={[520, 152]} />
+</Diagram>
+
+A DLQ is only useful if something happens next. Treat it as an inbox, not a bin:
+
+- **Alert on it.** A few dead jobs a day is normal. Fifty in five minutes means a bug or an outage, and someone should look now.
+- **Keep the evidence.** Store the job, the last error, the stack trace and the attempt history with each dead job.
+- **Make redrive easy.** After fixing a bug, you want to send the dead jobs back to the main queue with one command. That only works because the jobs are idempotent.
+- **Tell the user.** For Gatepass, a dead SMS job marks the ticket's SMS status as failed, and the app shows “We couldn't text you. Your ticket is in your email and in the app.”
+
+<Callout tone="tip" title="Fail fast on errors that can't succeed">
+Don't spend eight attempts on a `400 invalid number`. Classify errors in the worker: transient errors are retried, permanent errors go straight to the DLQ (or are marked failed and dropped) on the first attempt.
+</Callout>
+
+## Scheduled jobs
+
+Not all background work is triggered by a user action. Some of it runs on a clock:
+
+- Release seats whose 10-minute hold expired without payment.
+- Send “your show is tomorrow” reminders at 10:00 the day before.
+- Build the organisers' nightly sales report.
+- Delete idempotency keys older than 24 hours.
+
+The classic tool is **cron**: a schedule like `*/1 * * * *` (every minute) that runs a command. The trap is the obvious setup: put the cron entry on the app server. With ten app servers, the job runs ten times a minute. With one app server, the job stops when that server is replaced.
+
+The more robust pattern is to let the scheduler only **enqueue** a job, and let ordinary workers run it:
+
+1. One scheduler (a managed one such as EventBridge Scheduler or Cloud Scheduler, or a single leader-elected process) fires every minute and enqueues `release-expired-holds`.
+2. A worker takes the job and does the work, with the same retries, timeouts, metrics and DLQ as every other job.
+3. The job is written so that running it twice, or running two copies at once, is harmless.
+
+## Make scheduled jobs safe to overlap and to skip
+
+Two things go wrong with jobs on a timer, and both are about time.
+
+**Overlap.** The every-minute hold-release job normally takes 3 seconds. On on-sale day, with 40,000 expired holds, it takes 90 seconds, so the next run starts while the first is still going. Both pick the same holds. Make each run claim its rows atomically, for example:
+
+```sql
+UPDATE holds SET status = 'released'
+WHERE status = 'held' AND expires_at < now()
+RETURNING seat_id;
+```
+
+Each hold is released by exactly one run, because only one update can change a row from `held` to `released`.
+
+**Missed runs.** The scheduler was down for 20 minutes during a deploy. A job written as “release holds that expired in the last minute” now has a 20-minute gap of seats stuck in held forever. A job written as “release every hold that has expired” catches up on its next run. Write scheduled jobs to process **everything due**, not **everything since the last run**.
+
+<KeyIdea>A scheduled job should be a question about state (“what is overdue?”), not about time (“what happened in the last minute?”).</KeyIdea>
+
+## Delayed jobs: scheduling one thing
+
+Sometimes you need a timer per item rather than a global sweep: “send the reminder for booking 9812 at 10:00 tomorrow”. Most queues support **delayed jobs**: enqueue now, become visible later. That's neat for a few thousand items. For millions of future jobs, or delays of weeks, store the due time in a table (`reminders.due_at`, indexed) and let a frequent sweep enqueue whatever is due. The database is better at holding a long, changing list of future work, and an organiser rescheduling a show is just an `UPDATE`.
+
+<Quiz
+  id="dlq-schedule"
+  question="Gatepass's job “release holds that expired in the last 60 seconds” runs every minute. The scheduler is down for 10 minutes. What happens?"
+  options={[
+    "Nothing, cron catches up automatically",
+    "The holds that expired during the outage are never released, and those seats look taken forever",
+    "All holds are released twice",
+    "The job moves to the dead-letter queue",
+  ]}
+  answer={1}
+  explain={<>The job only looks back 60 seconds, so holds that expired during the 10-minute gap are never checked again. Writing it as “release all holds where <code>expires_at &lt; now()</code>” fixes this: the first run after the outage catches up on everything due.</>}
+/>
+
+## Key takeaways
+
+- Some jobs will never succeed. Cap attempts and move those jobs to a dead-letter queue so they can't block or crash the rest.
+- A DLQ needs alerts, stored errors, one-command redrive and a user-visible failure state.
+- Send errors that can never succeed to the DLQ immediately instead of retrying.
+- Schedulers should only enqueue jobs; workers run them with the same retries and monitoring as everything else.
+- Write scheduled jobs to process everything that is due, claimed atomically, so overlapping runs and missed runs are both harmless.
