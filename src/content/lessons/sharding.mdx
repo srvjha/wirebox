@@ -22,10 +22,10 @@ The rule that decides which shard owns a row is based on a **shard key**. A **ro
 <Diagram w={640} h={250} caption="Every request carries the shard key. The router maps it to exactly one shard.">
   <Box x={20} y={100} w={110} label="API" sub="booking for user 48210" icon="server" tone="req" />
   <Box x={190} y={100} w={120} label="Router" sub="hash(user_id) % 4" icon="lb" tone="accent" />
-  <Box x={420} y={14} w={130} h={44} label="Shard 1" sub="users 0" icon="db" dim />
-  <Box x={420} y={74} w={130} h={44} label="Shard 2" sub="users 1" icon="db" dim />
-  <Box x={420} y={134} w={130} h={44} label="Shard 3" sub="users 2" icon="db" tone="accent" />
-  <Box x={420} y={194} w={130} h={44} label="Shard 4" sub="users 3" icon="db" dim />
+  <Box x={420} y={14} w={130} h={44} label="Shard 1" sub="hash % 4 = 0" icon="db" dim />
+  <Box x={420} y={74} w={130} h={44} label="Shard 2" sub="hash % 4 = 1" icon="db" dim />
+  <Box x={420} y={134} w={130} h={44} label="Shard 3" sub="hash % 4 = 2" icon="db" tone="accent" />
+  <Box x={420} y={194} w={130} h={44} label="Shard 4" sub="hash % 4 = 3" icon="db" dim />
   <Wire points={[[132, 126], [188, 126]]} tone="req" flow />
   <Wire points={[[312, 126], [370, 126], [370, 156], [418, 156]]} tone="req" flow />
   <Wire points={[[312, 120], [370, 120], [370, 36], [418, 36]]} tone="muted" dashed />
