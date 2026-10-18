@@ -1,0 +1,114 @@
+import { ScaleUpVsOut } from "@/components/visuals/scale-up-vs-out"
+
+Tickets for the band go on sale at 10:00. The cache is doing its job, so the database is calm, but the single API server running Gatepass is not. At 10:00:01 its CPU hits 100%. Requests that took 40 ms now wait in a queue, and by 10:00:05 the queue is 30,000 deep. You need more computing power in the next few minutes, and there are exactly two ways to get it.
+
+## Two ways to grow
+
+- **Scale up** (vertical scaling): replace the server with a bigger one. More CPU cores, more memory, faster disks. Same single machine, just stronger.
+- **Scale out** (horizontal scaling): add more servers of the same size and spread requests across them with a load balancer.
+
+<Diagram w={700} h={230} caption="Scaling up makes one machine bigger. Scaling out adds machines and a load balancer to share the work.">
+  <Group x={14} y={24} w={300} h={190} label="Scale up" tone="accent" />
+  <Box x={34} y={110} w={100} h={44} label="4 vCPU" icon="server" dim />
+  <Wire points={[[140, 132], [176, 132]]} tone="accent" />
+  <Box x={182} y={70} w={116} h={124} label="64 vCPU" sub="512 GB RAM" icon="server" tone="accent" />
+  <Group x={340} y={24} w={346} h={190} label="Scale out" tone="info" />
+  <Box x={356} y={110} w={110} h={44} label="Balancer" icon="lb" tone="info" />
+  <Box x={540} y={44} w={130} h={40} label="API · 8 vCPU" />
+  <Box x={540} y={112} w={130} h={40} label="API · 8 vCPU" />
+  <Box x={540} y={180} w={130} h={26} label="+ more" dashed />
+  <Wire points={[[466, 124], [540, 64]]} tone="req" />
+  <Wire points={[[466, 132], [540, 132]]} tone="req" />
+  <Wire points={[[466, 140], [540, 193]]} tone="req" dashed />
+  <Packet points={[[466, 124], [540, 64]]} dur={1.2} />
+  <Packet points={[[466, 132], [540, 132]]} dur={1.2} delay={0.4} />
+</Diagram>
+
+## Scaling up: simple, until it isn't
+
+Scaling up is the right first move far more often than people admit. You change one setting in your cloud console, reboot, and the server is twice as strong. Your code doesn't change. There's still one machine to deploy to, one set of logs, one place where in-memory state lives. A modern 64-core machine with hundreds of gigabytes of memory can serve a surprising amount of traffic.
+
+But it has three hard limits:
+
+- **Diminishing returns.** Doubling the cores doesn't double throughput. Threads contend for locks, share memory bandwidth and wait on each other. A 64-core machine might do 5–6× what an 8-core one does, not 8×.
+- **A ceiling.** There's a largest machine you can rent. When traffic outgrows it, scaling up has nowhere left to go.
+- **One machine is one failure.** When it crashes, or you reboot it to resize it, or you deploy a bad build, Gatepass is down. All of it.
+
+There's also a cost curve: the largest machines often cost more per core than mid-sized ones, because they're rarer and more in demand.
+
+## Scaling out: limitless, with homework
+
+Scaling out puts several ordinary servers behind a **load balancer**, which spreads incoming requests across them (next lesson). Need more capacity? Add a server. In principle there's no ceiling: big sites run thousands of identical API servers.
+
+It also fixes the availability problem. If one of ten servers dies, you lose 10% of capacity, not 100%, and the balancer stops sending it traffic. You can deploy one server at a time with no downtime.
+
+The homework is that your servers must be **interchangeable**. Anything a server keeps in its own memory or disk, like a user's login session or an uploaded poster, now exists on one server only, and the next request may land on a different one. Lessons 4.3 and 4.5 deal with exactly that. You also take on a load balancer, health checks, and deploys across many machines.
+
+## Compare the two
+
+Drag the load from a quiet Tuesday (500 requests/s) to the band's on-sale peak (25,000+). Watch the monthly cost, how busy each machine is, and what happens if one machine dies.
+
+<ScaleUpVsOut />
+
+What the numbers say:
+
+- **At low load, scaling up is cheaper.** One 4-vCPU box ($140) beats two 8-vCPU boxes plus a balancer ($585). Many products never outgrow one big machine.
+- **In the middle, they cost about the same**, but the scaled-out setup survives a server loss.
+- **At high load, scaling up runs out.** Even the 128-vCPU machine tops out around 21,800 requests/s at 70% busy, and costs nearly twice as much as ten 8-vCPU servers that handle the same load.
+
+<KeyIdea>Scale up until it gets expensive or risky. Scale out when you need more than one machine can give, or can't afford one machine's failure.</KeyIdea>
+
+## Why "70% busy" and not 100%
+
+Both strategies in the visual aim to keep machines at or below 70% CPU at peak. That isn't waste:
+
+- **Queues explode near 100%.** As a server approaches full utilisation, waiting time grows much faster than load (the same effect you saw on the database in lesson 3.1). At 95% busy, a small burst means seconds of delay.
+- **Losing a machine moves its load to the others.** With three servers at 70%, losing one pushes the other two to 105%. With ten at 70%, the other nine go to 78%. More, smaller machines make each loss gentler.
+- **Traffic forecasts are wrong.** The band might be more popular than you guessed.
+
+<Quiz
+  id="scale-choice"
+  question="Gatepass's admin dashboard is used by 40 organisers and runs on one 2-vCPU server at 15% CPU. A teammate wants to move it to five servers behind a load balancer 'for scale'. What's the best response?"
+  options={[
+    "Agree: horizontal scaling is always better",
+    "Disagree: it has no scale problem. If availability matters, run two small servers, otherwise leave it",
+    "Scale it up to 32 vCPU instead",
+    "Move it to a CDN",
+  ]}
+  answer={1}
+  explain={<>At 15% CPU there's nothing to scale. The only real argument for more than one server is surviving a crash or a deploy, and two small machines cover that. Five servers adds cost and complexity for no benefit.</>}
+/>
+
+## The usual path
+
+Most systems, Gatepass included, follow the same order:
+
+1. **One modest server.** Fine for the first fest.
+2. **Scale up** when CPU gets high. Cheap, fast, no code changes.
+3. **Make the app stateless**, then scale out to two or three servers behind a load balancer, mainly for availability.
+4. **Add servers** as traffic grows, ideally automatically (lesson 4.6).
+5. Meanwhile, keep the database on one big, scaled-up machine for as long as possible, because scaling *it* out is much harder (module 5).
+
+The database line is worth repeating. API servers are easy to scale out because they don't hold the data. The database does, and two copies of data that both accept writes is a hard problem. That's why "add more API servers" is the common move and "add more databases" is the one you put off.
+
+<YourTurn
+  id="scale-plan"
+  prompt="Gatepass expects 25,000 requests/s at the peak of the band's sale and about 2,000 the rest of the week. Sketch a server plan: how many machines, what size, and what you'd do after the sale."
+  fields={3}
+  minAnswers={2}
+  hint="Use the visual's numbers: an 8-vCPU server handles about 2,900 requests/s, and you want headroom for one to fail."
+>
+- **Sale day:** about 25,000 / (2,900 × 0.7) ≈ 13 servers of 8 vCPU, plus one or two spare so losing one doesn't push the rest over. Call it 15, behind a load balancer, started *before* 10:00.
+- **No single big box:** even the largest machine couldn't take 25,000 requests/s with headroom, and a single machine failing mid-sale would be a disaster.
+- **After the sale:** scale back to 2–3 servers (two for availability, a third for deploy headroom). Paying for 15 servers all week would waste money. Lesson 4.6 automates this.
+</YourTurn>
+
+The URL shortener lab at [/labs/url-shortener](/labs/url-shortener) lets you try both: resize the single server first, then add more servers behind a balancer, and see which one survives the load test at each traffic level.
+
+## Key takeaways
+
+- Scaling up means a bigger machine: no code changes, but diminishing returns, a hard ceiling and a single point of failure.
+- Scaling out means more machines behind a load balancer: no ceiling and graceful failures, but servers must be interchangeable.
+- Small systems are usually cheaper on one bigger machine. Large or must-stay-up systems need several.
+- Plan for machines at about 70% busy at peak, so queues stay short and losing one machine is survivable.
+- API servers are easy to scale out. Databases are not, so keep them scaled up for as long as you can.

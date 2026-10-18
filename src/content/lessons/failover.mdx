@@ -1,0 +1,101 @@
+import { FailoverTimeline } from "@/components/visuals/failover-timeline"
+
+At 8:41 on a Friday, the machine hosting Gatepass's primary database stops responding. The replicas are healthy and have nearly all the data. Until one of them becomes the new primary, nobody can buy a ticket. Failover is the process of making that switch, and nearly everything that can go wrong in it comes from a single question: how sure are you that the old primary is really gone?
+
+## What failover means
+
+With single-leader replication there is one place that accepts writes. If it fails, writes stop. **Failover** promotes a replica to be the new primary and points everyone at it. It has five steps:
+
+1. **Detect** that the primary is down.
+2. **Choose** a replica, usually the one that has applied the most changes.
+3. **Promote** it so it starts accepting writes.
+4. **Repoint** the apps, proxies and other replicas to the new primary.
+5. **Deal with the old primary** if it ever returns.
+
+<Diagram w={700} h={220} caption="Before and after. The most caught-up replica becomes the primary, and the other replica now follows it.">
+  <Group x={10} y={10} w={320} h={200} label="Before" tone="muted" />
+  <Box x={30} y={46} w={130} h={44} label="Primary" sub="dead" icon="db" tone="err" dashed />
+  <Box x={30} y={120} w={130} h={44} label="Replica A" sub="most recent" icon="db" tone="ok" />
+  <Box x={190} y={120} w={120} h={44} label="Replica B" sub="slightly behind" icon="db" />
+  <Group x={370} y={10} w={320} h={200} label="After" tone="muted" />
+  <Box x={390} y={46} w={130} h={44} label="Replica A" sub="new primary" icon="db" tone="accent" />
+  <Box x={550} y={120} w={120} h={44} label="Replica B" sub="follows A" icon="db" />
+  <Wire points={[[455, 90], [455, 142], [550, 142]]} tone="accent" dashed />
+  <Packet points={[[455, 90], [455, 142], [550, 142]]} dur={2.4} tone="req" />
+</Diagram>
+
+## Where the time goes
+
+Failover isn't instant, and each step has its own delay:
+
+- **Detection** is usually the biggest. The system has to be confident the primary is dead, not just slow. Typical settings: ping every second and declare death after 10 consecutive failures. Shorter is faster but causes false alarms, the same trade-off as health checks.
+- **Promotion** takes seconds: finish replaying the log it has already received, switch from read-only to read-write.
+- **Repointing** takes more seconds: a virtual IP moves, a proxy updates, or DNS changes (and DNS can linger in caches for minutes, which is why serious setups avoid depending on it).
+- **Choosing a human.** If a person must do it, add paging, waking up, logging in and checking, easily 5 to 15 minutes.
+
+<KeyIdea>Downtime is detection plus promotion plus repointing. Automation shrinks the first and the last from minutes to seconds.</KeyIdea>
+
+## Try it
+
+Kill the primary under the default settings and note the numbers. Then switch to an on-call human, then turn on synchronous replication, then bring the old primary back with fencing off.
+
+<FailoverTimeline />
+
+What you should see:
+
+- **Automatic failover** has an outage of around 18 seconds here, mostly detection. The human version is over two minutes even with an unusually fast human.
+- **With asynchronous replication**, writes that the primary confirmed but hadn't yet sent are gone. At 100 writes per second and 500 ms of lag that's about 50 confirmed orders that never happened, as far as the new primary is concerned.
+- **With synchronous replication**, nothing confirmed is lost. The price is that every write waits for the replica, so writes are slower, and if the replica is the one that fails, the primary has to stop or fall back.
+- **Without fencing**, an old primary that wakes up after a freeze is still convinced it's the leader.
+
+## The two nasty failure modes
+
+**Lost writes.** Asynchronous replication confirms writes before replicas have them. Customers got "Booked!" for orders that the new primary has never heard of. Options: accept it for non-critical data, use synchronous (or semi-synchronous, where at least one replica must confirm) replication for important data, and keep the old primary's disk. When it comes back you can often recover the missing writes by hand, which is painful but better than silence. Never let it silently rejoin.
+
+**Split brain.** The old primary wasn't dead, only unreachable: a network partition, a long pause, a frozen virtual machine. The monitoring system promoted a replica, and then the old primary comes back still believing it's the leader. Now two nodes accept writes, each with orders the other doesn't have. Merging them is a nightmare.
+
+Defences against split brain:
+
+- **Fencing.** Make sure the old primary can't accept writes: cut its network, remove its storage access, or shut it down (the industry's blunt name for this is STONITH, "shoot the other node in the head").
+- **A quorum.** The decision to promote is made by a majority of independent nodes (three or five voters), so a node that is cut off from the majority knows it has lost leadership and steps down. This is what tools like Patroni with etcd, or managed cloud databases, do for you.
+- **Epoch numbers.** Each leader has a number that increases on every election. Replicas and clients reject writes from a lower number.
+
+<Callout tone="warn" title="Rehearse it">
+Untested failover fails. The scripts have a stale address, the replica has a different version, or the app caches connections to the dead host and never reconnects. Run a planned failover on a schedule, in a quiet hour, and time it. Managed databases from the cloud providers do most of this for you, but you still need to know how long your apps take to reconnect.
+</Callout>
+
+<Quiz
+  id="failover-loss"
+  question="Gatepass uses asynchronous replication with about 800 ms of lag at 60 writes/s. The primary's host crashes and a replica is promoted. Roughly how many confirmed orders can be missing?"
+  options={[
+    "None, because the replica had all the data",
+    "About 48",
+    "About 800",
+    "All orders from the last hour",
+  ]}
+  answer={1}
+  explain={<>60 writes per second times 0.8 seconds is about 48 writes that the old primary confirmed but never delivered. Synchronous replication would reduce this to zero at the cost of slower writes. The hour-long figure would only apply to much longer lag.</>}
+/>
+
+<YourTurn
+  id="failover-plan"
+  prompt="Write the failover plan for Gatepass's database: who triggers it, how you prevent split brain, and what you do about the writes that might be lost."
+  fields={4}
+  minAnswers={3}
+>
+- **Trigger**: automatic, driven by a monitor that requires about 10 s of failed checks from several vantage points, not from a single observer.
+- **Choice**: promote the replica with the highest applied log position, and have the others re-follow it.
+- **Split brain**: leadership decided by a quorum of three or more voters, and the old primary is fenced (network and storage cut) before the new one accepts writes. Increase an epoch number each promotion.
+- **Lost writes**: use semi-synchronous replication for the orders and payments tables so at least one replica confirms every commit. Keep the old primary's disk for forensics and reconcile any gap against payment-provider records.
+- **Rehearsal**: run a planned failover each quarter and measure the app's reconnect time.
+</YourTurn>
+
+The URL shortener lab at [/labs/url-shortener](/labs/url-shortener) lets you kill a database node during the load test, so you can measure for yourself how much traffic fails while a replica takes over.
+
+## Key takeaways
+
+- Failover = detect, choose, promote, repoint, and handle the old primary. Downtime is the sum of the delays.
+- Automation turns an outage of many minutes into seconds. Detection speed is a trade-off against false alarms.
+- Asynchronous replication can lose confirmed writes at failover. Synchronous or semi-synchronous replication prevents it at the price of slower writes.
+- Split brain happens when two nodes both think they are the leader. Prevent it with quorum decisions, fencing and epoch numbers.
+- Rehearse failover regularly. A plan nobody has run is a guess.

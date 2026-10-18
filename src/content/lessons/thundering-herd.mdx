@@ -1,0 +1,121 @@
+import { ThunderingHerdSim } from "@/components/visuals/thundering-herd-sim"
+
+The cache has been holding the band's event page all evening, absorbing 6,000 reads a second. At 19:42:30 its 30-second TTL runs out. In the next 250 ms, while the first miss is still rebuilding the page, 1,500 more requests also miss, and every one of them sends the same heavy query to the database. This is a **thundering herd** (also called a *cache stampede*), and it can take down a database that was coping fine a second earlier.
+
+## Why one expiry can cause an outage
+
+Cache-aside has a gap built into it. Between "the key is gone" and "someone has put it back", every request for that key is a miss, and each miss independently decides to rebuild the value. For an ordinary key read twice a minute, that gap doesn't matter. For a key read 6,000 times a second, a 250 ms gap is 1,500 identical database queries.
+
+It gets worse, because the gap isn't fixed. The rebuild query takes 250 ms on an idle database. With 1,500 copies of it arriving at once, the database is no longer idle. Each query slows down, so the gap gets longer, so more requests miss, so the database gets busier still. This positive feedback loop is what turns a blip into a pile-up.
+
+<Diagram w={700} h={230} caption="When a hot key expires, every request in the rebuild window misses. They all run the same query, which slows the rebuild, which widens the window.">
+  <Box x={20} y={30} w={110} label="App 1" icon="server" />
+  <Box x={20} y={92} w={110} label="App 2" icon="server" />
+  <Box x={20} y={154} w={110} label="App 20" icon="server" dim />
+  <Box x={290} y={20} w={140} label="Cache" sub="event:band · EXPIRED" icon="cache" tone="err" />
+  <Box x={540} y={110} w={140} label="Database" sub="same query × 1,500" icon="db" tone="err" />
+  <Wire points={[[130, 50], [290, 44]]} tone="err" dashed label="miss" />
+  <Wire points={[[130, 112], [290, 56]]} tone="err" dashed />
+  <Wire points={[[130, 64], [540, 124]]} tone="req" />
+  <Wire points={[[130, 120], [540, 136]]} tone="req" />
+  <Wire points={[[130, 174], [540, 148]]} tone="req" />
+  <Packet points={[[130, 64], [540, 124]]} dur={1} />
+  <Packet points={[[130, 64], [540, 124]]} dur={1} delay={0.33} />
+  <Packet points={[[130, 120], [540, 136]]} dur={1} delay={0.15} />
+  <Packet points={[[130, 120], [540, 136]]} dur={1} delay={0.5} />
+  <Packet points={[[130, 174], [540, 148]]} dur={1} delay={0.25} />
+  <Packet points={[[130, 174], [540, 148]]} dur={1} delay={0.7} />
+  <Text x={610} y={200} size={11} tone="err">slower → longer gap → more misses</Text>
+</Diagram>
+
+There's a second version of the same problem that doesn't need a hot key at all. Suppose a deploy flushed the cache at 19:42:00 and the first requests refilled all 41 popular pages within a second, each with a 30-second TTL. They will all expire together at 19:42:30, and again at 19:43:00, and so on. Individually each is a small miss. Together they're a synchronised wave.
+
+## Watch it happen
+
+The simulation below replays two minutes of announcement-night traffic after a deploy. With no protection, each wave of expiries pushes the database far over its limit. Turn the three defences on one at a time, then in pairs.
+
+<ThunderingHerdSim />
+
+Things to try:
+
+- **Jitter alone** spreads the 40 ordinary pages out, but the band's page still expires on its own and causes the same overload. Jitter fixes *synchronised* expiry, not *hot* keys.
+- **Coalescing alone** turns 6,000 misses a second into a trickle: one rebuild per key per server. The spikes remain, because all keys still expire together, but they stay below capacity.
+- **Early refresh** removes the misses altogether. Popular keys never actually expire.
+- **Coalescing plus jitter** is the cheapest combination that makes the chart boring, which is what you want.
+
+## Defence 1: request coalescing
+
+Only one request should rebuild a key; everyone else should wait for its result. This is **request coalescing** (sometimes called *single-flight*).
+
+Within one app server it's easy: keep an in-memory map of "rebuilds in progress". The first miss for `event:band` starts the query and stores a promise in the map. Later misses for the same key find the promise and await it. When it resolves, all of them get the same result, and only one query reached the database.
+
+Across 20 servers you get at most 20 rebuild queries per key, which is usually fine. If it isn't, use a short lock in the cache itself:
+
+1. On a miss, try `SET lock:event:band 1 NX PX 2000` (set only if absent, expire in 2 s).
+2. If you got the lock, rebuild the value, store it, delete the lock.
+3. If you didn't, wait 50 ms and read the cache again. Give up and query the database (or return a fallback) after a few tries.
+
+The lock's expiry matters: if the server holding it crashes, nobody else could rebuild until the lock expires.
+
+## Defence 2: refresh before expiry
+
+Better still, never let a hot key expire while people are reading it. Three ways to do that:
+
+- **Background refresh.** A job refreshes known-hot keys every 20 seconds, before their 30-second TTL is up. Simple and predictable; you need a list of what's hot.
+- **Probabilistic early expiry.** Each read that is close to the TTL has a small chance of rebuilding early, and the chance rises as expiry approaches. With thousands of reads a second, one of them almost certainly rebuilds a little early, while everyone else keeps getting hits. This needs no list of hot keys.
+- **Serve stale while revalidating.** Keep the value past its "fresh" time but mark it stale. The first reader after that triggers a rebuild in the background and everyone, including that reader, keeps getting the old value until the new one lands. CDNs do exactly this with the `stale-while-revalidate` header, which you'll meet in the next lesson.
+
+All three trade a little freshness for never having a gap.
+
+## Defence 3: jittered TTLs
+
+Whenever many keys are set at the same moment (after a deploy, a cache restart or a bulk import), give them slightly different TTLs: instead of exactly 30 seconds, 30 seconds ± 20%. It costs one line of code:
+
+```js
+const ttl = Math.round(30 * (0.8 + Math.random() * 0.4));
+await cache.set(key, value, { EX: ttl });
+```
+
+Expiries that would have landed in one second now spread over twelve. It does nothing for one very hot key, which is why it's a complement to coalescing, not a replacement.
+
+<KeyIdea>Coalescing stops many requests rebuilding the same key. Jitter stops many keys expiring at the same moment. Early refresh stops hot keys expiring at all.</KeyIdea>
+
+<Quiz
+  id="herd-jitter"
+  question="After a Redis restart, Gatepass's database overloads in waves every 60 seconds, then settles after about 10 minutes. Which fix targets this specific pattern?"
+  options={[
+    "Request coalescing",
+    "Jittered TTLs",
+    "A bigger cache",
+    "LFU eviction",
+  ]}
+  answer={1}
+  explain={<>The restart made every key get refilled at about the same time, with the same 60-second TTL, so they all expire together, every minute. Jitter spreads them out. The waves fade by themselves over time as random rebuild delays desynchronise them, which is why it settled after ten minutes.</>}
+/>
+
+## The cold start
+
+The worst herd of all is an **empty** cache at peak traffic: after a Redis failover, a flush, or a deploy that changed every key's version. Every key is a miss at once. Coalescing still helps, because it limits each key to one rebuild, but thousands of different keys can still overwhelm the database. Plans that help:
+
+- **Warm the cache before you need it.** Before the 10:00 sale, run a script that loads the top few hundred pages.
+- **Don't change every key at once.** Roll out a new key version gradually, or avoid deploys that invalidate everything during peak hours.
+- **Protect the database.** A cap on concurrent database queries (lesson 5.4 covers connection pools) turns overload into fast failures for some requests instead of slow failures for all.
+
+<YourTurn
+  id="herd-plan"
+  prompt="Tickets for the band go on sale at 10:00 tomorrow. Write a three-point plan so the event page's cache can't cause a stampede during the sale."
+  fields={3}
+  minAnswers={2}
+>
+1. **Warm it.** At 09:50, load the event page, ticket tiers and seat map into the cache, and check the hit rate on a dashboard before 10:00.
+2. **Never let it expire mid-sale.** A background job refreshes the band's keys every 10 seconds (or use stale-while-revalidate), so their TTL never runs out while they're hot.
+3. **Coalesce and jitter everywhere else.** Single-flight rebuilds per key in every app server, a short cache lock for the very hottest keys, and jittered TTLs on all keys so the rest of the site doesn't expire in waves. And no deploys between 09:30 and 11:00.
+</YourTurn>
+
+## Key takeaways
+
+- When a hot key expires, every request in the rebuild window misses and runs the same query. The database slows, the window widens, and it feeds itself.
+- Request coalescing lets one request rebuild while the rest wait: in memory per server, or with a short lock across servers.
+- Early refresh (background, probabilistic or stale-while-revalidate) keeps hot keys from ever expiring.
+- Jittered TTLs stop keys that were set together from expiring together.
+- Treat an empty cache at peak as a known risk: warm it, avoid mass invalidation, and cap database concurrency.

@@ -1,0 +1,101 @@
+import { ReplicationLagLab } from "@/components/visuals/replication-lag-lab"
+
+Maya buys a ticket for Saturday's comedy night. The payment page says "Booked!", she taps "My tickets", and the page says she has none. She buys again. Nothing is wrong with the code, and nothing is lost. The write went to the primary and the read went to a replica that hasn't heard about it yet.
+
+## Replication takes time
+
+With read replicas, the primary applies a write and then streams it to the replicas. Streaming is **asynchronous** by default: the primary confirms the write to the app as soon as it's safely stored locally, without waiting for replicas. That keeps writes fast, and it has a price. For a short window, the replica is behind.
+
+That window is **replication lag**. On a healthy network it is often a few milliseconds. It grows when:
+
+- the replica is busy running a heavy report, so it applies changes slowly;
+- a big batch (say, a bulk import of 2 million rows) makes a long burst of changes;
+- the network between regions is slow or flaky;
+- the primary is writing faster than a single replica can replay.
+
+<Diagram w={700} h={200} caption="The app's write is confirmed by the primary only. The replica receives the change a moment later, and a read in between sees the old state.">
+  <Box x={20} y={74} w={130} label="Maya's app" icon="phone" tone="info" />
+  <Box x={290} y={14} w={150} label="Primary" sub="ticket #812 stored" icon="db" tone="ok" />
+  <Box x={290} y={130} w={150} label="Replica" sub="no ticket #812 yet" icon="db" tone="warn" />
+  <Wire points={[[150, 90], [220, 90], [220, 40], [290, 40]]} tone="req" label="1  book" labelAt={[216, 68]} />
+  <Wire points={[[150, 112], [220, 112], [220, 156], [290, 156]]} tone="req" label="2  my tickets" labelAt={[226, 142]} />
+  <Wire points={[[440, 40], [520, 40], [520, 156], [440, 156]]} tone="accent" dashed label="still travelling" labelAt={[590, 100]} />
+  <Packet points={[[440, 40], [520, 40], [520, 156], [440, 156]]} dur={3} tone="req" />
+  <Tag x={365} y={100} tone="warn">LAG</Tag>
+</Diagram>
+
+Notice that nothing here is a bug in the database. The system is **eventually consistent**: if writes stop, every replica ends up identical. It is just not consistent at every instant.
+
+## Try it
+
+Set the lag to about a second, choose "No fix" and press the quick button. You will see the missing ticket. Then switch through the fixes with the same lag.
+
+<ReplicationLagLab />
+
+Which fix worked every time? What did the others cost? Set the lag to 0 for a moment and notice that the problem vanishes. That is why this bug hides in development, where there's one database, and appears in production under load.
+
+## The guarantee you actually want
+
+The user's complaint has a name: **read-your-writes** (or read-after-write) consistency. After I change something, my next read should show my change.
+
+Notice how narrow this is. You don't need every reader in the world to see Maya's ticket instantly. Another user seeing it 800 ms late is fine. Only *Maya* must see it right away. That's what makes the fixes cheap: they only treat the person who just wrote as special.
+
+A second, related guarantee is **monotonic reads**. With two replicas at different lags, Maya could load her page from replica A (has the ticket), refresh onto replica B (doesn't), and watch her ticket vanish. Time appears to go backwards. Pinning each user to the same replica for a session prevents it.
+
+## Three ways to get read-your-writes
+
+1. **Read from the primary for a while after a write.** When a user writes, set a short-lived flag (a cookie or session entry) such as "read primary for 5 seconds". The window must be longer than your normal lag, including bad days. It is simple and robust. The cost is a bit of extra primary load, only from users who just wrote.
+2. **Write through a cache.** When creating the ticket, also store it in a cache such as Redis. "My tickets" checks the cache first, so it can see the ticket before any replica does. It is fast, but it only covers what you remembered to cache. Other reads of the same data still go to replicas.
+3. **Check the replica's position.** The primary tells you the log position of your write (Postgres calls it an LSN). Save it with the user's session. Later, only use a replica that has already applied that position, otherwise fall back to the primary. This is precise, with no guessing about window lengths, but it takes plumbing: a position per session and a replica position check.
+
+Some systems also use a **sensitive-read rule by query**: the seat availability check inside a booking transaction always goes to the primary, because a stale answer there sells the same seat twice. That is not about the user who wrote. It is about the cost of being wrong.
+
+<Callout tone="key" title="Measure the lag you have">
+Monitor replication lag as a metric and alert when it passes a threshold, say 5 seconds. Automatically take a replica out of read rotation if it gets too far behind, so one slow replica doesn't serve very old data.
+</Callout>
+
+<Quiz
+  id="lag-fix"
+  question="After booking, Maya's 'My tickets' page is empty for about a second. Which change fixes this with the least extra load on the primary?"
+  options={[
+    "Send all reads to the primary",
+    "For a few seconds after a user writes, send that user's reads to the primary",
+    "Add more replicas",
+    "Increase the cache TTL on the ticket list",
+  ]}
+  answer={1}
+  explain={<>Only the user who just wrote needs to see fresh data, so only their reads need a detour to the primary. Sending everything to the primary removes the point of replicas. More replicas doesn't change that each one is behind. A longer cache TTL would make stale data last longer.</>}
+/>
+
+## When lag is fine
+
+Not every read needs a fix. Ask what happens when this read is a second old:
+
+- The public event listing shows 118 seats left instead of 117. Harmless.
+- An analytics dashboard is 30 seconds behind. Harmless.
+- A confirmation email says "ticket booked" before the replica can show it. Build emails from the primary's data or from the event itself, not from a replica read.
+- Checking whether a coupon has already been used. Dangerous: a stale read allows a second use. Read from the primary.
+
+The skill is sorting your reads into "must be fresh" and "can be a little old", and spending effort only on the first group.
+
+<YourTurn
+  id="lag-plan"
+  prompt="List three Gatepass reads. For each, say whether it can use a replica, and if it must be fresh, which fix you'd use."
+  fields={3}
+  minAnswers={3}
+>
+- **Event list**: replica. A second of staleness changes nothing.
+- **"My tickets" right after booking**: the user must see it. Use a short primary window after a write (simple), or a position check if you already track log positions.
+- **Seat availability inside checkout**: primary, always. It decides whether to sell, so stale data is a double sale.
+- **Organiser sales dashboard**: replica. It can be 30 seconds old, and it's a heavy query you don't want on the primary.
+</YourTurn>
+
+To practise this, open the URL shortener lab at [/labs/url-shortener](/labs/url-shortener) and design where its reads and writes go, so a freshly created link still resolves right away.
+
+## Key takeaways
+
+- Replicas apply changes asynchronously, so a read right after a write can miss it. The size of the gap is replication lag.
+- The guarantee users expect is read-your-writes: after I write, I see my write. Monotonic reads stops data appearing then disappearing.
+- Fixes: read the primary for a short window after a write, write through a cache, or check the replica's log position.
+- Sort reads into must-be-fresh (checkout, coupons) and can-be-a-little-old (listings, dashboards).
+- Monitor lag and take replicas that fall too far behind out of rotation.

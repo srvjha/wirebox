@@ -1,0 +1,108 @@
+import { LoadBalancerAlgorithms } from "@/components/visuals/load-balancer-algorithms"
+
+Gatepass now has four API servers instead of one. Fans' phones don't know that, and shouldn't: they still call `api.gatepass.in`. Something has to stand at that address, accept every request and pass each one to a server that can handle it. That something is a **load balancer**, and the rule it uses to pick a server matters more than you'd think the moment one server gets slow.
+
+## What a load balancer does
+
+A load balancer is a server (or a managed cloud service) that sits in front of your API servers:
+
+- It has the **public address**. DNS for `api.gatepass.in` points at the balancer, not at any API server.
+- It keeps a **pool** of backend servers and picks one for each request (or each connection).
+- It **watches** the backends and stops sending traffic to ones that look dead (lesson 4.4).
+- It often **terminates TLS**, so the HTTPS work happens once at the edge and backends speak plain HTTP on the private network.
+
+<Diagram w={700} h={240} caption="Clients only know the balancer's address. The balancer chooses a backend for each request and hides how many there are.">
+  <Box x={14} y={40} w={110} label="Phones" icon="phone" />
+  <Box x={14} y={146} w={110} label="Browsers" icon="client" />
+  <Box x={250} y={93} w={150} label="Load balancer" sub="api.gatepass.in" icon="lb" tone="info" />
+  <Box x={540} y={14} w={140} h={44} label="API 1" icon="server" />
+  <Box x={540} y={70} w={140} h={44} label="API 2" icon="server" />
+  <Box x={540} y={126} w={140} h={44} label="API 3" icon="server" tone="warn" />
+  <Box x={540} y={182} w={140} h={44} label="API 4" icon="server" />
+  <Wire points={[[124, 66], [250, 110]]} tone="req" />
+  <Wire points={[[124, 172], [250, 128]]} tone="req" />
+  <Wire points={[[400, 110], [540, 36]]} tone="req" />
+  <Wire points={[[400, 115], [540, 92]]} tone="req" />
+  <Wire points={[[400, 124], [540, 148]]} tone="req" />
+  <Wire points={[[400, 130], [540, 204]]} tone="req" />
+  <Packet points={[[400, 110], [540, 36]]} dur={1.4} />
+  <Packet points={[[400, 115], [540, 92]]} dur={1.4} delay={0.35} />
+  <Packet points={[[400, 124], [540, 148]]} dur={1.4} delay={0.7} />
+  <Packet points={[[400, 130], [540, 204]]} dur={1.4} delay={1.05} />
+  <Text x={325} y={176} size={11} tone="muted">TLS ends here</Text>
+</Diagram>
+
+## L4 or L7: how much the balancer can see
+
+Balancers come in two broad kinds, named after layers of the network model:
+
+- **Layer 4 (transport)** balancers see TCP connections: source and destination IP and port, nothing more. They pick a backend when a connection opens and forward its bytes without reading them. They're extremely fast and work for any protocol, but they can't make decisions based on the URL, headers or cookies, and every request on a long-lived connection goes to the same backend.
+- **Layer 7 (application)** balancers understand HTTP. They read each request, so they can route `/api/bookings` to one pool and `/images` to another, add headers, retry a failed request on another backend, and balance individual requests rather than connections. They cost more CPU per request, which rarely matters.
+
+Most web systems, Gatepass included, use an L7 balancer (an AWS Application Load Balancer, NGINX, Envoy, HAProxy in HTTP mode). L4 shows up in front of non-HTTP traffic, or as an extra layer in front of a fleet of L7 balancers at very large scale.
+
+## Choosing a server: the algorithms
+
+**Round robin** sends requests to servers in turn: 1, 2, 3, 4, 1, 2… It's simple and spreads requests evenly by count. *Weighted* round robin gives bigger servers a bigger share.
+
+**Least connections** sends each request to the server with the fewest requests currently in progress. It doesn't assume all requests or all servers are equal; it reacts to what's actually happening.
+
+**Hashing** picks a server from a hash of something in the request, like the user id or client IP. The same user always reaches the same server, which is useful when servers keep per-user state or a warm local cache. **Consistent hashing** (lesson 19.1) is the version that moves only a few users when you add or remove a server.
+
+There are others, like *random*, *least response time* and *power of two choices* (pick two servers at random, use the less busy one, which works remarkably well with almost no coordination). But these three cover the important ideas.
+
+## When one server gets slow
+
+Every algorithm looks fine when all servers are identical. The interesting case is when they aren't. Below, server 3 is four times slower than the others. Start with round robin at 70 requests/s, then switch to least connections.
+
+<LoadBalancerAlgorithms />
+
+What you should see:
+
+- **Round robin** keeps sending server 3 a quarter of the traffic, about 17 requests/s, though it can only finish about 8. Its queue grows without limit, requests start timing out, and p95 latency explodes, even though the other three servers have spare capacity.
+- **Least connections** notices that server 3 always has more requests in progress and sends it fewer. Queues stay short and nothing times out. The slow server still handles some requests, which is why p95 is a few hundred milliseconds rather than 150, but nobody waits seconds.
+- **Consistent hashing** behaves like round robin here. A quarter of *users* belong to server 3, and they keep landing there however slow it gets. Hashing trades load-awareness for stickiness.
+
+Push traffic past about 100 requests/s and even least connections can't save you: total capacity (about 108 requests/s with one slow server) has run out, and every queue grows. No algorithm creates capacity; it can only avoid wasting it.
+
+<KeyIdea>Round robin spreads requests evenly. Least connections spreads work evenly. When servers aren't identical, only the second one keeps queues short.</KeyIdea>
+
+<Quiz
+  id="lb-algorithm"
+  question="Gatepass's booking endpoint takes 20 ms for most requests but 2 s when it generates a PDF. Which algorithm keeps latency most even across servers?"
+  options={[
+    "Round robin",
+    "Least connections",
+    "Hash by client IP",
+    "Random",
+  ]}
+  answer={1}
+  explain={<>With very uneven request costs, a server can be stuck on several 2-second requests while round robin keeps sending it more. Least connections sees those requests still in progress and routes around that server. (Better still, move the PDF into a background job, as in module 7.)</>}
+/>
+
+## The balancer is a single point of failure too
+
+You added a balancer to remove the single API server as a point of failure. Now every request goes through the balancer. If it dies, Gatepass is down. Real setups handle this in one of these ways:
+
+- **Managed cloud balancers** are already a fleet of machines across availability zones behind one name. You don't see the redundancy, but it's there.
+- **Self-hosted pairs**: two balancers share a floating IP address. If the active one stops sending heartbeats, the standby takes over the address within a few seconds.
+- **DNS with several balancer addresses**: clients get multiple IPs and try another if one fails, which is slower to react because of DNS caching.
+
+<YourTurn
+  id="lb-choices"
+  prompt="Gatepass's live seat map uses long-lived WebSocket connections, while the rest of the API is short HTTP requests. What balancer setup and algorithms would you choose for each, and why?"
+  fields={3}
+  minAnswers={2}
+>
+- **Regular API**: an L7 balancer with least connections (or round robin if requests are uniform and servers identical). L7 lets you route by path and retry idempotent requests on another backend.
+- **WebSockets**: each connection lasts minutes or hours and stays on one server, so balancing is per connection, not per message. Least connections is the right algorithm because it spreads *open connections*. Round robin can leave one server holding far more long-lived connections after a restart.
+- **Routing:** send `/live/*` to a separate WebSocket pool so a flood of connections can't starve the booking API. Module 6 covers keeping those connections in sync across servers.
+</YourTurn>
+
+## Key takeaways
+
+- A load balancer owns the public address, picks a backend for each request, and stops sending to unhealthy ones.
+- L4 balancers forward connections without reading them. L7 balancers read HTTP, so they can route by path, retry and balance per request.
+- Round robin balances request counts; least connections balances actual work; hashing keeps a user on one server.
+- When one server is slow, round robin and hashing keep feeding it. Least connections routes around it.
+- The balancer itself must be redundant: a managed fleet, a failover pair, or several addresses.

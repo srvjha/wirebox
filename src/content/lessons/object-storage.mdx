@@ -1,0 +1,104 @@
+Every Gatepass event has a poster, every venue has a seat-map image, and every booking produces a PDF ticket. On the single server, all of these went into an `./uploads` folder on its disk. Now there are four interchangeable servers, any of which can be replaced at any moment. Files need a home that isn't any of them.
+
+## Why files don't belong on API servers
+
+A file on an API server's local disk breaks every promise of the previous lessons:
+
+- **Other servers can't see it.** The organiser uploads a poster through API 1; a fan's request for it lands on API 3 and gets a 404.
+- **It dies with the server.** Stateless servers are replaced on every deploy and every autoscaling event. Their disks go with them.
+- **It doesn't scale.** A 400 KB poster served 2 million times is 800 GB of traffic flowing through your API servers, using CPU and bandwidth they need for bookings.
+
+You could put files in the database as blobs. Databases *can* store them, but it's a poor fit: it bloats backups, fills the database's memory cache with image bytes instead of hot rows, and makes your most expensive, hardest-to-scale component serve your cheapest kind of data.
+
+## Object storage
+
+**Object storage** (Amazon S3, Google Cloud Storage, Cloudflare R2, Azure Blob Storage, or MinIO if you host it yourself) is a service built for exactly this. Its model is deliberately simple:
+
+- You store **objects** (any bytes, from a few bytes to terabytes) under a **key** like `posters/evt_8812/3f9a1c.jpg`, inside a **bucket**.
+- You can `PUT` an object, `GET` it, `DELETE` it and list keys by prefix. You can't edit part of an object; you replace the whole thing.
+- Storage is effectively unlimited, very durable (copies across several data centres, typically quoted at "eleven nines" of durability) and cheap, roughly $0.02 per GB per month.
+- Every server, worker and CDN can reach the same object over HTTP.
+
+The trade-off is that it's not a filesystem or a database. There are no queries, no transactions, and a request takes tens of milliseconds, not microseconds. That's fine, because you don't query posters. You fetch them by name.
+
+<KeyIdea>Store the bytes in object storage, the metadata in the database, and serve the bytes through a CDN.</KeyIdea>
+
+## The shape: database for metadata, bucket for bytes
+
+The database still knows about every file; it just doesn't hold the bytes. The `events` table gets a `poster_key` column: `posters/evt_8812/3f9a1c.jpg`. The page renders an image URL from that key. The bytes live in the bucket.
+
+<Diagram w={700} h={250} caption="Uploads go straight from the organiser's browser to the bucket using a short-lived signed URL. Fans fetch the poster from the CDN, which fetches from the bucket once per edge.">
+  <Box x={14} y={30} w={130} label="Organiser" icon="client" />
+  <Box x={14} y={170} w={130} label="Fans" icon="phone" />
+  <Box x={270} y={30} w={140} label="API server" icon="server" />
+  <Box x={270} y={170} w={140} label="CDN" sub="cached at edge" icon="cdn" tone="ok" />
+  <Box x={540} y={30} w={146} label="Postgres" sub="poster_key" icon="db" />
+  <Box x={540} y={170} w={146} label="Bucket" sub="posters/evt_8812/…" icon="storage" tone="accent" />
+  <Wire points={[[144, 46], [270, 46]]} tone="req" label="1 · ask to upload" labelAt={[207, 30]} />
+  <Wire points={[[270, 64], [144, 64]]} tone="res" />
+  <Wire points={[[410, 56], [540, 56]]} tone="req" label="save key" />
+  <Wire points={[[100, 82], [560, 170]]} tone="accent" dashed label="2 · PUT with signed URL" labelAt={[330, 128]} />
+  <Wire points={[[144, 196], [270, 196]]} tone="req" label="GET poster" />
+  <Wire points={[[410, 196], [540, 196]]} tone="req" dashed label="on miss" />
+</Diagram>
+
+## Uploads: don't stream through your servers
+
+The naive upload sends the file to your API server, which then forwards it to the bucket. Your server spends time and memory holding a 20 MB video for the length of a slow mobile upload. Do that for 500 organisers at once and your API servers are busy being a pipe.
+
+The better pattern is a **pre-signed URL**:
+
+1. The organiser's browser asks your API: "I want to upload a poster for event 8812."
+2. Your API checks they're allowed to, picks the key (`posters/evt_8812/<random>.jpg`), and asks the storage SDK for a URL that permits one `PUT` to that key, valid for 5 minutes. No network call is needed; it's a signature.
+3. The browser uploads the file directly to the bucket using that URL.
+4. The browser tells your API the upload finished; your API records the key in the database. (Or the bucket sends an event when the object lands.)
+
+Your servers only handle two tiny JSON requests. The bytes never touch them. Downloads of private files work the same way: a signed `GET` URL that expires, so a ticket PDF can be fetched only by its owner and only for a while.
+
+<Callout tone="warn" title="Validate what you can">
+A signed URL lets someone upload *something* to a key you chose. Limit it: set a maximum size and content type in the signature where the provider supports it, and after the upload check the file before you publish it (is it really an image, is it a sane size). Never let the client choose the key.
+</Callout>
+
+## Serving: put a CDN in front
+
+Object storage can serve files directly, but it's in one region and charges for every byte out. A CDN in front (lesson 3.7) fixes both. The poster's key includes a content hash, so it's cached with `max-age=31536000, immutable` and each edge fetches it from the bucket once. Two million fans, a few hundred bucket reads.
+
+For private files, like ticket PDFs, use short-lived signed URLs and `Cache-Control: private`. They're read rarely, so they don't need the CDN.
+
+## Other things you get
+
+- **Lifecycle rules.** "Move PDFs older than 90 days to the cheap archive tier; delete abandoned uploads after a day." Configured once on the bucket.
+- **Versioning.** Keep previous versions of overwritten or deleted objects, which protects you from a buggy cleanup script.
+- **Events.** "When an object lands in `uploads/raw/`, start a job." That's how image resizing works: the organiser uploads one large poster, a worker writes 400 px, 800 px and 1600 px versions back to the bucket.
+
+<Quiz
+  id="object-storage-upload"
+  question="Organisers upload 50 MB promo videos. Uploads are slowing down the booking API. What's the best fix?"
+  options={[
+    "Add more API servers",
+    "Store videos in Postgres instead",
+    "Have browsers upload directly to object storage with pre-signed URLs",
+    "Compress the videos on the API server before storing them",
+  ]}
+  answer={2}
+  explain={<>The API servers are being used as a pipe for big, slow uploads. Pre-signed URLs let the browser send bytes straight to the bucket, and the API only signs the request and records the key. Compression, if you want it, belongs in a background worker triggered after the upload.</>}
+/>
+
+<YourTurn
+  id="object-storage-design"
+  prompt="Design how Gatepass stores and serves three kinds of file: event posters, seat-map images and ticket PDFs. For each, give the key format, who can read it, and how it's served."
+  fields={3}
+  minAnswers={2}
+>
+- **Posters**: `posters/{eventId}/{contentHash}.jpg` plus resized variants. Public. Uploaded with a pre-signed PUT, resized by a worker, served through the CDN with an immutable one-year cache. The event row stores the current key.
+- **Seat maps**: `seatmaps/{venueId}/{contentHash}.svg`. Public, change almost never. CDN with long caching, new hash when the venue's layout changes.
+- **Ticket PDFs**: `tickets/{bookingId}/{random}.pdf`. Private. Generated by a background worker after booking. Served via a signed GET URL valid for a few minutes, generated only after checking the requester owns the booking. Lifecycle rule moves them to archive storage a few months after the event.
+</YourTurn>
+
+## Key takeaways
+
+- Files on an API server's disk break statelessness: other servers can't see them and they vanish on replacement.
+- Object storage stores bytes under keys, durably and cheaply, reachable by every server. It isn't a database or a filesystem.
+- Keep metadata (the key, owner, size) in the database and bytes in the bucket.
+- Upload and download with pre-signed URLs so bytes skip your API servers.
+- Put a CDN in front of public files, with content-hashed keys so they can be cached forever.

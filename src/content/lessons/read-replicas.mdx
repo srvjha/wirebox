@@ -1,0 +1,103 @@
+import { ReplicaFanout } from "@/components/visuals/replica-fanout"
+
+Gatepass now runs ten API servers, and every one of them talks to the same single Postgres database. The API tier scales happily. The database sits at 95% CPU, queries queue, and the pages that browse events are slow for everyone. Most of that traffic only reads. That's the opening for read replicas.
+
+## The database is the next bottleneck
+
+Stateless servers were easy to multiply because they held nothing. A database holds the truth, and you can't just start nine more and hope. Two copies that both accept writes can disagree about whether the last seat in row F is taken.
+
+But look at the traffic. On Gatepass, people browse events, open ticket pages and check availability far more than they buy. A typical split is 90% reads and 10% writes. If the reads could go somewhere else, the main database would only need to deal with the writes.
+
+## Primary and replicas
+
+The standard answer is **single-leader replication**:
+
+- One **primary** (also called leader or master) accepts all writes.
+- One or more **replicas** (followers) receive a stream of every change from the primary and apply it in the same order. They are read-only.
+- The application sends writes to the primary and spreads reads across the replicas.
+
+<Diagram w={700} h={260} caption="Writes go to one place. Changes stream to the replicas. Reads are spread across them.">
+  <Box x={20} y={100} w={140} label="API servers" sub="×10" icon="server" tone="info" />
+  <Box x={300} y={18} w={160} label="Primary" sub="accepts writes" icon="db" tone="accent" />
+  <Box x={300} y={110} w={160} label="Replica 1" sub="read-only" icon="db" />
+  <Box x={300} y={200} w={160} label="Replica 2" sub="read-only" icon="db" />
+  <Wire points={[[160, 112], [230, 112], [230, 44], [300, 44]]} tone="req" label="writes" labelAt={[222, 78]} />
+  <Wire points={[[160, 126], [300, 136]]} tone="res" label="reads" labelAt={[230, 138]} />
+  <Wire points={[[160, 140], [230, 140], [230, 226], [300, 226]]} tone="res" />
+  <Wire points={[[460, 54], [520, 54], [520, 136], [460, 136]]} tone="accent" dashed label="change stream" labelAt={[580, 94]} />
+  <Wire points={[[520, 136], [520, 226], [460, 226]]} tone="accent" dashed />
+  <Packet points={[[160, 112], [230, 112], [230, 44], [300, 44]]} dur={2} tone="req" />
+  <Packet points={[[460, 54], [520, 54], [520, 136], [460, 136]]} dur={2.4} tone="req" />
+</Diagram>
+
+Technically, the primary writes every change to an ordered log (Postgres calls it the write-ahead log, MySQL the binary log). Replicas connect, read that log and replay it. Because they replay the same changes in the same order, they converge on the same data.
+
+## Try it
+
+Start with 1,800 requests per second and no replicas. The primary is overloaded. Add replicas one at a time, then raise the write share and see what happens.
+
+<ReplicaFanout />
+
+What to notice:
+
+- With **no replicas**, one node does everything and is saturated.
+- Each replica takes a share of the **reads**, so the primary's load falls, though not to zero. It still handles every write.
+- Every replica also **replays every write**. At 10% writes that's a small cost. At 40% writes, replicas spend most of their time on writes that no reader asked for, and the benefit of adding another shrinks.
+- If **writes alone** exceed what one node can do, replicas can't help at all. That's the wall, and the fix is to split the data across machines, covered in the sharding module.
+
+## What replicas are good for
+
+- **Read scaling.** Browsing pages, search listings, ticket history. Anything that reads a lot and can tolerate data a moment old.
+- **Heavy queries.** Point the nightly revenue report at a replica, so a 10-minute query does not slow down checkout.
+- **Failover candidates.** A replica already has the data. If the primary dies, one becomes the new primary (the failover lesson).
+- **Geography.** A replica in another region gives local readers a short round trip.
+
+What they are not good for: raising write throughput, or serving reads that must see a write that happened a millisecond ago. Replication takes time, which is the next lesson.
+
+## Routing reads and writes
+
+Somebody has to decide which queries go where. There are three common options:
+
+1. **In the application.** Two connection pools, `primary` and `replicas`. Code picks explicitly: `db.primary.insert(...)`, `db.replica.select(...)`. Clear, and you can make exceptions.
+2. **In a library or ORM.** Many frameworks support a read/write split and route `SELECT`s to replicas automatically. Convenient, but a `SELECT` inside a transaction that also writes must go to the primary.
+3. **In a proxy.** A middle layer parses queries and routes them. No code changes, but it is one more moving part.
+
+Spread reads across replicas with round robin or least connections, and take a replica out of rotation when its health check fails, just like web servers.
+
+<Callout tone="warn" title="A replica is not a backup">
+If someone runs <code>DELETE FROM tickets</code> by mistake, the replicas faithfully replay the delete a few milliseconds later. Replicas protect against hardware failure, not against bad changes. Backups are a later lesson.
+</Callout>
+
+<Quiz
+  id="replicas-fix"
+  question="Gatepass's database is at 95% CPU. 60% of the load is the nightly reconciliation job and ticket-list reads, 40% is checkout writes. What's the best first step?"
+  options={[
+    "Add 5 more API servers",
+    "Add a replica and route the reconciliation job and browse reads to it",
+    "Add a second primary so writes can be spread",
+    "Raise the connection limit",
+  ]}
+  answer={1}
+  explain={<>Most of the load is read-shaped, and a replica takes that off the primary. More API servers would increase pressure on the database. A second writable primary creates conflict problems and isn't a first step. A higher connection limit just lets more queries queue.</>}
+/>
+
+<YourTurn
+  id="replicas-plan"
+  prompt="Which Gatepass queries would you send to a replica, and which must stay on the primary? Name at least two of each and say why."
+  fields={4}
+  minAnswers={3}
+>
+- **Replica**: the public event list and event detail page. Seeing a price a few hundred milliseconds old is harmless.
+- **Replica**: the organiser's sales report and the nightly reconciliation job. Heavy, slow, and nobody needs them to the millisecond.
+- **Primary**: creating an order, reserving a seat and any `UPDATE` or `INSERT`. Replicas are read-only.
+- **Primary**: the seat availability check inside the booking transaction. A stale read could sell the same seat twice.
+- **Primary (usually)**: the "my tickets" page right after a purchase, because a replica may not have the new row yet. The next lesson covers this.
+</YourTurn>
+
+## Key takeaways
+
+- A single database becomes the bottleneck once the app tier scales out. Most traffic is reads, which can move.
+- Single-leader replication: one primary takes all writes, replicas replay its change log and serve reads.
+- Replicas scale reads and heavy queries. They don't scale writes, since every replica repeats every write.
+- Route reads and writes in code, a framework or a proxy, and take unhealthy replicas out of rotation.
+- Replicas lag behind the primary and are not backups.

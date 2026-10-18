@@ -1,0 +1,106 @@
+The second API server went live at 09:55. At 10:02 support gets the first message: "I logged in, picked my seats, pressed Pay, and it asked me to log in again." Nothing is broken on either server. The bug is that each one remembers different things, and the load balancer doesn't know or care which one you talked to last.
+
+## The bug: memory that lives on one server
+
+On the single server, logging in worked like this. The fan sent their phone number and OTP; the server checked it, created a session (`{ userId: 812, expires: … }`), stored it in a JavaScript `Map` in its own memory, and sent back a cookie with the session id. Every later request carried the cookie, and the server looked the id up in its map.
+
+With two servers behind a round-robin balancer, the login request lands on API 1, which stores the session in *its* memory. The "pick seats" request lands on API 2, which has never heard of that session id. To API 2, the fan is a stranger.
+
+<Diagram w={700} h={230} caption="The session exists only in API 1's memory. When the next request lands on API 2, the fan appears logged out.">
+  <Box x={14} y={89} w={110} label="Fan" icon="phone" />
+  <Box x={210} y={89} w={120} label="Balancer" icon="lb" tone="info" />
+  <Box x={430} y={24} w={250} h={66} label="API 1" sub="sessions: { s_9f2: user 812 }" icon="server" tone="ok" />
+  <Box x={430} y={140} w={250} h={66} label="API 2" sub="sessions: { }" icon="server" tone="err" />
+  <Wire points={[[124, 110], [210, 110]]} tone="req" />
+  <Wire points={[[330, 104], [430, 60]]} tone="ok" label="1 · login" />
+  <Wire points={[[330, 120], [430, 170]]} tone="err" label="2 · pick seats" />
+  <Tag x={555} y={222} tone="err">401 WHO ARE YOU?</Tag>
+</Diagram>
+
+Sessions are the most common case, but the same trap catches anything a server keeps for itself:
+
+- **Uploaded files** saved to the server's local disk: the poster exists on API 1, so API 2 returns a 404 for it.
+- **In-memory caches** of data that changes: each server has its own copy, so they disagree after an update.
+- **Rate-limit counters** kept in memory: a scraper gets four times the limit because each server counts separately.
+- **Scheduled jobs** started with `setInterval` in the server process: with four servers, the "send reminders" job runs four times.
+- **WebSocket connections**: a seat update that happens on API 1 never reaches fans connected to API 2 (module 6).
+
+## The fix: stateless servers
+
+A **stateless** server keeps nothing between requests that another server would need. Everything a request depends on either comes with the request or lives in a shared store every server can reach. Any server can handle any request, so the balancer can send traffic anywhere, and you can add, remove or restart servers freely.
+
+"Stateless" doesn't mean the *system* has no state. Gatepass is full of state. It means the state has moved out of the API servers into places built to hold it: the database, Redis, object storage. The servers become interchangeable workers.
+
+<KeyIdea>Stateless servers don't remove state. They move it somewhere every server can reach, so any server can answer any request.</KeyIdea>
+
+## Three ways to fix sessions
+
+**1. Sticky sessions.** Configure the balancer to send each fan back to the same server, usually by setting its own cookie. It's a config change, no code. But it only hides the problem: when that server crashes or is replaced in a deploy, its fans are logged out. Load also becomes uneven, because a server stays stuck with whoever it got first. Fine as a stopgap, a poor foundation.
+
+**2. A shared session store.** Keep sessions in Redis instead of process memory. The cookie still holds a random session id; every server looks it up in the same Redis (`GET session:s_9f2`, about 0.5 ms). Logging out means deleting the key, so it takes effect instantly everywhere. This is the most common choice and the one Gatepass uses.
+
+**3. Signed tokens.** Put the session data itself in the cookie or `Authorization` header, signed by the server so it can't be forged, like a JWT: `{ userId: 812, exp: 1735689600 }` plus a signature. Any server holding the key can verify it without looking anything up. No session store at all. The catch is revocation: you can't easily "log out" a token that is valid for another hour, so tokens are kept short-lived (5–15 minutes) and paired with a refresh token that *is* checked against a store.
+
+<Diagram w={700} h={210} caption="With a shared session store, every API server looks up the same session. The balancer is free to send each request anywhere.">
+  <Box x={14} y={80} w={110} label="Fan" icon="phone" />
+  <Box x={190} y={80} w={120} label="Balancer" icon="lb" tone="info" />
+  <Box x={380} y={20} w={120} label="API 1" icon="server" />
+  <Box x={380} y={140} w={120} label="API 2" icon="server" />
+  <Box x={570} y={80} w={116} label="Redis" sub="session:s_9f2" icon="cache" tone="ok" />
+  <Wire points={[[124, 106], [190, 106]]} tone="req" />
+  <Wire points={[[310, 98], [380, 50]]} tone="req" />
+  <Wire points={[[310, 114], [380, 160]]} tone="req" />
+  <Wire points={[[500, 46], [570, 96]]} tone="ok" />
+  <Wire points={[[500, 166], [570, 116]]} tone="ok" />
+  <Packet points={[[500, 46], [570, 96]]} dur={1.3} tone="ok" />
+  <Packet points={[[500, 166], [570, 116]]} dur={1.3} delay={0.6} tone="ok" />
+</Diagram>
+
+<Quiz
+  id="stateless-sticky"
+  question="Gatepass uses sticky sessions with sessions in each server's memory. During the sale you deploy a fix, replacing servers one at a time. What do fans experience?"
+  options={[
+    "Nothing; rolling deploys are seamless",
+    "Fans on each replaced server are logged out, some mid-checkout",
+    "Every fan is logged out at once",
+    "Fans see slightly slower pages",
+  ]}
+  answer={1}
+  explain={<>Sticky sessions tie each fan to one server's memory. When that server is replaced, its sessions vanish, and those fans are sent to a new server that doesn't know them. With sessions in Redis, the same deploy would be invisible.</>}
+/>
+
+## Moving everything else out
+
+Apply the same thinking to each kind of local state:
+
+- **Files** go to object storage like S3, never the server's disk (lesson 4.5).
+- **Caches** of shared data move to Redis. A small per-server in-memory cache is fine for data that's identical everywhere and rarely changes, like a city list with a short TTL, but never for anything that must be consistent.
+- **Rate-limit counters** move to Redis, shared by all servers (module 8).
+- **Scheduled jobs** run in one dedicated worker, or use a lock so only one server runs each job (module 7).
+- **Configuration** comes from environment variables or a config service, the same on every server.
+
+A good test: could you kill any API server at any moment, start a fresh one from the same image, and have no user notice? If yes, your servers are stateless.
+
+<Callout tone="tip" title="Treat servers like cattle">
+Stateless servers are disposable. You don't log in to fix one; you replace it. That's what makes autoscaling (lesson 4.6), rolling deploys and recovering from crashes routine instead of scary.
+</Callout>
+
+<YourTurn
+  id="stateless-audit"
+  prompt="Audit this single-server Gatepass code for state that breaks with two servers: sessions in a Map, posters saved to ./uploads, a setInterval that emails reminders every hour, and an in-memory cache of seat counts. For each, what goes wrong and where should it live instead?"
+  fields={4}
+  minAnswers={3}
+>
+- **Sessions in a Map**: fans are randomly logged out depending on which server they hit. Move them to Redis (or use short-lived signed tokens with a refresh token).
+- **Posters in ./uploads**: an image uploaded to API 1 is a 404 on API 2, and lost entirely when API 1 is replaced. Store them in object storage and serve them through a CDN.
+- **setInterval reminders**: every server runs it, so fans get one reminder per server. Run scheduled jobs in a single worker, or take a lock in Redis before each run.
+- **In-memory seat counts**: each server shows different numbers and they drift apart as bookings happen elsewhere. Keep counts in the database (the source of truth), with a shared Redis cache and a short TTL for display.
+</YourTurn>
+
+## Key takeaways
+
+- With more than one server, anything a server keeps in its own memory or disk is invisible to the others.
+- A stateless server keeps nothing between requests that another server would need. Any server can serve any request.
+- Sticky sessions hide the problem until a server dies. A shared session store (like Redis) or short-lived signed tokens solve it.
+- Move files to object storage, shared caches and counters to Redis, and scheduled jobs to a single worker.
+- If you can kill any server at any time without users noticing, your servers are stateless.

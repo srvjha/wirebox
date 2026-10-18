@@ -1,0 +1,118 @@
+import { CacheAsideStepper } from "@/components/visuals/cache-aside-stepper"
+
+You've decided the band's event page needs a cache. The next question is mechanical but important: who puts things in the cache, who takes them out, and what exactly gets stored? The most common answer, and the one Gatepass will use, is called **cache-aside**.
+
+## The pattern in four lines
+
+In cache-aside (also called *lazy loading*), the cache sits beside the database, not in front of it. Your application code talks to both. On every read it does the same four things:
+
+1. Build a key for what it wants, like `event:the-band-mumbai`.
+2. Ask the cache for that key. If the cache has it, return it. Done.
+3. If not, run the real query against the database.
+4. Store the result in the cache with an expiry time, then return it.
+
+The cache never talks to the database and knows nothing about your tables. It's a dumb, fast dictionary. All the intelligence lives in your code, which is why this pattern works with any cache and any database.
+
+<Diagram w={680} h={220} caption="Cache-aside: the app checks the cache first and only goes to the database on a miss. Solid arrows are the hit path; dashed ones run only on a miss.">
+  <Box x={20} y={84} w={120} label="Fan" icon="phone" />
+  <Box x={250} y={84} w={140} label="App server" sub="getEvent(id)" icon="server" tone="accent" />
+  <Box x={520} y={20} w={140} label="Cache" sub="Redis · ~0.5 ms" icon="cache" tone="ok" />
+  <Box x={520} y={148} w={140} label="Database" sub="Postgres · ~25 ms" icon="db" />
+  <Wire points={[[140, 104], [250, 104]]} tone="req" />
+  <Wire points={[[250, 120], [140, 120]]} tone="res" />
+  <Wire points={[[390, 92], [520, 46]]} tone="req" label="1 · GET key" />
+  <Wire points={[[520, 60], [390, 104]]} tone="ok" />
+  <Wire points={[[390, 116], [520, 166]]} tone="req" dashed label="2 · on miss: query" />
+  <Wire points={[[520, 182], [390, 130]]} tone="res" dashed />
+  <Wire d="M 600 148 C 640 120, 640 100, 600 72" tone="info" dashed label="3 · SET key EX 60" labelAt={[612, 110]} />
+  <Packet points={[[390, 92], [520, 46]]} dur={1.6} />
+  <Packet points={[[520, 60], [390, 104]]} dur={1.6} delay={0.8} tone="ok" />
+</Diagram>
+
+<Callout tone="note" title="The SET arrow">
+The diagram draws the fill as an arrow from database to cache to show where the data ends up, but it's the **app** that sends the `SET`. In cache-aside the cache and database never speak to each other.
+</Callout>
+
+## Walk through a hit and a miss
+
+Step through both paths below. Pay attention to the clock in the corner. A hit costs about a millisecond. A miss costs the database query plus two extra cache round trips: the failed `GET` and the `SET` afterwards.
+
+<CacheAsideStepper />
+
+Three things are worth noticing:
+
+- **The first request pays for everyone.** A miss is slightly *slower* than having no cache at all, because of the extra round trips. That's fine when a key is read thousands of times. It's a waste when a key is read once, which is why caching rarely-read data does nothing for you.
+- **The cache fills itself.** You never preload anything. Whatever people actually ask for ends up cached, and what nobody asks for never takes up memory.
+- **Every key starts cold.** After a deploy that clears the cache, or after Redis restarts, every request is a miss until the popular keys are back. Lesson 3.6 shows what happens when that coincides with a traffic peak.
+
+<KeyIdea>Cache-aside is lazy: the cache only ever holds what someone has already asked for.</KeyIdea>
+
+## Choosing the key
+
+The key is how you find the value again, so it must include **everything that changes the answer**, and nothing that doesn't.
+
+For the event page, the answer depends only on the event, so `event:{id}` is right. Now consider the "events near you" list on the home screen. It depends on the city, and maybe the page number. A key like `events:list` would serve Mumbai's list to someone in Pune. The correct key is something like `events:city:mumbai:page:1`.
+
+The opposite mistake is just as common. If you put the user's id in a key whose value is the same for everyone, like `event:{id}:user:{userId}`, you store one copy per user. Your hit rate collapses, because each user's first view is a miss, and memory fills with duplicates.
+
+A few conventions that save pain later:
+
+- **Use a prefix per kind of thing**: `event:`, `user:`, `seatmap:`. You can find, count and delete them as a group.
+- **Add a version** when the shape of the value changes: `v2:event:{id}`. Deploying new code that reads `v2:` keys means old, differently shaped values are simply never read again.
+- **Keep keys readable.** You'll be typing them into a Redis console during an incident.
+
+<Quiz
+  id="cache-aside-key"
+  question="The event page shows prices in the user's currency (INR, USD or EUR). What should the cache key be?"
+  options={[
+    "event:{id}",
+    "event:{id}:user:{userId}",
+    "event:{id}:currency:{currency}",
+    "event:{id}:{timestamp}",
+  ]}
+  answer={2}
+  explain={<>The currency changes the answer, so it belongs in the key. That gives you three copies per event, not one per user. Including the user id would destroy the hit rate, and a timestamp makes every key unique, so nothing would ever hit.</>}
+/>
+
+## Choosing the value
+
+The simplest value is the exact thing you're about to return: the JSON for the event page. One `GET`, one response, no further work.
+
+Sometimes it's better to cache smaller pieces. The event page shows the event details (change rarely), the ticket tiers (change a few times a day) and seats left (change every second during the sale). If you cache the whole page for 60 seconds, the seat count is up to 60 seconds wrong. If you cache the details and tiers separately, you can give each its own expiry and fetch seat counts live, or cache them for just 2 seconds.
+
+Rules of thumb for values:
+
+- **Keep them small.** A few KB is ideal. A 2 MB value takes real time to move over the network on every hit and pushes everything else out of memory.
+- **Store what you serve, not what you'd have to rebuild.** Caching raw rows that you then join and format on every hit saves the database but not your CPU.
+- **Separate things that change at different speeds.** Then each piece can have its own expiry.
+
+<YourTurn
+  id="cache-aside-design"
+  prompt="Design the cache key and expiry for these three Gatepass reads: the seat map layout for a venue, the list of tickets a user has booked, and the trending events in a city."
+  fields={3}
+  minAnswers={2}
+  hint="For each one: what makes the answer different, and how stale can it be before someone notices?"
+>
+- **Seat map layout**: `seatmap:venue:{venueId}`, expiry of a day or more. The physical layout of a venue almost never changes. Keep seat *availability* out of this value.
+- **A user's tickets**: `tickets:user:{userId}`, expiry of a few minutes, and delete the key whenever that user books or cancels (lesson 3.3). Per-user keys are right here because the answer really is different for every user.
+- **Trending in a city**: `trending:city:{city}`, expiry of 1–5 minutes. Everyone in the city shares one key, so it gets a high hit rate, and a few minutes old is perfectly acceptable for a "trending" list.
+</YourTurn>
+
+## When the cache is down
+
+Redis will eventually restart, fail over, or become unreachable for a few seconds. In cache-aside your code decides what happens next, so decide on purpose.
+
+The usual choice is to **fail open**: if the cache call errors or takes longer than a short timeout (say 50 ms), treat it as a miss and go to the database. Users get slower pages instead of errors. Two details matter:
+
+- **Use a short timeout on cache calls.** A cache that hangs for 5 seconds is worse than one that's down, because every request waits 5 seconds before falling back.
+- **Remember what lesson 3.1 said.** If your database is sized for the misses only, failing open sends it the full load. For short blips that's survivable. For a long outage at peak, you'll also need to shed load or serve a simpler page.
+
+In the URL shortener lab at [/labs/url-shortener](/labs/url-shortener) you'll add exactly this kind of cache in front of the redirect lookup, then run a load test to see how far it moves the database's breaking point.
+
+## Key takeaways
+
+- Cache-aside: check the cache, on a miss read the database, then write the result to the cache with an expiry. The app does all of it; the cache is a plain key-value store.
+- A miss costs slightly more than no cache at all. The pattern pays off only for keys that are read many times.
+- The key must contain everything that changes the answer and nothing else. Too little serves the wrong data; too much (like a user id) ruins the hit rate.
+- Keep values small, store them ready to serve, and split data that changes at different speeds.
+- Decide what happens when the cache is down. Usually fail open with a short timeout, knowing the database will feel it.

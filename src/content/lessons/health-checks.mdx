@@ -1,0 +1,113 @@
+import { HealthCheckFailover } from "@/components/visuals/health-check-failover"
+
+At 10:07, in the middle of the sale, API 2's machine loses its disk. The process is gone, but the load balancer doesn't know that yet. It keeps sending API 2 a third of all requests, and each of those fans sees an error. Having three servers only helps if the system notices quickly that it has two, and if two are enough.
+
+## Redundancy is two problems
+
+Scaling out gave Gatepass several servers, which means one can fail without taking everything down. But that's only true if two things hold:
+
+1. **Detection.** The load balancer must notice the dead server and stop sending it traffic. Until then, a share of requests fails.
+2. **Capacity.** The remaining servers must be able to carry the full load. If they can't, removing the dead one just moves the failures around.
+
+This lesson is about both. The first is solved by **health checks**, the second by **planning for N+1**.
+
+## Health checks
+
+A health check is a small request the balancer sends to every backend on a schedule, typically `GET /healthz` every few seconds. A fast `200 OK` means healthy. An error, a refused connection or no answer within a timeout counts as a failure. After a set number of failures in a row the balancer removes the server from its pool. After a set number of successes, it adds it back.
+
+<Diagram w={700} h={220} caption="The balancer probes each backend on a schedule. After enough consecutive failures, it stops routing to that server.">
+  <Box x={20} y={84} w={140} label="Load balancer" icon="lb" tone="info" />
+  <Box x={480} y={14} w={200} h={48} label="API 1" sub="200 OK · 3 ms" icon="server" tone="ok" />
+  <Box x={480} y={84} w={200} h={48} label="API 2" sub="timeout ✕ ✕ ✕" icon="server" tone="err" />
+  <Box x={480} y={154} w={200} h={48} label="API 3" sub="200 OK · 4 ms" icon="server" tone="ok" />
+  <Wire points={[[160, 100], [480, 38]]} tone="ok" dashed label="GET /healthz" labelAt={[320, 62]} />
+  <Wire points={[[160, 110], [480, 108]]} tone="err" dashed />
+  <Wire points={[[160, 120], [480, 178]]} tone="ok" dashed />
+  <Packet points={[[160, 100], [480, 38]]} dur={2} tone="ok" />
+  <Packet points={[[160, 110], [480, 108]]} dur={2} delay={0.3} tone="err" />
+  <Packet points={[[160, 120], [480, 178]]} dur={2} delay={0.6} tone="ok" />
+  <Tag x={320} y={130} tone="err">REMOVED FROM POOL</Tag>
+</Diagram>
+
+The two knobs, interval and threshold, trade speed against false alarms:
+
+- **Detection delay**, worst case, is roughly *interval × failures required*. Every 10 seconds with 3 failures needed is up to 30 seconds of errors.
+- **Checking too eagerly** has its own failure. With a 1-second interval and a threshold of 1, one slow garbage-collection pause or one dropped packet removes a perfectly good server. Under heavy load, servers get slow, fail checks, get removed, and the remaining ones get even more load, which is how a balancer can turn "busy" into "down".
+
+Common settings are an interval of 5–10 seconds, 2–3 failures to remove and 2–5 successes to restore.
+
+## Try it
+
+Kill API 2 and watch the red bars. Then try a shorter interval, a lower threshold, and no health checks at all. Finally, push the traffic to 75% and kill a server again.
+
+<HealthCheckFailover />
+
+What you should notice:
+
+- **Without health checks**, a third of requests fail until someone notices and fixes it by hand, which on a good night is minutes.
+- **With checks**, failures stop after the detection delay. Faster checks mean fewer failed requests.
+- **At 75% load**, removing the dead server doesn't stop the failures. Two servers at 112% each drop the excess. You've detected the problem perfectly and still have an outage.
+
+## What /healthz should check
+
+A health endpoint has to answer one question: "should the balancer send me traffic?" Get that wrong in either direction and it hurts.
+
+- **Too shallow**: an endpoint that always returns `200` as long as the process is running. It misses a server whose database connection pool is broken or whose disk is full.
+- **Too deep**: an endpoint that checks the database, Redis and the payment provider on every call. When the database has a 2-second hiccup, *every* server fails its check at once, and the balancer removes all of them. A shared dependency failing is not a reason to take every server out of the pool, since none of them would be better.
+
+A sensible split, used by Kubernetes and most platforms:
+
+- **Liveness**: "is this process stuck?" Very cheap. If it fails, restart the process.
+- **Readiness**: "can this server serve requests right now?" Checks things that are *local* to the server: finished starting up, connection pool usable, not shutting down. If it fails, take it out of the pool, but don't restart it.
+
+<Callout tone="tip" title="Passive checks help too">
+Many L7 balancers also watch real traffic. If a backend returns several 5xx errors or timeouts in a row, it's ejected for a while, even between scheduled checks. This is called *outlier detection*, and it catches failures in seconds.
+</Callout>
+
+## N+1: having enough left
+
+Detection only helps if the survivors can carry the load. The rule of thumb is **N+1**: if you need N servers at peak, run N+1, so losing any one leaves you at full capacity. Critical systems run N+2, so they can lose one during a deploy and one more by accident.
+
+The arithmetic is worth doing explicitly. With three servers, each at 60% at peak, losing one puts the other two at 90%. That's tight but survivable. At 70% each, the survivors would need 105%, which fails. With ten servers at 70%, losing one puts the other nine at 78%. The more servers you have, the less headroom each needs.
+
+<KeyIdea>Redundancy you haven't sized for is decoration. Check what the survivors would carry if any one server died at peak.</KeyIdea>
+
+Two more places where one failure takes out "redundant" servers:
+
+- **Same rack, same zone.** If all three servers run in one data centre (one cloud *availability zone*), a power or network fault there kills all three. Spread servers across at least two zones.
+- **Same bug.** A bad deploy goes to every server. Rolling deploys, one server at a time with health checks gating each step, limit the damage to one server.
+
+<Quiz
+  id="health-capacity"
+  question="Gatepass runs 4 API servers at 80% CPU during the sale, with health checks every 5 s. One dies. What happens?"
+  options={[
+    "About 5–15 seconds of errors, then everything is fine",
+    "Errors until it's detected, then the 3 survivors run at about 107% and keep failing",
+    "Nothing; the balancer retries on another server",
+    "All four servers are removed",
+  ]}
+  answer={1}
+  explain={<>Detection works, but 4 × 80% = 320% of one server's capacity spread over 3 servers is about 107% each. The survivors are overloaded, queues grow and requests time out. Health checks can't fix missing capacity. Run 5 servers, or target lower utilisation.</>}
+/>
+
+<YourTurn
+  id="health-plan"
+  prompt="Design the health-check setup for Gatepass's API during the sale: interval, thresholds, what /healthz checks, and how many servers you'd run if the peak needs 12."
+  fields={4}
+  minAnswers={3}
+>
+- **Interval and thresholds**: check every 5 s, remove after 2 failures, restore after 3 successes. Worst case about 10 s of errors per failure, without flapping on one slow response. Add outlier detection for faster ejection on real errors.
+- **/healthz (readiness)**: returns 200 when the server has finished starting, its database connection pool can hand out a connection, and it isn't draining for shutdown. It does *not* run a real query against the database or call the payment provider.
+- **Liveness**: a trivial endpoint the platform uses to restart a hung process.
+- **Server count**: 12 needed at peak → run 14 (N+2) spread across 2–3 availability zones, so a whole zone failing still leaves enough, or at least you know exactly how much you'd lose.
+</YourTurn>
+
+In the URL shortener lab at [/labs/url-shortener](/labs/url-shortener) you can add a second server and a load balancer, then see how the design holds up when a node fails during the load test.
+
+## Key takeaways
+
+- Redundancy needs detection (stop sending traffic to the dead server) and capacity (survivors can carry the load).
+- Health checks remove a server after a number of consecutive failures. Worst-case detection is roughly interval × threshold.
+- Checks that are too eager cause flapping. Checks that test shared dependencies can remove every server at once.
+- Separate liveness (restart me) from readiness (route to me).
+- Plan for N+1 or N+2 servers and spread them across zones. Do the arithmetic for losing one at peak.
