@@ -1,0 +1,105 @@
+At 9:00 on Friday, tickets for a headline gig go on sale. Gatepass normally runs on 4 API servers. By 9:01 traffic is five times normal, the servers sit at 100% CPU, and the new machines you ordered by hand are still booting. Autoscaling is the habit of letting the platform add servers when load rises and remove them when it falls, so nobody has to be awake for it.
+
+## What autoscaling does
+
+Because the API servers are stateless, adding one is cheap: start a copy, wait for its health check to pass, and the load balancer begins sending it traffic. Autoscaling puts a loop around that:
+
+1. **Measure** a signal, such as average CPU across the group.
+2. **Compare** it to a target, say 60%.
+3. **Adjust** the number of servers up or down, within a minimum and maximum you set.
+
+<Diagram w={700} h={200} caption="The autoscaler watches a metric and changes the size of the group. The balancer only sees servers that pass health checks.">
+  <Box x={20} y={72} w={140} label="Metrics" sub="avg CPU 82%" icon="stream" tone="info" />
+  <Box x={250} y={72} w={150} label="Autoscaler" sub="target 60% · 4–20" icon="service" tone="accent" />
+  <Group x={490} y={14} w={190} h={172} label="Server group" tone="muted" />
+  <Box x={510} y={44} w={150} h={40} label="API 1–4" sub="running" icon="server" tone="ok" />
+  <Box x={510} y={110} w={150} h={40} label="API 5–7" sub="booting…" icon="server" tone="warn" dashed />
+  <Wire points={[[160, 98], [250, 98]]} tone="info" label="CPU" labelAt={[205, 84]} />
+  <Wire points={[[400, 98], [490, 98]]} tone="accent" label="add 3" labelAt={[445, 84]} />
+  <Packet points={[[160, 98], [250, 98]]} dur={2} tone="req" />
+  <Packet points={[[400, 98], [490, 98]]} dur={2} delay={1} tone="req" />
+</Diagram>
+
+The idea is simple. The details are where autoscaling goes wrong.
+
+## Pick a signal that matches the bottleneck
+
+CPU is the default, and for a CPU-bound API it works. But a server can be in trouble with low CPU. If each request waits 400 ms on the database, the server has idle CPU and a growing pile of waiting requests. Better signals depend on what limits you:
+
+- **CPU or memory**: good for compute-heavy work.
+- **Requests per server**: good when each request costs about the same. Target 200 req/s per server and divide.
+- **Queue depth or age of oldest job**: the right signal for workers. If the oldest ticket email has waited 5 minutes, add workers, whatever their CPU says.
+- **Latency (p95)**: close to what users feel, but noisy, and adding servers does not help when the real bottleneck is the database.
+
+<Callout tone="warn" title="Scaling can't fix a shared bottleneck">
+If every API server waits on one database, adding API servers makes the database's life harder. Autoscaling the layer in front of a bottleneck moves the pain, it doesn't remove it. Modules 5 and 6 are about that next layer.
+</Callout>
+
+## Lag: the slow part
+
+Reacting is not instant. Count the delays from a spike to a served request:
+
+- The metric is averaged over a window, often 1 minute.
+- The autoscaler checks every 15–60 seconds and may require a few readings in a row.
+- The cloud provider launches a machine: 30–90 seconds for a virtual machine, a few seconds for a container on a warm host.
+- The app starts, warms its caches and passes health checks: 10–60 seconds.
+
+Add it up and a new server can easily arrive 2–4 minutes after the spike started. A ticket sale that sells out in 90 seconds is over by then. That's why reactive scaling alone fails for events you know about.
+
+<Quiz
+  id="autoscale-lag"
+  question="Tickets for a gig go on sale at 9:00 and normally sell out by 9:02. Which approach works best?"
+  options={[
+    "Autoscale on CPU with a target of 60%",
+    "Scale to the expected size at 8:45, then let autoscaling handle the surprises",
+    "Run at the maximum size permanently",
+    "Scale up after the first errors appear",
+  ]}
+  answer={1}
+  explain={<>Reactive scaling arrives minutes late, and the sale is over in two. When you know the time of a rush, use <strong>scheduled scaling</strong> to raise the minimum beforehand. Keep the reactive rule as a safety net. Running at maximum forever works but pays for idle servers every other day.</>}
+/>
+
+## Scale up fast, scale down slowly
+
+Adding too late costs you customers. Removing too early costs you a second outage. So the two directions get different rules:
+
+- **Scale out quickly.** A short window, a big step ("add 50% of current size, at least 2"), no waiting.
+- **Scale in slowly.** Wait for load to stay low for 10–15 minutes, remove one or two servers at a time, and use *connection draining* so in-flight requests finish before a server stops.
+
+Without that asymmetry you get **flapping**. Load dips, the autoscaler removes servers, load per server jumps back above target, it adds them again, and you pay for constant churn while latency wobbles. A gap between the scale-out and scale-in thresholds (say out above 65% and in below 35%) prevents it. A **cooldown** after each change also gives the new size time to show up in the metrics.
+
+## Limits and cost
+
+Always set a **minimum** and a **maximum**.
+
+- The minimum is your resilience floor. With a minimum of 1, one failure is an outage, so it should be at least the N+1 count from the health checks lesson, spread across zones.
+- The maximum is your wallet's safety belt. A bug, a bot or an attack can drive load without limit, and an autoscaler will happily buy 400 servers to serve junk. A cap turns a surprise bill into a degraded service, which is usually better. Rate limiting (later in the course) deals with the junk itself.
+
+Money is also why autoscaling pays off. If Gatepass needs 20 servers for two hours on sale days and 4 otherwise, running 20 always costs five times as much for the quiet 22 hours.
+
+Other gotchas:
+
+- **Startup time.** A 3-minute boot makes every rule worse. Keep images small, do heavy warm-up in the background, and pre-build the machine image.
+- **Cold caches.** Fresh servers have empty local caches and fresh connections. Ten new servers connecting to the database at once is its own load spike (see connection pooling later in this module).
+- **Stateful pieces don't scale this way.** Databases need other techniques. That's the rest of the module.
+
+<YourTurn
+  id="autoscale-plan"
+  prompt="Design the autoscaling policy for Gatepass's API and its email workers for sale days. State the signal, the minimum and maximum, and how you handle the 9:00 spike."
+  fields={4}
+  minAnswers={3}
+>
+- **API signal**: requests per server (target about 150 req/s each) or CPU at 60%. Not latency alone, since slow database responses wouldn't be fixed by more servers.
+- **API limits**: minimum 4 across two zones, maximum 24, so a bug or bot flood can't scale the bill without limit.
+- **Scheduled scaling**: at 8:45 on sale days set the minimum to the expected peak, say 16, so capacity exists before the rush. Reactive scaling stays on for surprises.
+- **Directions**: scale out in 1 minute with big steps; scale in only after 15 quiet minutes, one or two servers at a time, with connection draining.
+- **Email workers**: scale on queue age, not CPU. If the oldest job is older than 60 s, add workers; at 0 backlog for 10 minutes, remove them.
+</YourTurn>
+
+## Key takeaways
+
+- Autoscaling is a loop: measure a signal, compare to a target, adjust the group size within a minimum and maximum.
+- Pick a signal that reflects the real bottleneck: CPU, requests per server, or queue age for workers.
+- Reaction takes minutes. For known rushes, scale on a schedule before the event.
+- Scale out fast and in slowly, with a gap between thresholds and a cooldown, to avoid flapping.
+- Set a floor for resilience and a ceiling for cost. Autoscaling the app tier can't fix a database bottleneck.
