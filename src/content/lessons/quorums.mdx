@@ -1,0 +1,100 @@
+import { QuorumExplorer } from "@/components/visuals/quorum-explorer"
+
+Gatepass moved its "seats left" counters to a leaderless store with three replicas. A fan bought two tickets, hit refresh, and the page still showed the old count. The write had succeeded. The read had succeeded. They just never talked to the same machine. Quorums are the rule that decides whether they must.
+
+## Voting on every operation
+
+In a leaderless system there is no single node whose word is final. Instead, every operation asks a group of replicas and counts answers. Three numbers describe the setup:
+
+- **N**: how many replicas hold each piece of data.
+- **W**: how many replicas must acknowledge a write before you tell the client "done".
+- **R**: how many replicas you ask on a read before you answer.
+
+A write is sent to all N replicas, but it only waits for W acknowledgements. A read is sent to R replicas (or to all and waits for R replies) and returns the newest version among the answers. A replica that is down or slow simply doesn't vote. The operation succeeds as long as enough of them do.
+
+## The overlap rule
+
+The key idea is a counting argument. If a write reached W replicas and a read asks R replicas, and **R + W > N**, then the two sets must share at least one replica. There is no room for them to be disjoint: N replicas can't hold W plus R different members when W + R is larger than N.
+
+That shared replica holds the newest write, so the read sees it. The read compares versions from its R answers and picks the highest.
+
+Play with it below. Start with N = 3, W = 2, R = 2 and try to make a read stale by clicking replicas. You can't. Then drop R to 1 and click the replica that missed the write.
+
+<QuorumExplorer />
+
+<Diagram w={640} h={210} caption="N = 5, W = 3, R = 3. Any 3 replicas and any other 3 replicas must share at least one, and that one has the latest value.">
+  <Text x={320} y={22} size={12} tone="accent" mono>R + W = 6 &gt; N = 5</Text>
+  <Box x={30} y={60} w={96} h={44} label="Replica 1" sub="v2" tone="accent" />
+  <Box x={140} y={60} w={96} h={44} label="Replica 2" sub="v2" tone="accent" />
+  <Box x={250} y={60} w={96} h={44} label="Replica 3" sub="v2" tone="accent" />
+  <Box x={360} y={60} w={96} h={44} label="Replica 4" sub="v1" />
+  <Box x={470} y={60} w={96} h={44} label="Replica 5" sub="v1" />
+  <Wire points={[[78, 52], [78, 40], [298, 40], [298, 52]]} tone="req" arrow={false} />
+  <Text x={188} y={36} size={10} tone="req" mono>write reached 1-3</Text>
+  <Wire points={[[298, 112], [298, 140], [508, 140], [508, 112]]} tone="info" arrow={false} />
+  <Text x={400} y={158} size={10} tone="info" mono>read asked 3-5</Text>
+  <Text x={298} y={186} size={11} tone="res">Replica 3 is in both, so the read finds v2</Text>
+</Diagram>
+
+## What W and R buy you
+
+Pick them and you pick a personality:
+
+| N | W | R | Behaviour |
+| --- | --- | --- | --- |
+| 3 | 2 | 2 | Balanced. Survives one node down for both reads and writes. Reads see the latest write. |
+| 3 | 3 | 1 | Fast reads from any one replica, but a single dead node blocks all writes. |
+| 3 | 1 | 3 | Fast writes, but reads must reach every replica, so one dead node blocks reads. |
+| 3 | 1 | 1 | Fastest and always available, with no overlap. Reads can be stale. |
+| 5 | 3 | 3 | Survives two nodes down and still overlaps. |
+
+Notice the trade: raising W makes writes slower and less available but makes reads cheaper, and vice versa. Latency follows the slowest of the fastest W (or R) replies. With W = 2 of 3, a single slow replica doesn't hurt you, because you stop waiting once two have answered.
+
+For read-heavy data like show listings, people often pick a small R and a large W. For write-heavy data like click streams, the opposite.
+
+## Repairing the replicas that missed out
+
+A write that reaches W of N replicas leaves N − W replicas behind. They catch up in two ways:
+
+- **Read repair**: when a read gets different versions from its R replicas, it writes the newest value back to the stale ones.
+- **Anti-entropy**: a background job compares replicas, often with hash trees, and copies over anything missing.
+
+Without these, a replica that was down during a write would stay stale forever, and eventually enough stale replicas would break the overlap guarantee.
+
+## What a quorum does not guarantee
+
+"R + W > N means strongly consistent" is the most common wrong belief about quorums. It guarantees a narrow thing: a read that starts after a write has been acknowledged will touch at least one replica holding it. Several things can still go wrong:
+
+- **Concurrent operations.** A read that overlaps a write in time can see either version, and two readers can see different versions, one new and one old, in the wrong order.
+- **Failed writes leave debris.** If a write reaches only 1 of 3 replicas and then fails to reach W, the client is told "error", yet that one replica keeps the new value. A later read may or may not return it.
+- **Sloppy quorums.** To stay available during an outage, some stores accept writes on stand-in nodes that aren't among the N "home" replicas and hand them back later. During that window, R + W > N does not give overlap.
+- **Clock-based version choice.** If "newest" is decided by timestamps, clock skew can make an older write win. See the clocks lesson.
+- **Two writers, one key.** Two concurrent writes can each reach a different majority-ish set. Which one wins depends on the conflict rule, which is the topic two lessons from now.
+
+<Callout tone="warn" title="Quorum is not linearizable">
+Dynamo-style stores with R + W > N give you "usually fresh" reads, not the guarantee that every reader sees one agreed order of operations. If you need that, use a leader-based or consensus-based system.
+</Callout>
+
+## Choosing for Gatepass
+
+Seat inventory must never be oversold, so it stays in single-leader Postgres. The quorum store holds softer data:
+
+- **Viewers-right-now counter**: N = 3, W = 1, R = 1. Stale by a second? Nobody cares, and it never blocks.
+- **Wishlists and saved shows**: N = 3, W = 2, R = 2. A user adds a show and expects to see it on refresh.
+- **Notification delivery log**: N = 3, W = 2, R = 1 for cheap reads, with the occasional stale check tolerated.
+
+<Quiz
+  id="quorum-overlap"
+  question="A store keeps N = 5 replicas and reads with R = 2. What is the smallest W that guarantees every read overlaps the latest acknowledged write?"
+  options={["W = 2", "W = 3", "W = 4", "W = 5"]}
+  answer={2}
+  explain={<>You need R + W {">"} N, so 2 + W {">"} 5, which means W ≥ 4. With W = 3 the write could sit on replicas 1 to 3 while the read asks replicas 4 and 5.</>}
+/>
+
+## Key takeaways
+
+- A quorum system writes to W replicas and reads from R of N, and answers with the newest version it sees.
+- If R + W > N, any read set and any acknowledged write set share at least one replica.
+- Raising W or R improves freshness and costs latency and availability; lowering them does the reverse.
+- Read repair and anti-entropy bring lagging replicas back in line.
+- R + W > N is not strong consistency. Concurrency, failed writes, sloppy quorums and clock skew can all still show stale or reordered data.
