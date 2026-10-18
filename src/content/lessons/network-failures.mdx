@@ -1,0 +1,106 @@
+import { NetworkFailureOutcomes } from "@/components/visuals/network-failure-outcomes"
+
+At 10:00:07 on a big on-sale, booking asks payments to charge a fan ₹1,200. One second later, nothing has come back. Booking has to tell the fan something right now. Did the money move? The honest answer is: booking cannot know. This lesson is about living with that.
+
+## Every call has three outcomes, not two
+
+Inside one process, a function call either returns or throws. Across a network, a call can end three ways:
+
+1. **Success.** The reply arrived. You know what happened.
+2. **Failure.** The reply arrived and says it failed: a `402 card declined`, a `400 bad request`. You also know what happened.
+3. **Unknown.** No reply arrived before you gave up. Anything might have happened.
+
+The third outcome is the one that the monolith never had, and it's the one that causes real damage. "Unknown" covers very different situations, and from the caller's side they all look exactly the same:
+
+- The **request was lost** on the way. Payments never saw it. Nothing happened.
+- The request arrived, payments **charged the card, and the reply was lost**. Everything happened; you just weren't told.
+- Payments is **slow**. It will charge the card, or already has, and the reply is still coming.
+- Payments **crashed halfway**. Maybe it charged, maybe it didn't, depending on exactly where it died.
+
+Networks lose packets, connections reset, load balancers drop idle connections, a server can pause for a garbage collection. At Gatepass's scale, "rare" still means several times an hour.
+
+## What a timeout tells you
+
+Booking can't wait forever, so it sets a **timeout**: after 1 second with no reply, stop waiting. A timeout is necessary. But be precise about what it tells you: **only that you didn't get an answer in time**. It says nothing about whether the work was done.
+
+<NetworkFailureOutcomes />
+
+Try the four scenarios with retry off. "Request lost", "Reply lost" and "Slow" (with a 1,000 ms timeout) produce the same thing on booking's side: a timeout. Yet in one the fan was never charged, and in the other two she was.
+
+Now turn retry on, still without an idempotency key. The retry fixes "request lost" and **double-charges** in the other two. Turn the key on and all three end with exactly one charge.
+
+<KeyIdea>A timeout means "I don't know", never "it didn't happen". Design every call so that "I don't know" has a safe next step.</KeyIdea>
+
+## Choosing a timeout
+
+There's no free choice. Too short, and you give up on calls that were about to succeed, then retry them, adding load to a service that is already slow. Too long, and every stuck call holds a thread, a connection and a waiting fan, and a slow dependency eats all your capacity. You'll see that cascade in the circuit-breaker lesson.
+
+A sensible starting point is to look at the dependency's latency distribution and set the timeout a little above its p99 under normal load. If payments answers in 250 ms at p50 and 700 ms at p99, a 1-second timeout gives up on roughly one call in a thousand, and never waits longer than a second.
+
+Timeouts must also fit inside each other. The app gives up after 5 seconds; the gateway must give up sooner, and booking sooner still, or you'll do work for a fan who has already left:
+
+<Diagram w={640} h={210} caption="A deadline is passed along and shrinks at every hop. Each service only spends what's left.">
+  <Box x={20} y={70} w={110} h={56} label="App" sub="gives up at 5 s" icon="phone" />
+  <Box x={180} y={70} w={120} h={56} label="Gateway" sub="budget 4.5 s" icon="lb" />
+  <Box x={350} y={70} w={120} h={56} label="Booking" sub="budget 4.0 s" icon="service" tone="accent" />
+  <Box x={520} y={70} w={110} h={56} label="Payments" sub="budget 1.0 s" icon="service" />
+  <Wire points={[[130, 98], [180, 98]]} tone="req" />
+  <Wire points={[[300, 98], [350, 98]]} tone="req" />
+  <Wire points={[[470, 98], [520, 98]]} tone="req" />
+  <Text x={325} y={40} size={12} tone="muted" mono>header: deadline = now + 4.5 s</Text>
+  <Text x={325} y={168} size={12}>Booking spends ~1 s per payment attempt, so it has room for one careful retry.</Text>
+</Diagram>
+
+Passing a **deadline** along with the request, as gRPC does natively, lets every service see how much time is actually left and refuse to start work that can't finish in time.
+
+## Retrying safely
+
+Retrying is how you turn many "unknown"s back into "success". In Part 1 you made background jobs safe to run twice. The same idea applies to every service call that changes something: the operation must be **idempotent**, so doing it twice has the same effect as doing it once.
+
+Some operations are naturally idempotent: "set booking 9f2 status to CONFIRMED" can run five times safely. "Charge ₹1,200" is not. For those, the caller sends an **idempotency key**, a unique ID generated once per logical operation, and reuses it on every retry:
+
+```
+POST /charges
+Idempotency-Key: bk_9f2-charge-1
+{ "amount": 120000, "currency": "INR", "card": "tok_..." }
+```
+
+Payments stores the key with the result in the same transaction as the charge. When the same key shows up again, it doesn't charge; it returns the stored result. If the first attempt is still in progress, it waits for it or answers "in progress".
+
+A few rules keep retries from making things worse:
+
+- **Only retry what's safe.** Reads and idempotent writes, yes. A non-idempotent call without a key, never.
+- **Back off with jitter**, exactly as in Part 1, so a thousand callers don't retry in lockstep.
+- **Cap attempts and time.** Two or three attempts within the deadline. After that, stop.
+- **Retry at one layer.** If the app, gateway, booking and payments each retry three times, one failed bank call becomes 81 attempts.
+
+## When you still don't know
+
+Sometimes even retries run out. The bank is down, the deadline passes, and booking still doesn't know if the card was charged. Don't guess. Make "unknown" a real state:
+
+- Save the booking as **PAYMENT_PENDING** and tell the fan honestly: "We're confirming your payment. You'll get your ticket or a full refund within 10 minutes."
+- Keep the seats held during that window so nobody else buys them.
+- A background job asks payments, by idempotency key, what happened, and either confirms or releases. Payment providers also send webhooks when a charge settles, which can resolve it sooner.
+
+This is **reconciliation**: when a call's outcome is unknown, you find out later instead of pretending you know now.
+
+<Quiz
+  id="timeout-meaning"
+  question="Booking's call to payments times out after 1 second. What can booking conclude?"
+  options={[
+    "The card was not charged, so it is safe to show an error and let the fan try again",
+    "The card was charged, so it should confirm the booking",
+    "Nothing about the charge. It must retry with the same idempotency key or check later",
+    "Payments is down, so it should stop calling it",
+  ]}
+  answer={2}
+  explain={<>A timeout only says no reply arrived in time. The request may have been lost, or processed with the reply lost, or still be running. Showing an error invites the fan to pay again; confirming risks a free ticket. Retry with the same key, or record the booking as pending and reconcile.</>}
+/>
+
+## Key takeaways
+
+- A remote call can succeed, fail, or end in "unknown". Unknown is the dangerous one.
+- A timeout means "no answer in time", not "it didn't happen". Lost request, lost reply and slow server look the same to the caller.
+- Set timeouts from the dependency's real latency (a little above p99), and pass a shrinking deadline down the call chain.
+- Retry only idempotent operations. Use an idempotency key for anything that changes money or state, plus backoff, jitter and a cap.
+- When retries run out, store an explicit pending state and reconcile later instead of guessing.
