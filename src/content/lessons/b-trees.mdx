@@ -1,0 +1,110 @@
+import { BTreeSim, BTreeHeight } from "@/components/visuals/b-tree-sim"
+
+The Gatepass `bookings` table has 200 million rows. Looking up one booking by ID takes about a millisecond. Without an index it would mean reading all 200 million rows. The structure that makes the difference is almost half a century old and sits inside Postgres, MySQL, SQLite, SQL Server and Oracle: the **B-tree**.
+
+You met indexes from the outside in Part 1. This lesson opens one up. You will insert keys, watch nodes split, and see why a tree holding a billion rows is only four levels tall.
+
+## Why not a binary search tree?
+
+A binary search tree finds a key in log₂(n) steps. For a billion rows that is 30 steps. In memory, 30 steps is nothing. On disk, each step can be a separate page read, and a random read from an SSD costs around 100 microseconds. Thirty of those is 3 ms per lookup, and on a spinning disk it was closer to a third of a second.
+
+Disks do not read single keys anyway. They read **pages**: Postgres uses 8 KB, MySQL's InnoDB uses 16 KB. Reading 8 KB costs about the same as reading 8 bytes. So the B-tree asks: if we have to read a whole page anyway, why put only one key in it?
+
+## Wide, short and always balanced
+
+A B-tree node *is* a page, and it holds hundreds of sorted keys with a child pointer between each pair. A search reads the root, binary-searches inside it to pick the right child, reads that child, and so on down to a leaf.
+
+<Diagram w={640} h={210} caption="Searching for 70: the root says “between 40 and 80”, so only the middle child is read. Two page reads, whatever the size of the other subtrees.">
+  <Box x={255} y={20} w={130} label="40 · 80" sub="root page" tone="info" />
+  <Box x={40} y={130} w={130} label="10 · 25" sub="leaf page" dim />
+  <Box x={255} y={130} w={130} label="55 · 70" sub="leaf page" tone="info" />
+  <Box x={470} y={130} w={130} label="90 · 120" sub="leaf page" dim />
+  <Wire points={[[280, 72], [105, 130]]} label="< 40" labelAt={[180, 100]} />
+  <Wire points={[[320, 72], [320, 130]]} tone="info" label="40–80" labelAt={[320, 100]} />
+  <Wire points={[[360, 72], [535, 130]]} label="> 80" labelAt={[460, 100]} />
+  <Text x={320} y={204} size={12} tone="info">search 70 → 2 page reads</Text>
+</Diagram>
+
+The number of children per node is the **fan-out**, and the maximum is the tree's **order**. With a fan-out of 300, one level holds 300 children, two levels hold 90,000, three hold 27 million and four hold 8.1 billion. The top one or two levels are read so often that they are always in memory, so a lookup in a billion-row table typically costs one or two actual disk reads.
+
+<BTreeHeight />
+
+The other half of the trick is that a B-tree **never gets lopsided**. Every leaf is at exactly the same depth, after any sequence of inserts. The simulation shows how.
+
+## Run it: inserts and splits
+
+Real B-trees have orders in the hundreds. This one lets you pick 3 to 6 so you can see every split.
+
+<BTreeSim />
+
+The rules you are watching:
+
+1. **Insert into a leaf.** Walk down from the root as if searching, and put the key into the leaf in sorted position.
+2. **If the leaf overflows, split it.** It now holds one key too many, so it splits into two half-full nodes, and the middle key moves *up* into the parent as the new separator.
+3. **Repeat upwards.** If the parent overflows, it splits too.
+4. **If the root splits, a new root is created above it.** This is the only way the tree gets taller, so it grows from the top, and every leaf stays at the same depth.
+
+Things to try:
+
+- **Insert keys one at a time with order 3** and watch splits cascade. Most inserts cause no split at all; occasionally one ripples to the top.
+- **Press "Next ascending" ten times.** Every new key lands in the rightmost leaf. Notice the nodes it leaves behind: half-full, and never touched again. That is wasted space in every page.
+- **Search for a key, then for a missing one.** Both visit exactly one node per level. Count the levels: that is the cost of every lookup.
+- **Switch the order from 3 to 6** with the same keys. The tree gets shorter and wider.
+
+<Quiz
+  id="bt-height"
+  question="A B-tree has a fan-out of 400. Roughly how many levels does it need for 50 million rows?"
+  options={["2", "3", "8", "26"]}
+  answer={1}
+  explain={<>400² = 160,000 is too few, and 400³ = 64 million is enough, so 3 levels. A binary tree would need about 26.</>}
+/>
+
+## What databases actually store
+
+Production databases use a variant called the **B+ tree**:
+
+- **Only leaves hold the rows** (or pointers to them). Internal nodes hold just separator keys, so more of them fit in a page and fan-out goes up.
+- **Leaves are linked** to their neighbours. A range query like "all bookings for event 812 between 9 and 10 pm" finds the first match with one descent and then walks sideways along the leaves, reading them in order. That is why B-trees are so good at `ORDER BY` and `BETWEEN`, which hash indexes cannot do.
+
+The simulation shows a classic B-tree, with keys in internal nodes, because the split behaviour is the same and the pictures are smaller.
+
+## What it costs
+
+Every index is a B-tree you have to keep up to date. Each insert into `bookings` updates the table and every index on it, and each of those is a walk down a tree plus a possible page split. A split writes several pages and takes a short lock.
+
+Key order matters a lot:
+
+- **Ascending keys** (auto-increment IDs, timestamps) always insert into the rightmost leaf. That leaf stays hot in memory, which is fast, though it is a contention point under very heavy concurrent inserts. Postgres and InnoDB detect rightmost splits and pack pages fuller instead of splitting them half and half.
+- **Random keys** such as UUIDv4 insert all over the index. Each insert likely touches a different leaf, so the working set is the whole index, which no longer fits in memory once the table is big. Pages split everywhere and end up around two thirds full. Teams that switched from UUIDv4 to time-ordered IDs like UUIDv7 or ULIDs have reported large drops in write I/O.
+
+<KeyIdea>A B-tree trades a little write work for reads that cost one page per level, and with hundreds of keys per page there are only ever three or four levels.</KeyIdea>
+
+## B-tree or LSM tree?
+
+The two lessons pair up neatly:
+
+- **B-trees** update pages in place. Reads are predictable: one path, a few pages. Writes are random I/O plus occasional splits. This suits read-heavy and mixed workloads like Gatepass's bookings, events and users, which is why it is the default index in every major SQL database.
+- **LSM trees** never update in place. Writes are sequential and cheap; reads may check several files and rely on Bloom filters; compaction runs in the background. This suits write-heavy logs and time series like gate scans.
+
+Neither wins everywhere, and some engines offer both: MySQL can use InnoDB (B+ tree) or MyRocks (LSM).
+
+<Quiz
+  id="bt-uuid"
+  question="Gatepass switches booking IDs from auto-increment to random UUIDv4. Inserts get slower as the table grows past the size of RAM. Why?"
+  options={[
+    "UUIDs are longer, so comparisons are slower",
+    "Random keys land in random leaves, so almost every insert reads a page that isn't cached",
+    "B-trees cannot store strings",
+    "The tree becomes unbalanced with random keys",
+  ]}
+  answer={1}
+  explain={<>With ascending keys only the rightmost path is hot. With random keys every leaf is equally likely, so once the index outgrows memory most inserts need a disk read first, and splits happen all over the index. The tree stays balanced either way; that is guaranteed.</>}
+/>
+
+## Key takeaways
+
+- A B-tree node is a disk page holding hundreds of sorted keys, so the tree is very wide and very short: three or four levels for billions of rows.
+- Inserts go into leaves. Overflowing nodes split and push the middle key up. The tree only grows at the root, so all leaves stay at the same depth.
+- Every lookup costs one page per level, and the top levels are almost always cached.
+- Databases use B+ trees: rows in linked leaves, which makes range scans and `ORDER BY` cheap.
+- Key order affects write cost. Ascending keys keep one hot path; random keys like UUIDv4 spread writes across the whole index.
