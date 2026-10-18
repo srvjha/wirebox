@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { ComingSoon } from "@/components/lab/coming-soon";
 import { LabPlayer } from "@/components/lab/player/lab-player";
 import { getLab } from "@/content/labs";
@@ -17,8 +18,18 @@ export async function generateMetadata({ params }: PageProps<"/labs/[slug]">): P
   return { title: meta.title, description: meta.tagline };
 }
 
-export default async function LabPage({ params }: PageProps<"/labs/[slug]">) {
-  const { slug } = await params;
+// Params are read inside Suspense so navigation stays instant; pages are still prerendered.
+export default function LabPage({ params }: PageProps<"/labs/[slug]">) {
+  return (
+    <Suspense fallback={<div className="min-h-dvh bg-bg" aria-hidden />}>
+      {params.then(({ slug }) => (
+        <Lab slug={slug} />
+      ))}
+    </Suspense>
+  );
+}
+
+function Lab({ slug }: { slug: string }) {
   const meta = getLabMeta(slug);
   if (!meta) notFound();
   if (!getLab(slug)) return <ComingSoon lab={meta} />;

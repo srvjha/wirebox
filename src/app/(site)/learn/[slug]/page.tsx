@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { ChevronRight, Clock, ListOrdered } from "lucide-react";
 import { getChapters } from "@/components/learn/chapters";
 import { KindIcon, kindLabel } from "@/components/learn/kind-icon";
@@ -29,8 +30,30 @@ export async function generateMetadata({ params }: PageProps<"/learn/[slug]">): 
   };
 }
 
-export default async function LessonPage({ params }: PageProps<"/learn/[slug]">) {
-  const { slug } = await params;
+// Params are read inside Suspense so the shared App Shell can render instantly on
+// navigation; every lesson is still prerendered via generateStaticParams.
+export default function LessonPage({ params }: PageProps<"/learn/[slug]">) {
+  return (
+    <Suspense fallback={<LessonSkeleton />}>
+      {params.then(({ slug }) => (
+        <Lesson slug={slug} />
+      ))}
+    </Suspense>
+  );
+}
+
+function LessonSkeleton() {
+  return (
+    <div className="mx-auto w-full max-w-[680px] animate-pulse px-4 pt-12" aria-hidden>
+      <div className="h-3 w-48 rounded bg-surface-2" />
+      <div className="mt-8 h-9 w-3/4 rounded bg-surface-2" />
+      <div className="mt-4 h-4 w-full rounded bg-surface-2" />
+      <div className="mt-2 h-4 w-5/6 rounded bg-surface-2" />
+    </div>
+  );
+}
+
+async function Lesson({ slug }: { slug: string }) {
   const lesson = getLesson(slug);
   if (!lesson || lesson.kind === "lab" || !liveLessonSlugs().has(slug)) notFound();
   const { default: Content } = await import(`@/content/lessons/${slug}.mdx`);
