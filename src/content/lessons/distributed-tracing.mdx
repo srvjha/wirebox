@@ -1,0 +1,103 @@
+import { TraceWaterfall } from "@/components/visuals/trace-waterfall"
+
+A fan tweets that booking took "like five seconds" at 10:02. In the monolith you'd open one log file and search. Now the request touched the gateway, booking, events, payments and a bank, each with its own logs on its own machines, and thousands of other bookings were happening in the same second. Which lines are hers?
+
+## Logs don't join up on their own
+
+Each service logs what it did: `charge ok in 2140 ms`, `seat hold created`, `POST /bookings 201`. Every line is true, and none of them says which user request it belonged to. With 300 bookings a second, "the payments log line at 10:02:14" could be any of them.
+
+You need one shared identifier that travels with the request through every service, so every piece of work done for it can be found and lined up. That's what **distributed tracing** gives you.
+
+## Traces, spans and context
+
+Three words carry the whole idea:
+
+- A **trace** is the whole journey of one request, from the moment the gateway received it to the response. It has a **trace ID**, a random 128-bit value like `4bf92f3577b34da6a3ce929d0e0e4736`.
+- A **span** is one unit of work inside that trace: "booking handled CreateBooking", "payments called the bank", "events ran SELECT seats". Each span records its service, operation name, start time, duration, status and a few attributes.
+- Spans form a tree. Each span has its own **span ID** and points at its **parent span ID**, the span that caused it.
+
+The trick is **context propagation**. When booking calls payments, it adds a header carrying the trace ID and its own span ID. Payments reads it, creates its span as a child, and passes the context on when it calls the bank. The standard header is called `traceparent`:
+
+```
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+                 └── trace id ──────────────────┘ └ parent span ┘
+```
+
+<Diagram w={640} h={230} caption="The trace ID stays the same across every hop. Each service starts a new span whose parent is the caller's span.">
+  <Box x={20} y={70} w={120} h={58} label="Gateway" sub="span a1" icon="lb" />
+  <Box x={180} y={70} w={120} h={58} label="Booking" sub="span b7 ← a1" icon="service" tone="accent" />
+  <Box x={340} y={70} w={120} h={58} label="Payments" sub="span c3 ← b7" icon="service" />
+  <Box x={500} y={70} w={120} h={58} label="Bank" sub="span d9 ← c3" icon="cdn" />
+  <Wire points={[[140, 99], [180, 99]]} tone="req" />
+  <Wire points={[[300, 99], [340, 99]]} tone="req" />
+  <Wire points={[[460, 99], [500, 99]]} tone="req" />
+  <Text x={320} y={40} size={12} tone="accent" mono>trace 4bf9…4736 travels in the traceparent header</Text>
+  <Box x={160} y={168} w={320} h={44} label="Collector → trace store" icon="storage" tone="info" />
+  <Wire points={[[80, 128], [80, 190], [160, 190]]} tone="info" dashed />
+  <Wire points={[[240, 128], [240, 168]]} tone="info" dashed />
+  <Wire points={[[400, 128], [400, 168]]} tone="info" dashed />
+  <Wire points={[[560, 128], [560, 190], [480, 190]]} tone="info" dashed />
+</Diagram>
+
+Each service sends its finished spans, asynchronously, to a **collector**. The tracing backend groups them by trace ID and rebuilds the tree. In practice you don't write any of this yourself: OpenTelemetry libraries exist for every major language and instrument HTTP servers, HTTP clients, gRPC, database drivers and Kafka clients automatically. Your job is to make sure the context crosses every boundary, including the ones libraries can't see, like a message on a queue.
+
+<Callout tone="warn" title="Async hops need the context too">
+When booking publishes `booking.confirmed`, put the trace context in the message headers. Otherwise the notification service's spans start a brand-new trace, and "why did the ticket email arrive 4 minutes late?" can't be connected to the booking that caused it.
+</Callout>
+
+## Reading a waterfall
+
+Traces are shown as a **waterfall**: one row per span, indented under its parent, with a bar showing when it started and how long it took. Time runs left to right.
+
+The most important number on each span isn't its duration. It's its **self time**: the part of its duration not covered by any child. A parent always looks at least as slow as its slowest child, because it's waiting. Self time tells you where the time was actually *spent*.
+
+<TraceWaterfall />
+
+Work through the scenarios. Each one is a shape you'll see in real systems:
+
+- **One long leaf.** A span deep in the tree with large self time, and all its ancestors long only because they wait. Look at the leaf.
+- **A staircase.** Many short, similar spans one after another. Nothing is slow; there are just too many of them. Classic N+1 queries, fixed by batching.
+- **Repeated red spans.** Timeouts followed by retries. The trace shows how many attempts, how long each waited, and raises the question you'll meet next module: did the timed-out attempts do anything?
+- **A gap.** A parent with a stretch where no child runs. Either the service did uninstrumented work, or something is missing a span. Add one.
+
+<KeyIdea>A slow parent is usually innocent. Follow self time down the tree to where the time is really spent.</KeyIdea>
+
+## Sampling: you can't keep everything
+
+At 300 bookings a second with twelve spans each, you'd store about 300 million spans a day. Most of them describe perfectly ordinary, fast bookings. So tracing systems **sample**.
+
+- **Head sampling** decides at the start of the trace: keep 1 in 100, chosen at random by the gateway, and pass the decision along in the context so every service agrees. It's cheap and simple. The flaw: the decision is made before you know whether the request will be interesting. The one slow booking in a thousand is probably thrown away.
+- **Tail sampling** buffers all spans of a trace in the collector for a few seconds, then decides after it's complete: keep every trace that errored or took over 1 second, plus 1% of the rest. You keep the traces you'll actually look at. The cost is memory in the collector and a more complex pipeline.
+
+A common setup: head-sample generously at the edge, then tail-sample in the collector to keep all errors and slow traces.
+
+## Logs, metrics and traces together
+
+Tracing doesn't replace your other tools. Each answers a different question:
+
+- **Metrics** tell you *that* something is wrong: p99 booking latency jumped from 300 ms to 2.4 s at 10:01. They're cheap, aggregated and great for alerts.
+- **Traces** tell you *where*: in the payments → bank span, for bookings paid by UPI.
+- **Logs** tell you *why*: the bank returned `RETRY_LATER` with a rate-limit message.
+
+The glue is the trace ID. Put it in every log line, and link from a latency graph to example traces from that minute. Then the path is: alert fires, open a slow trace, click the slow span, jump to that service's logs for that exact request. Ten minutes instead of an afternoon.
+
+<Quiz
+  id="self-time"
+  question="In a trace, the booking span lasts 900 ms. Its children are events (40 ms) and payments (180 ms), which don't overlap. What's booking's self time, and what does it suggest?"
+  options={[
+    "900 ms; booking is the slowest service",
+    "680 ms; booking is doing a lot of work itself that isn't covered by any child span",
+    "220 ms; the children are the problem",
+    "0 ms; parents never have self time",
+  ]}
+  answer={1}
+  explain={<>Self time is 900 − 40 − 180 = 680 ms. Most of the request is spent inside booking itself with no child span to explain it: maybe CPU work like rendering a PDF, a lock wait, or a call that isn't instrumented yet. That's where to look, and probably where to add spans.</>}
+/>
+
+## Key takeaways
+
+- A trace is one request's journey; spans are the units of work in it, linked by parent IDs into a tree.
+- Context propagation, usually the `traceparent` header, carries the trace ID across every hop, including messages on queues.
+- In a waterfall, follow self time, not duration. Learn the shapes: long leaf, staircase, retries, gaps.
+- Sample to control cost. Tail sampling keeps the slow and failed traces you actually need.
+- Metrics say something is wrong, traces say where, logs say why. The trace ID ties them together.
