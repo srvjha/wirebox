@@ -1,0 +1,102 @@
+Gatepass is forty cities and thirty engineers, all in one repository, one deployable and one database. Releases take a day because everyone has to agree on them. A change to the refund code broke search last Tuesday. Someone says, "We should move to microservices." This lesson is about when that is true, and when it just moves the pain somewhere harder to see.
+
+## First, what a monolith is (and isn't)
+
+A **monolith** is one deployable unit: the code for booking, payments, search, notifications and admin builds into one artifact and runs as one process, usually against one database. That is not an insult. It gives you:
+
+- **Simple calls.** Booking calls payments with a function call: microseconds, no network, no timeout, and a failure is an exception you can catch.
+- **Transactions.** One database transaction can write the booking, the seat hold and the payment record together.
+- **One thing to run and debug.** One log, one stack trace, one deploy.
+
+A monolith with clear internal boundaries is a perfectly good system for a company of hundreds of engineers. A **big ball of mud**, where every module reads every other module's tables, is the bad version, and splitting it into services will not clean it up. It will give you a distributed ball of mud.
+
+<Diagram w={640} h={220} caption="Same four capabilities. Left: function calls inside one process. Right: network calls between processes, each with its own failure modes.">
+  <Group x={10} y={20} w={290} h={180} label="modular monolith" />
+  <Box x={26} y={56} w={118} h={44} label="Booking" icon="service" />
+  <Box x={166} y={56} w={118} h={44} label="Payments" icon="service" />
+  <Box x={26} y={116} w={118} h={44} label="Search" icon="service" />
+  <Box x={166} y={116} w={118} h={44} label="Notify" icon="service" />
+  <Wire points={[[144, 78], [164, 78]]} tone="muted" />
+  <Wire points={[[85, 102], [85, 114]]} tone="muted" />
+  <Group x={330} y={20} w={300} h={180} label="services" tone="info" />
+  <Box x={346} y={56} w={118} h={44} label="Booking" icon="service" tone="info" />
+  <Box x={496} y={56} w={118} h={44} label="Payments" icon="service" tone="info" />
+  <Box x={346} y={116} w={118} h={44} label="Search" icon="service" tone="info" />
+  <Box x={496} y={116} w={118} h={44} label="Notify" icon="service" tone="info" />
+  <Wire points={[[466, 78], [494, 78]]} tone="req" flow label="HTTP" />
+  <Wire points={[[405, 102], [405, 114]]} tone="req" flow />
+  <Wire points={[[554, 102], [554, 114]]} tone="req" flow />
+</Diagram>
+
+## Signals that it's time
+
+Splitting solves specific problems. Look for these, with evidence rather than a hunch:
+
+**Teams block each other.** Two teams need to change the same module weekly and keep colliding in merge conflicts and release schedules. If deploys wait on a shared release train, the cost is measurable: lead time from merge to production.
+
+**Parts have very different scaling needs.** Search needs 40 machines on Friday evenings, while admin reports need two. In a monolith you scale everything together, so you pay for 40 copies of the admin code and its memory.
+
+**Parts have different reliability needs.** Payments must stay up even when a bug in recommendations crashes the process. A shared process means a shared blast radius.
+
+**Parts want different technology.** Ticket-image generation is CPU-bound and fits a different runtime, or a search engine fits a different data store. Cases where one part truly can't live in the shared stack.
+
+**Deploy and test time have grown.** Builds take 40 minutes, the test suite has 15,000 tests, and nobody trusts a deploy on Friday.
+
+Notice what is *not* on this list: "microservices are modern", "Netflix does it", or "the code feels messy". Messy code is fixed by refactoring, with or without a network in between.
+
+<KeyIdea>Split along team and scaling boundaries when the coordination cost of staying together is higher than the cost of a network between the parts.</KeyIdea>
+
+## The step before: a modular monolith
+
+Almost always, the cheaper first move is to draw the boundaries **inside** the monolith:
+
+- Each module (booking, payments, notifications) owns its tables. No other module queries them directly.
+- Modules talk through a small, explicit interface, a class or an in-process API, not through each other's internals.
+- Enforce it with tooling: lint rules for forbidden imports, separate packages, ownership files.
+
+Now teams own modules, merge conflicts drop and the boundaries are tested in production. If one module later needs to leave, its seams are already there. If the boundaries turn out to be wrong, moving a function between modules is a refactor; moving it between services is a migration project.
+
+## How to carve something out
+
+When you do extract a service, do it one piece at a time, and pick the *easy and valuable* one first. A common recipe, the **strangler** approach:
+
+1. Pick a capability with a clean edge and clear need. **Notifications** is the classic first candidate: asynchronous, few callers, no shared transactions. Search is another.
+2. Put an interface in front of it inside the monolith.
+3. Build the new service and route a small percentage of calls to it. Compare results.
+4. Move the data it owns into its own database. This is the hard part.
+5. Remove the old code once traffic is fully moved.
+
+Leave the tangled core, such as bookings, payments and inventory that share transactions, for last, or leave it as the (smaller) monolith. Ending with "one core service plus six satellites" is a fine result.
+
+## What you pay for
+
+A network between components makes everything in the earlier modules suddenly relevant to every call:
+
+- **Every call can fail or be slow.** You need timeouts, retries with backoff, idempotency and circuit breakers on every service boundary.
+- **No shared transaction.** Booking and payments can't commit together any more. You get sagas, outbox tables and the possibility of a seat held with no payment.
+- **Data is split.** Joins across services become API calls or duplicated data kept in sync by events.
+- **Debugging crosses processes.** You need distributed tracing and correlation ids to follow one request through six services.
+- **Operations multiply.** Each service needs its own pipeline, dashboards, on-call rota and versioning story. Twelve services is twelve of everything.
+- **Contracts.** Changing an API now means coordinating with its callers, or supporting two versions at once.
+
+A useful rule of thumb: have **roughly one team per service**, and no more services than you have teams that can own them. Ten engineers running thirty services is a recipe for burnout.
+
+<Callout tone="warn" title="The distributed monolith">
+If services must be deployed together, share a database, or can't work when a neighbour is down, you have a monolith with network latency added. All the cost of services, none of the independence.
+</Callout>
+
+<Quiz
+  id="monolith-split-signal"
+  question="Which is the strongest reason to extract notifications into its own service at Gatepass?"
+  options={["Microservices are the industry standard", "Its work is asynchronous, scales on queue depth, and a bug there shouldn't take booking down", "The notifications code is messy", "We want to use a different language"]}
+  answer={1}
+  explain={<>A different <strong>scaling profile</strong>, a clean boundary and fault isolation are concrete benefits. Messy code is a refactoring problem and fashion is not a reason.</>}
+/>
+
+## Key takeaways
+
+- A monolith gives you simple calls, real transactions and one thing to run. Most systems should start and stay there longer than expected.
+- Split when teams block each other, parts need different scaling or reliability, or builds and deploys have become slow. Not for fashion or messy code.
+- Draw module boundaries inside the monolith first. They are cheap to change.
+- Extract one clear, asynchronous capability at a time; leave the transactional core for last.
+- Services cost you network failures, lost transactions, split data and operational overhead. Avoid the distributed monolith.
