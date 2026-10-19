@@ -125,7 +125,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 55,
     concepts: ["Chunking", "Delta sync", "Conflicts"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "ranked-feed",
