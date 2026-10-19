@@ -3,8 +3,8 @@ import { MotionGate } from "./motion-gate";
 
 /**
  * The landing page's live architecture: fans -> rate limiter -> load balancer
- * -> three stateless API servers -> Redis + Postgres. Every 12 seconds API 2
- * fails its health check, the balancer routes around it, and it comes back.
+ * -> three stateless API servers -> Redis + Postgres. The `phase` prop shows
+ * API 2 failing its health check, the balancer routing around it, and recovery.
  * Drawn twice (wide and tall) so labels stay readable on a phone.
  */
 
@@ -20,7 +20,6 @@ type Node = {
 type Orientation = "wide" | "tall";
 
 const H = 52;
-export const CYCLE = 12; // seconds per failure/recovery loop
 
 function layout(o: Orientation) {
   if (o === "wide") {
@@ -200,23 +199,19 @@ function route(nodes: Node[], o: Orientation): Pt[] {
   return pts;
 }
 
-/** Opacity that follows the failure cycle. */
-function Cycle({ values, keyTimes }: { values: string; keyTimes: string }) {
-  return (
-    <animate attributeName="opacity" values={values} keyTimes={keyTimes} dur={`${CYCLE}s`} repeatCount="indefinite" />
-  );
+export type Phase = "healthy" | "down" | "recovering";
+
+type Layer = "DOWN" | "RECOVER" | "HEALTHY" | "API2_TRAFFIC";
+
+/** Which failure layers are visible in each phase. */
+function shown(phase: Phase, layer: Layer) {
+  if (layer === "DOWN") return phase === "down" ? 1 : 0;
+  if (layer === "RECOVER") return phase === "recovering" ? 1 : 0;
+  if (layer === "HEALTHY") return phase === "healthy" ? 1 : 0;
+  return phase === "down" ? 0 : 1;
 }
 
-// Phases of the 12 s loop, as fractions.
-const DOWN = { values: "0;0;1;1;0;0", keyTimes: "0;0.4;0.42;0.68;0.7;1" };
-const RECOVER = { values: "0;0;1;1;0;0", keyTimes: "0;0.68;0.7;0.84;0.86;1" };
-const HEALTHY = { values: "1;1;0;0;1;1", keyTimes: "0;0.4;0.42;0.84;0.86;1" };
-const API2_TRAFFIC = {
-  values: "1;1;0;0;1;1",
-  keyTimes: "0;0.4;0.41;0.85;0.87;1",
-};
-
-function Arch({ o }: { o: Orientation }) {
+function Arch({ o, phase }: { o: Orientation; phase: Phase }) {
   const L = layout(o);
   const { fans, limiter, lb, apis, redis, pg } = L;
   const stores = [redis, pg];
@@ -240,8 +235,7 @@ function Arch({ o }: { o: Orientation }) {
         stores.map((s) => <Wire key={api.label + s.label} points={link(api, s, o)} tone="muted" />),
       )}
       {/* LB -> API 2 turns red while API 2 is down */}
-      <g opacity={0}>
-        <Cycle {...DOWN} />
+      <g style={{ opacity: shown(phase, "DOWN"), transition: "opacity 300ms" }}>
         <Wire points={link(lb, apis[1], o)} tone="err" dashed width={1.6} />
       </g>
 
@@ -254,8 +248,7 @@ function Arch({ o }: { o: Orientation }) {
           <Packet points={resRoute(i)} dur={3.2} delay={2.5 + i * 0.4} tone="res" />
         </g>
       ))}
-      <g>
-        <Cycle {...API2_TRAFFIC} />
+      <g style={{ opacity: shown(phase, "API2_TRAFFIC"), transition: "opacity 300ms" }}>
         <Packet points={reqRoutes[1]} dur={3.2} delay={0.3} />
         <Packet points={resRoute(1)} dur={3.2} delay={1.9} tone="res" />
       </g>
@@ -274,8 +267,7 @@ function Arch({ o }: { o: Orientation }) {
       ))}
 
       {/* API 2 failure overlay */}
-      <g opacity={0}>
-        <Cycle {...DOWN} />
+      <g style={{ opacity: shown(phase, "DOWN"), transition: "opacity 300ms" }}>
         <rect
           x={apis[1].x}
           y={apis[1].y}
@@ -291,8 +283,7 @@ function Arch({ o }: { o: Orientation }) {
           DOWN
         </Tag>
       </g>
-      <g opacity={0}>
-        <Cycle {...RECOVER} />
+      <g style={{ opacity: shown(phase, "RECOVER"), transition: "opacity 300ms" }}>
         <rect
           x={apis[1].x}
           y={apis[1].y}
@@ -318,20 +309,17 @@ function Arch({ o }: { o: Orientation }) {
 
       {/* Status line */}
       <g>
-        <g opacity={1}>
-          <Cycle {...HEALTHY} />
+        <g style={{ opacity: shown(phase, "HEALTHY"), transition: "opacity 300ms" }}>
           <Text x={L.status[0]} y={L.status[1]} size={11} mono tone="muted">
             ● all 3 servers healthy · p99 84 ms
           </Text>
         </g>
-        <g opacity={0}>
-          <Cycle {...DOWN} />
+        <g style={{ opacity: shown(phase, "DOWN"), transition: "opacity 300ms" }}>
           <Text x={L.status[0]} y={L.status[1]} size={11} mono tone="err">
             api-2 failed health check · traffic rerouted
           </Text>
         </g>
-        <g opacity={0}>
-          <Cycle {...RECOVER} />
+        <g style={{ opacity: shown(phase, "RECOVER"), transition: "opacity 300ms" }}>
           <Text x={L.status[0]} y={L.status[1]} size={11} mono tone="ok">
             api-2 passed 3 checks · back in rotation
           </Text>
@@ -341,14 +329,14 @@ function Arch({ o }: { o: Orientation }) {
   );
 }
 
-export function HeroDiagram() {
+export function HeroDiagram({ phase = "healthy" }: { phase?: Phase }) {
   return (
     <MotionGate>
       <div className="hidden sm:block">
-        <Arch o="wide" />
+        <Arch o="wide" phase={phase} />
       </div>
       <div className="sm:hidden">
-        <Arch o="tall" />
+        <Arch o="tall" phase={phase} />
       </div>
     </MotionGate>
   );
