@@ -11,7 +11,7 @@ const nav = [
 export function SiteHeader() {
   return (
     <header className="sticky top-0 z-40 bg-bg">
-      <div className="flex h-14 items-center gap-3 px-5 sm:gap-8 sm:px-7">
+      <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:gap-8 sm:px-6">
         <Logo />
         <nav className="flex items-center gap-1 sm:gap-3">
           {nav.map((n) => (

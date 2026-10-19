@@ -36,18 +36,18 @@ export function LiveSystem() {
 
   return (
     <div>
-      <div ref={ref} data-ui className="bg-surface p-2 sm:p-4">
+      <div ref={ref} data-ui className="rounded-xl bg-surface p-2 sm:p-4">
         <HeroDiagram />
       </div>
       <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
         <button
           type="button"
           onClick={pullThePlug}
-          className="press h-12 bg-fg px-6 text-[17px] font-medium text-bg outline-none hover:bg-accent hover:text-accent-fg focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+          className="press h-11 rounded-lg bg-err/15 px-4 text-[15px] font-medium text-err outline-none hover:bg-err/25 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
         >
           Pull the plug on API 2
         </button>
-        <p aria-live="polite" className="max-w-[46ch] text-[17px] text-fg">
+        <p aria-live="polite" className="max-w-[46ch] text-[15px] text-muted">
           {down
             ? "API 2 failed its health check. The load balancer stops sending it requests, and fans keep buying tickets."
             : "Three servers share the load. Fail one and watch where its requests go."}

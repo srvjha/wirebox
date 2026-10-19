@@ -70,20 +70,20 @@ const faqs: { q: string; a: ReactNode }[] = [
 
 export function Faq() {
   return (
-    <div className="space-y-4">
+    <div className="space-y-1">
       {faqs.map((f) => (
         <details
           key={f.q}
-          className="group -mx-5 px-5 py-3 open:bg-surface-2 open:pb-6 sm:-mx-6 sm:px-6 [&_summary::-webkit-details-marker]:hidden"
+          className="group rounded-lg px-4 py-1 open:bg-surface open:pb-5 [&_summary::-webkit-details-marker]:hidden"
         >
-          <summary className="flex cursor-pointer list-none items-center gap-6 py-2 text-[clamp(1.25rem,1.1rem+0.7vw,1.625rem)] text-fg outline-none hover:text-accent focus-visible:text-accent">
+          <summary className="flex cursor-pointer list-none items-center gap-6 py-2 text-[17px] font-medium text-fg outline-none hover:text-accent focus-visible:text-accent">
             <span className="flex-1">{f.q}</span>
             <ChevronDown
-              className="size-6 shrink-0 stroke-[1.5] text-fg transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
+              className="size-5 shrink-0 text-muted transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
               aria-hidden
             />
           </summary>
-          <div className="mt-3 max-w-[48ch] text-[17px] leading-[1.55] text-fg">{f.a}</div>
+          <div className="mt-1 max-w-[60ch] text-[16px] leading-[1.6] text-fg/80">{f.a}</div>
         </details>
       ))}
     </div>
