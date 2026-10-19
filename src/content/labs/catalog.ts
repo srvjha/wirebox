@@ -165,7 +165,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "hard",
     minutes: 70,
     concepts: ["Partitioning", "Replication", "Quorums"],
-    status: "soon",
+    status: "live",
   },
 ];
 
