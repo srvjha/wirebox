@@ -37,7 +37,7 @@ const faqs: { q: string; a: ReactNode }[] = [
     q: "How do the drills work?",
     a: (
       <>
-        Each drill gives you a product brief, say a URL shortener. You write its API, model its data and wire up an
+        Each drill gives you a product brief, say a chat app. You write its API, model its data and wire up an
         architecture on a canvas. Then a simulator load-tests your design, step by step, from a handful of users to tens
         of thousands of requests a second. When something breaks, you get a debrief explaining why, and you fix it.
       </>

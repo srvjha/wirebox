@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 
 const liveDrills = drillCatalog.filter((l) => l.status === "live");
 const previewDrills = [...liveDrills, ...drillCatalog.filter((l) => l.status === "soon")].slice(0, 6);
-const firstDrill = liveDrills[0]?.slug ?? "url-shortener";
+const firstDrill = liveDrills[0]?.slug ?? "pastebin";
 
 const stats = [
   {
@@ -88,7 +88,7 @@ export default function Home() {
                 Start learning <ArrowRight className="size-4" aria-hidden />
               </TrackedLink>
               <TrackedLink href={`/drills/${firstDrill}`} location="home_hero" variant="secondary" size="lg">
-                Try the URL shortener drill
+                Try the pastebin drill
               </TrackedLink>
             </div>
             <p className="mt-4 text-[13px] text-subtle">No sign-up needed. Your progress saves in this browser.</p>

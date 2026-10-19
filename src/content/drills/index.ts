@@ -21,10 +21,10 @@ import { videoPlatform } from "./video-platform";
  * entry says "live"; everything else in the catalogue shows "coming soon".
  */
 const drills: Drill[] = [
-  urlShortener,
   pastebin,
   notifications,
   videoPlatform,
+  urlShortener,
   chat,
   newsFeed,
   ticketBooking,

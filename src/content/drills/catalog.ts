@@ -18,16 +18,6 @@ export type DrillMeta = {
 
 export const drillCatalog: DrillMeta[] = [
   {
-    slug: "url-shortener",
-    product: "URL shortener",
-    title: "Design a URL shortener",
-    tagline: "A few writes, billions of redirects, and short codes that never collide.",
-    difficulty: "easy",
-    minutes: 50,
-    concepts: ["API design", "Schema", "Vertical & horizontal scaling", "Caching", "Rate limiting", "Failover", "Read-your-writes"],
-    status: "live",
-  },
-  {
     slug: "pastebin",
     product: "Pastebin",
     title: "Design a pastebin",
@@ -55,6 +45,16 @@ export const drillCatalog: DrillMeta[] = [
     difficulty: "medium",
     minutes: 60,
     concepts: ["Upload pipelines", "Transcoding", "Adaptive bitrate", "CDN"],
+    status: "live",
+  },
+  {
+    slug: "url-shortener",
+    product: "URL shortener",
+    title: "Design a URL shortener",
+    tagline: "A few writes, billions of redirects, and short codes that never collide.",
+    difficulty: "easy",
+    minutes: 50,
+    concepts: ["API design", "Schema", "Vertical & horizontal scaling", "Caching", "Rate limiting", "Failover", "Read-your-writes"],
     status: "live",
   },
   {
@@ -177,7 +177,7 @@ export const drillTracks: DrillTrack[] = [
     id: "reads",
     title: "Serve it fast",
     blurb: "Read-heavy products where caching, storage and the edge do most of the work.",
-    slugs: ["url-shortener", "pastebin", "search-autocomplete", "video-platform"],
+    slugs: ["pastebin", "search-autocomplete", "video-platform", "url-shortener"],
   },
   {
     id: "fanout",
