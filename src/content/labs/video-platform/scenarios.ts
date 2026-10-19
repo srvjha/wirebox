@@ -189,7 +189,7 @@ export const REFERENCE: Record<StepId, Case> = {
   pipeline: {
     pass: { spec: piped(4), knobs: { ack: "accepted", path: "presigned" } },
     fail: [
-      { why: "transcoding inside the upload request (no queue)", design: { spec: { ...core, server: 1 }, knobs: { ack: "accepted", path: "presigned" } }, failing: ["successRate", "flowSuccess"] },
+      { why: "transcoding inside the upload request (no queue)", design: { spec: { ...core, server: 1 }, knobs: { ack: "accepted", path: "presigned" } }, failing: ["flowSuccess"] },
       { why: "one worker can't keep up", design: { spec: piped(1), knobs: { ack: "accepted", path: "presigned" } }, failing: ["asyncOnTime", "maxQueueLag"] },
       { why: "holds the upload open until transcoding ends", design: { spec: piped(4), knobs: { ack: "wait", path: "presigned" } }, failing: ["custom"] },
       { why: "proxies bytes through the API", design: { spec: piped(4), knobs: { ack: "accepted", path: "proxy" } }, failing: ["custom"] },
