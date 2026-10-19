@@ -55,7 +55,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 60,
     concepts: ["Upload pipelines", "Transcoding", "Adaptive bitrate", "CDN"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "chat",
