@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 import { courseStats } from "@/content/course";
-import { labCatalog } from "@/content/labs/catalog";
+import { drillCatalog } from "@/content/drills/catalog";
 
 export const alt = "Wirebox: learn system design by building it. Free for everyone.";
 export const size = { width: 1200, height: 630 };
@@ -105,7 +105,7 @@ export default function OpengraphImage() {
         <span style={{ color: C.subtle }}>·</span>
         <span>{courseStats.lessons} lessons</span>
         <span style={{ color: C.subtle }}>·</span>
-        <span>{labCatalog.length} product drills</span>
+        <span>{drillCatalog.length} product drills</span>
         <span style={{ color: C.subtle }}>·</span>
         <span>{hours} hours</span>
         <span style={{ marginLeft: "auto", color: C.subtle }}>No paywall. No trial.</span>

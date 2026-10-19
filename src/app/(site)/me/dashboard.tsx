@@ -4,11 +4,11 @@ import Link from "next/link";
 import { ArrowRight, CircleCheck, Cloud, CloudOff, FlaskConical } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buttonClass } from "@/components/ui/button";
-import { LabIcon } from "@/components/site/lab-card";
-import { labPercent, useProgress, type LabProgress } from "@/components/site/progress";
+import { DrillIcon } from "@/components/site/drill-card";
+import { drillPercent, useProgress, type DrillProgress } from "@/components/site/progress";
 import { TrackedLink } from "@/components/site/tracked-link";
 import { allLessons, course, type ModuleMeta } from "@/content/course";
-import { getLabMeta, labCatalog } from "@/content/labs/catalog";
+import { getDrillMeta, drillCatalog } from "@/content/drills/catalog";
 import { cn } from "@/lib/utils";
 
 function Bar({ pct, tone = "accent", label }: { pct: number; tone?: "accent" | "ok"; label: string }) {
@@ -79,15 +79,15 @@ function ModuleRow({ m, done, live }: { m: ModuleMeta; done: Set<string>; live: 
   );
 }
 
-function LabRow({ p }: { p: LabProgress }) {
-  const meta = getLabMeta(p.slug);
-  const pct = labPercent(p);
+function DrillRow({ p }: { p: DrillProgress }) {
+  const meta = getDrillMeta(p.slug);
+  const pct = drillPercent(p);
   const done = !!p.completedAt;
   return (
     <li className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4 sm:flex-row sm:items-center sm:gap-5">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/30 bg-accent-soft text-accent">
-          <LabIcon slug={p.slug} className="size-[18px]" />
+          <DrillIcon slug={p.slug} className="size-[18px]" />
         </div>
         <div className="min-w-0">
           <p className="truncate text-[14.5px] font-medium text-fg">{meta?.title ?? p.slug}</p>
@@ -101,7 +101,7 @@ function LabRow({ p }: { p: LabProgress }) {
       </div>
       <TrackedLink
         href={`/drills/${p.slug}`}
-        location="me_labs"
+        location="me_drills"
         variant={done ? "ghost" : "secondary"}
         size="sm"
         className="self-start sm:self-auto"
@@ -114,21 +114,21 @@ function LabRow({ p }: { p: LabProgress }) {
 
 export function ProgressDashboard({ liveLessons }: { liveLessons: string[] }) {
   const live = new Set(liveLessons);
-  const { lessons: done, labs, signedIn, sessionPending, user, loading } = useProgress();
+  const { lessons: done, drills, signedIn, sessionPending, user, loading } = useProgress();
 
   const doneCount = allLessons.filter((l) => done.has(l.slug)).length;
   const modulesDone = course.flatMap((p) => p.modules).filter((m) => m.lessons.every((l) => done.has(l.slug))).length;
-  const startedLabs = [...labs.values()]
+  const startedDrills = [...drills.values()]
     .filter((l) => l.stepsDone > 0 || l.completedAt)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-  const labsDone = startedLabs.filter((l) => l.completedAt).length;
+  const drillsDone = startedDrills.filter((l) => l.completedAt).length;
 
   // Next lesson: the first live lesson after the furthest one finished, else the first unfinished live lesson.
   const lastDoneIdx = allLessons.reduce((acc, l, i) => (done.has(l.slug) ? i : acc), -1);
   const next =
     allLessons.slice(lastDoneIdx + 1).find((l) => live.has(l.slug) && !done.has(l.slug)) ??
     allLessons.find((l) => live.has(l.slug) && !done.has(l.slug));
-  const suggestedLab = labCatalog.find((l) => l.status === "live" && !labs.has(l.slug));
+  const suggestedDrill = drillCatalog.find((l) => l.status === "live" && !drills.has(l.slug));
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-14 sm:px-6 sm:py-20">
@@ -181,23 +181,23 @@ export function ProgressDashboard({ liveLessons }: { liveLessons: string[] }) {
           label="modules complete"
           sub={`of ${course.reduce((n, p) => n + p.modules.length, 0)}`}
         />
-        <Stat value={startedLabs.length} label="drills started" />
-        <Stat value={labsDone} label="drills completed" />
+        <Stat value={startedDrills.length} label="drills started" />
+        <Stat value={drillsDone} label="drills completed" />
       </section>
 
-      <section aria-labelledby="labs-title" className="mt-14">
+      <section aria-labelledby="drills-title" className="mt-14">
         <div className="mb-4 flex items-center justify-between">
-          <h2 id="labs-title" className="text-[20px] font-semibold tracking-tight text-fg">
+          <h2 id="drills-title" className="text-[20px] font-semibold tracking-tight text-fg">
             Drills
           </h2>
           <Link href="/drills" className="text-[13px] text-muted hover:text-fg">
             All drills
           </Link>
         </div>
-        {startedLabs.length > 0 ? (
+        {startedDrills.length > 0 ? (
           <ul className="space-y-3">
-            {startedLabs.map((p) => (
-              <LabRow key={p.slug} p={p} />
+            {startedDrills.map((p) => (
+              <DrillRow key={p.slug} p={p} />
             ))}
           </ul>
         ) : (
@@ -205,10 +205,10 @@ export function ProgressDashboard({ liveLessons }: { liveLessons: string[] }) {
             <FlaskConical className="size-5 shrink-0 text-subtle" aria-hidden />
             <p className="flex-1 text-[14px] text-muted">
               You haven&apos;t started a drill yet.
-              {suggestedLab && ` The ${suggestedLab.product.toLowerCase()} drill is a good first one.`}
+              {suggestedDrill && ` The ${suggestedDrill.product.toLowerCase()} drill is a good first one.`}
             </p>
-            {suggestedLab && (
-              <TrackedLink href={`/drills/${suggestedLab.slug}`} location="me_labs" variant="secondary" size="sm">
+            {suggestedDrill && (
+              <TrackedLink href={`/drills/${suggestedDrill.slug}`} location="me_drills" variant="secondary" size="sm">
                 Start the drill
               </TrackedLink>
             )}

@@ -1,9 +1,9 @@
 /**
  * Flow engine: describe a product's traffic as data, let the learner's graph decide how it fares.
  *
- * A lab's design step declares flows (who sends what, through which kinds of components),
- * optional lab-defined knobs (design choices that change engine numbers), and optional custom
- * checks (correctness the throughput model can't see). No per-lab UI is needed.
+ * A drill's design step declares flows (who sends what, through which kinds of components),
+ * optional drill-defined knobs (design choices that change engine numbers), and optional custom
+ * checks (correctness the throughput model can't see). No per-drill UI is needed.
  *
  * ```ts
  * const step: DesignStep = {
@@ -154,7 +154,7 @@ export type CustomKnob = {
 
 export type CustomCheckResult = { label: string; ok: boolean; message?: string };
 
-/** Selected knob options: raw choices for labs, merged numeric values for the engine. */
+/** Selected knob options: raw choices for drills, merged numeric values for the engine. */
 export type FlowKnobs = { choices: Record<string, string>; values: Record<string, number> };
 
 export type NodeConfig = Partial<Record<Kind, Record<string, number>>>;

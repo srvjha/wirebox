@@ -1,37 +1,37 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ComingSoon } from "@/components/lab/coming-soon";
-import { LabPlayer } from "@/components/lab/player/lab-player";
-import { getLab } from "@/content/labs";
-import { getLabMeta, labCatalog } from "@/content/labs/catalog";
+import { ComingSoon } from "@/components/drill/coming-soon";
+import { DrillPlayer } from "@/components/drill/player/drill-player";
+import { getDrill } from "@/content/drills";
+import { getDrillMeta, drillCatalog } from "@/content/drills/catalog";
 
-// Live labs and "coming soon" pages are all prerendered.
+// Live drills and "coming soon" pages are all prerendered.
 export function generateStaticParams() {
-  return labCatalog.map((l) => ({ slug: l.slug }));
+  return drillCatalog.map((l) => ({ slug: l.slug }));
 }
 
 export async function generateMetadata({ params }: PageProps<"/drills/[slug]">): Promise<Metadata> {
   const { slug } = await params;
-  const meta = getLabMeta(slug);
+  const meta = getDrillMeta(slug);
   if (!meta) return {};
   return { title: meta.title, description: meta.tagline };
 }
 
 // Params are read inside Suspense so navigation stays instant; pages are still prerendered.
-export default function LabPage({ params }: PageProps<"/drills/[slug]">) {
+export default function DrillPage({ params }: PageProps<"/drills/[slug]">) {
   return (
     <Suspense fallback={<div className="min-h-dvh bg-bg" aria-hidden />}>
       {params.then(({ slug }) => (
-        <Lab slug={slug} />
+        <Drill slug={slug} />
       ))}
     </Suspense>
   );
 }
 
-function Lab({ slug }: { slug: string }) {
-  const meta = getLabMeta(slug);
+function Drill({ slug }: { slug: string }) {
+  const meta = getDrillMeta(slug);
   if (!meta) notFound();
-  if (!getLab(slug)) return <ComingSoon lab={meta} />;
-  return <LabPlayer slug={slug} />;
+  if (!getDrill(slug)) return <ComingSoon drill={meta} />;
+  return <DrillPlayer slug={slug} />;
 }

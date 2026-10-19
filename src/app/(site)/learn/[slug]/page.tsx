@@ -16,7 +16,7 @@ import { liveLessonSlugs } from "@/content/lessons/live";
 
 export function generateStaticParams() {
   const live = liveLessonSlugs();
-  return allLessons.filter((l) => l.kind !== "lab" && live.has(l.slug)).map((l) => ({ slug: l.slug }));
+  return allLessons.filter((l) => l.kind !== "drill" && live.has(l.slug)).map((l) => ({ slug: l.slug }));
 }
 
 export async function generateMetadata({ params }: PageProps<"/learn/[slug]">): Promise<Metadata> {
@@ -55,7 +55,7 @@ function LessonSkeleton() {
 
 async function Lesson({ slug }: { slug: string }) {
   const lesson = getLesson(slug);
-  if (!lesson || lesson.kind === "lab" || !liveLessonSlugs().has(slug)) notFound();
+  if (!lesson || lesson.kind === "drill" || !liveLessonSlugs().has(slug)) notFound();
   const { default: Content } = await import(`@/content/lessons/${slug}.mdx`);
 
   const parts = getCourseNav();

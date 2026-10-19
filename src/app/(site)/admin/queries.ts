@@ -1,7 +1,7 @@
 import "server-only";
 import { and, count, countDistinct, desc, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { account, labProgress, lessonProgress, loadTestRun, postmortem, user } from "@/lib/db/schema";
+import { account, drillProgress, lessonProgress, loadTestRun, postmortem, user } from "@/lib/db/schema";
 
 const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000);
 
@@ -17,7 +17,7 @@ export async function getAdminStats() {
     activeRows,
     [lessonsTotal],
     topLessons,
-    labs,
+    drills,
     [loadTotals],
     loadByStep,
     [postmortems],
@@ -49,7 +49,7 @@ export async function getAdminStats() {
     db.execute<{ n: number }>(sql`
       select count(distinct user_id)::int as n from (
         select ${lessonProgress.userId} as user_id from ${lessonProgress} where ${lessonProgress.completedAt} >= now() - interval '7 days'
-        union select ${labProgress.userId} from ${labProgress} where ${labProgress.updatedAt} >= now() - interval '7 days'
+        union select ${drillProgress.userId} from ${drillProgress} where ${drillProgress.updatedAt} >= now() - interval '7 days'
         union select ${loadTestRun.userId} from ${loadTestRun} where ${loadTestRun.createdAt} >= now() - interval '7 days'
       ) active
     `),
@@ -62,12 +62,12 @@ export async function getAdminStats() {
       .limit(10),
     db
       .select({
-        lab: labProgress.labSlug,
+        drill: drillProgress.drillSlug,
         started: count(),
-        completed: count(labProgress.completedAt),
+        completed: count(drillProgress.completedAt),
       })
-      .from(labProgress)
-      .groupBy(labProgress.labSlug)
+      .from(drillProgress)
+      .groupBy(drillProgress.drillSlug)
       .orderBy(desc(count())),
     db
       .select({
@@ -78,15 +78,15 @@ export async function getAdminStats() {
       .from(loadTestRun),
     db
       .select({
-        lab: loadTestRun.labSlug,
+        drill: loadTestRun.drillSlug,
         step: loadTestRun.step,
         n: count(),
         passed: sql<number>`count(*) filter (where ${loadTestRun.pass})`.mapWith(Number),
         p99: sql<number>`percentile_cont(0.5) within group (order by ${loadTestRun.p99Ms})`.mapWith(Number),
       })
       .from(loadTestRun)
-      .groupBy(loadTestRun.labSlug, loadTestRun.step)
-      .orderBy(loadTestRun.labSlug, loadTestRun.step),
+      .groupBy(loadTestRun.drillSlug, loadTestRun.step)
+      .orderBy(loadTestRun.drillSlug, loadTestRun.step),
     db.select({ n: count(), users: countDistinct(postmortem.userId) }).from(postmortem),
   ]);
 
@@ -104,7 +104,7 @@ export async function getAdminStats() {
     providers,
     activeLearners7d: Number(activeRows[0]?.n ?? 0),
     lessons: { total: lessonsTotal.n, learners: lessonsTotal.learners, top: topLessons },
-    labs,
+    drills,
     loadTests: { ...loadTotals, byStep: loadByStep },
     postmortems,
   };

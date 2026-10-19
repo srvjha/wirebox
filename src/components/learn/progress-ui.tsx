@@ -9,11 +9,11 @@ export function moduleProgress(module: NavModule, completed: ReadonlySet<string>
 }
 
 /**
- * A module is finished when every lesson the reader *can* do is done. Labs are
- * tracked by the lab itself, and unwritten lessons can't be done yet.
+ * A module is finished when every lesson the reader *can* do is done. Drills are
+ * tracked by the drill itself, and unwritten lessons can't be done yet.
  */
 export function isModuleFinished(module: NavModule, completed: ReadonlySet<string>) {
-  const doable = module.lessons.filter((l) => l.live && l.kind !== "lab");
+  const doable = module.lessons.filter((l) => l.live && l.kind !== "drill");
   return doable.length > 0 && doable.every((l) => completed.has(l.slug));
 }
 

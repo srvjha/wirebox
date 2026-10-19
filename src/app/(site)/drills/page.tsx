@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Eyebrow } from "@/components/home/section";
 import { DrillIndex } from "@/components/site/drill-index";
-import { labCatalog } from "@/content/labs/catalog";
+import { drillCatalog } from "@/content/drills/catalog";
 
 export const metadata: Metadata = {
   title: "Drills",
@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     "Design real products end to end: write the API, model the data, wire the architecture and load-test it. Free, in your browser.",
 };
 
-const live = labCatalog.filter((l) => l.status === "live");
+const live = drillCatalog.filter((l) => l.status === "live");
 const hours = Math.round(live.reduce((sum, l) => sum + l.minutes, 0) / 60);
 
 const loop = [
@@ -43,7 +43,7 @@ export default function DrillsPage() {
           ))}
         </ol>
       </header>
-      <DrillIndex labs={labCatalog} />
+      <DrillIndex drills={drillCatalog} />
     </div>
   );
 }

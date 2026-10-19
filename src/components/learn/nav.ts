@@ -1,16 +1,16 @@
 import "server-only";
 import { allLessons, course, type FlatLesson } from "@/content/course";
-import { getLabMeta } from "@/content/labs/catalog";
+import { getDrillMeta } from "@/content/drills/catalog";
 import { liveLessonSlugs } from "@/content/lessons/live";
 import type { NavLesson, NavPart } from "./types";
 
-export function lessonHref(lesson: { slug: string; kind: string; lab?: string }) {
-  return lesson.kind === "lab" && lesson.lab ? `/drills/${lesson.lab}` : `/learn/${lesson.slug}`;
+export function lessonHref(lesson: { slug: string; kind: string; drill?: string }) {
+  return lesson.kind === "drill" && lesson.drill ? `/drills/${lesson.drill}` : `/learn/${lesson.slug}`;
 }
 
-/** A lab lesson is live when its lab is; any other lesson when its MDX file exists. */
-export function isLive(lesson: { slug: string; kind: string; lab?: string }, live = liveLessonSlugs()) {
-  if (lesson.kind === "lab") return !!lesson.lab && getLabMeta(lesson.lab)?.status === "live";
+/** A drill lesson is live when its drill is; any other lesson when its MDX file exists. */
+export function isLive(lesson: { slug: string; kind: string; drill?: string }, live = liveLessonSlugs()) {
+  if (lesson.kind === "drill") return !!lesson.drill && getDrillMeta(lesson.drill)?.status === "live";
   return live.has(lesson.slug);
 }
 

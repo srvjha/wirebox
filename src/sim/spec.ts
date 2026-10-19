@@ -4,7 +4,7 @@
  * These are planning numbers, not benchmarks: the right order of magnitude for
  * a small service doing a key lookup on common cloud machines. What matters for
  * learning is the ratios (a cache is ~3x a database for reads, a bigger box
- * gives less per extra core). Tune them here; every lab reads from this file.
+ * gives less per extra core). Tune them here; every drill reads from this file.
  */
 
 export type Kind =

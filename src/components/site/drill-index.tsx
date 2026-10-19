@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { ArrowRight, Check, Clock } from "lucide-react";
-import { drillTracks, type Difficulty, type LabMeta } from "@/content/labs/catalog";
+import { drillTracks, type Difficulty, type DrillMeta } from "@/content/drills/catalog";
 import { cn } from "@/lib/utils";
-import { LabIcon } from "./lab-card";
-import { labPercent, useProgress, type LabProgress } from "./progress";
+import { DrillIcon } from "./drill-card";
+import { drillPercent, useProgress, type DrillProgress } from "./progress";
 import { TrackedLink } from "./tracked-link";
 
 type DifficultyFilter = "all" | Difficulty;
@@ -27,7 +27,7 @@ function DifficultyMeter({ difficulty }: { difficulty: Difficulty }) {
 }
 
 /** Right-hand status: start, in progress, or done. */
-function DrillState({ p }: { p: LabProgress | undefined }) {
+function DrillState({ p }: { p: DrillProgress | undefined }) {
   if (p?.completedAt) {
     return (
       <span className="inline-flex items-center gap-1.5 text-ok">
@@ -36,7 +36,7 @@ function DrillState({ p }: { p: LabProgress | undefined }) {
     );
   }
   if (p && p.stepsDone > 0) {
-    const pct = labPercent(p);
+    const pct = drillPercent(p);
     return (
       <span className="inline-flex items-center gap-2 text-fg">
         <span
@@ -57,29 +57,29 @@ function DrillState({ p }: { p: LabProgress | undefined }) {
   return <span className="text-muted transition-colors group-hover:text-fg">Start</span>;
 }
 
-function DrillRow({ lab, number, p }: { lab: LabMeta; number: number; p: LabProgress | undefined }) {
+function DrillRow({ drill, number, p }: { drill: DrillMeta; number: number; p: DrillProgress | undefined }) {
   return (
     <TrackedLink
       plain
-      href={`/drills/${lab.slug}`}
+      href={`/drills/${drill.slug}`}
       location="drills_index"
       className="group grid grid-cols-[auto_1fr_auto] items-start gap-x-4 gap-y-3 px-4 py-5 outline-none hover:bg-surface-2/60 focus-visible:bg-surface-2 sm:grid-cols-[2.5rem_auto_1fr_auto] sm:items-center sm:px-5"
     >
       <span className="hidden font-mono text-[13px] text-subtle tabular-nums sm:block">{String(number).padStart(2, "0")}</span>
       <span className="grid size-10 place-items-center rounded-lg border border-line bg-surface-2 text-muted transition-colors group-hover:border-accent/40 group-hover:text-accent">
-        <LabIcon slug={lab.slug} className="size-[18px]" />
+        <DrillIcon slug={drill.slug} className="size-[18px]" />
       </span>
       <span className="min-w-0">
         <span className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-[15.5px] font-semibold tracking-tight text-fg">{lab.product}</span>
-          <span className="text-[13.5px] text-muted">{lab.tagline}</span>
+          <span className="text-[15.5px] font-semibold tracking-tight text-fg">{drill.product}</span>
+          <span className="text-[13.5px] text-muted">{drill.tagline}</span>
         </span>
         <span className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-subtle">
-          <DifficultyMeter difficulty={lab.difficulty} />
+          <DifficultyMeter difficulty={drill.difficulty} />
           <span className="inline-flex items-center gap-1">
-            <Clock className="size-3.5" aria-hidden /> {lab.minutes} min
+            <Clock className="size-3.5" aria-hidden /> {drill.minutes} min
           </span>
-          <span className="hidden truncate md:inline">{lab.concepts.join(" · ")}</span>
+          <span className="hidden truncate md:inline">{drill.concepts.join(" · ")}</span>
         </span>
       </span>
       <span className="flex items-center gap-2 self-center text-[13px] font-medium">
@@ -94,15 +94,15 @@ function DrillRow({ lab, number, p }: { lab: LabMeta; number: number; p: LabProg
  * The drills index: the catalogue grouped into tracks, one dense row per
  * drill, with a sticky rail of per-track progress on wide screens.
  */
-export function DrillIndex({ labs }: { labs: LabMeta[] }) {
+export function DrillIndex({ drills }: { drills: DrillMeta[] }) {
   const [difficulty, setDifficulty] = useState<DifficultyFilter>("all");
   const progress = useProgress();
-  const bySlug = new Map(labs.map((l) => [l.slug, l]));
+  const bySlug = new Map(drills.map((l) => [l.slug, l]));
   const numberOf = new Map(drillTracks.flatMap((t) => t.slugs).map((s, i) => [s, i + 1]));
 
   const tracks = drillTracks.map((t) => {
-    const all = t.slugs.map((s) => bySlug.get(s)).filter((l): l is LabMeta => !!l && l.status === "live");
-    const done = all.filter((l) => progress.labs.get(l.slug)?.completedAt).length;
+    const all = t.slugs.map((s) => bySlug.get(s)).filter((l): l is DrillMeta => !!l && l.status === "live");
+    const done = all.filter((l) => progress.drills.get(l.slug)?.completedAt).length;
     const shown = all.filter((l) => difficulty === "all" || l.difficulty === difficulty);
     return { ...t, all, done, shown };
   });
@@ -168,9 +168,9 @@ export function DrillIndex({ labs }: { labs: LabMeta[] }) {
               <p className="px-1 py-5 text-[13.5px] text-subtle">No {difficulty} drills in this track.</p>
             ) : (
               <ul className="divide-y divide-line">
-                {t.shown.map((lab) => (
-                  <li key={lab.slug}>
-                    <DrillRow lab={lab} number={numberOf.get(lab.slug) ?? 0} p={progress.labs.get(lab.slug)} />
+                {t.shown.map((drill) => (
+                  <li key={drill.slug}>
+                    <DrillRow drill={drill} number={numberOf.get(drill.slug) ?? 0} p={progress.drills.get(drill.slug)} />
                   </li>
                 ))}
               </ul>

@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 import { allLessons } from "@/content/course";
-import { labCatalog } from "@/content/labs/catalog";
+import { drillCatalog } from "@/content/drills/catalog";
 import { liveLessonSlugs } from "@/content/lessons/live";
 import { SITE } from "@/lib/utils";
 
@@ -14,7 +14,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...allLessons
       .filter((l) => live.has(l.slug))
       .map((l) => ({ url: `${base}/learn/${l.slug}`, changeFrequency: "monthly" as const, priority: 0.7 })),
-    ...labCatalog
+    ...drillCatalog
       .filter((l) => l.status === "live")
       .map((l) => ({ url: `${base}/drills/${l.slug}`, changeFrequency: "monthly" as const, priority: 0.7 })),
     { url: `${base}/sign-in`, changeFrequency: "yearly", priority: 0.2 },

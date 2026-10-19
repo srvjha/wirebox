@@ -1,4 +1,4 @@
-import { PartitionStrategyLab } from "@/components/visuals/partition-strategy-lab"
+import { PartitionStrategyDrill } from "@/components/visuals/partition-strategy-drill"
 
 Gatepass sharded its bookings by city, and it worked until Mumbai grew to ten times the size of every other city. One shard sat at 90% CPU while the rest idled. Sharding by city was a decision about where rows live, and it turned out to be the wrong one. This lesson compares the three basic ways to make that decision and what each one makes easy or painful.
 
@@ -59,7 +59,7 @@ Gatepass's multi-tenant admin tool uses this: each organiser account maps to a p
 
 Switch strategies and watch the load bars. Then turn on the hot key and slide the scan window.
 
-<PartitionStrategyLab />
+<PartitionStrategyDrill />
 
 What you should see:
 

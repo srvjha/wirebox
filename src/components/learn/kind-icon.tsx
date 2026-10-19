@@ -5,11 +5,11 @@ import { cn } from "@/lib/utils";
 export const kindLabel: Record<LessonKind, string> = {
   read: "Read",
   visual: "Interactive",
-  lab: "Drill",
+  drill: "Drill",
 };
 
-const icons = { read: BookOpen, visual: MousePointerClick, lab: FlaskConical } as const;
-const tones = { read: "text-subtle", visual: "text-info", lab: "text-accent" } as const;
+const icons = { read: BookOpen, visual: MousePointerClick, drill: FlaskConical } as const;
+const tones = { read: "text-subtle", visual: "text-info", drill: "text-accent" } as const;
 
 export function KindIcon({ kind, className }: { kind: LessonKind; className?: string }) {
   const Icon = icons[kind];

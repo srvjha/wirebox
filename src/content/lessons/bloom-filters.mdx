@@ -1,4 +1,4 @@
-import { BloomFilterLab } from "@/components/visuals/bloom-filter-lab"
+import { BloomFilterDrill } from "@/components/visuals/bloom-filter-drill"
 
 Gatepass has 40 million accounts. Every time someone types a username on the sign-up screen, the app asks "is this taken?", and every keystroke used to be a database query. A Bloom filter answers most of those questions from memory, in a few bytes per name, and is never wrong when it says no.
 
@@ -68,7 +68,7 @@ Notice what is *not* stored: the names themselves. The filter holds only bits, s
 
 This filter is real: names are hashed with FNV-1a, and the k positions come from two hashes combined as `h1 + i × h2`, a standard trick that behaves like k independent hash functions. The measured false-positive rate comes from checking 2,000 names that were never inserted.
 
-<BloomFilterLab />
+<BloomFilterDrill />
 
 Things to try:
 

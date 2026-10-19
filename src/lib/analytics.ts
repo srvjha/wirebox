@@ -22,21 +22,21 @@ export type AnalyticsEvents = {
   quiz_answered: { lesson: string; quiz: string; correct: boolean };
   visual_interacted: { visual: string; control: string; value: string | number | boolean };
 
-  lab_viewed: { lab: string };
-  lab_reset: { lab: string };
-  lab_step_viewed: { lab: string; step: number; type: string };
-  lab_step_completed: { lab: string; step: number; type: string };
-  lab_completed: { lab: string; seconds: number };
-  lab_api_checked: { lab: string; step: number; ok: boolean; problems: number };
-  lab_schema_checked: { lab: string; step: number; ok: boolean; problems: number };
-  lab_component_added: { lab: string; kind: string };
-  lab_component_removed: { lab: string; kind: string };
-  lab_wire_added: { lab: string; from: string; to: string; ok: boolean };
-  lab_knob_changed: { lab: string; knob: string; value: string | number | boolean };
-  lab_hint_opened: { lab: string; step: number; hint: number };
-  lab_choice_made: { lab: string; step: number; option: string };
+  drill_viewed: { drill: string };
+  drill_reset: { drill: string };
+  drill_step_viewed: { drill: string; step: number; type: string };
+  drill_step_completed: { drill: string; step: number; type: string };
+  drill_completed: { drill: string; seconds: number };
+  drill_api_checked: { drill: string; step: number; ok: boolean; problems: number };
+  drill_schema_checked: { drill: string; step: number; ok: boolean; problems: number };
+  drill_component_added: { drill: string; kind: string };
+  drill_component_removed: { drill: string; kind: string };
+  drill_wire_added: { drill: string; from: string; to: string; ok: boolean };
+  drill_knob_changed: { drill: string; knob: string; value: string | number | boolean };
+  drill_hint_opened: { drill: string; step: number; hint: number };
+  drill_choice_made: { drill: string; step: number; option: string };
   load_test_run: {
-    lab: string;
+    drill: string;
     step: number;
     pass: boolean;
     success_rate: number;
@@ -44,7 +44,7 @@ export type AnalyticsEvents = {
     cost_usd: number;
     nodes: number;
   };
-  postmortem_requested: { lab: string; step: number };
+  postmortem_requested: { drill: string; step: number };
 
   sign_in_started: { method: "google" | "github" | "email" | "guest" };
   sign_up_started: { method: "email" };

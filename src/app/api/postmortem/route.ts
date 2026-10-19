@@ -9,7 +9,7 @@ import { getServerSession } from "@/lib/session";
 const MAX_PER_HOUR = 20;
 
 const Body = z.object({
-  lab: z.string().min(1).max(80),
+  drill: z.string().min(1).max(80),
   step: z.number().int().min(0).max(100),
   design: z.string().min(1).max(8000),
   scenario: z.string().max(4000).default(""),
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
 
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Bad request." }, { status: 400 });
-  const { lab, step, design, scenario, result } = parsed.data;
+  const { drill, step, design, scenario, result } = parsed.data;
   const userId = session.user.id;
 
   const designHash = createHash("sha256").update(`${design}\n--\n${step}`).digest("hex");
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     .where(
       and(
         eq(postmortem.userId, userId),
-        eq(postmortem.labSlug, lab),
+        eq(postmortem.drillSlug, drill),
         eq(postmortem.step, step),
         eq(postmortem.designHash, designHash),
       ),
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
       })
     ).trim();
     if (!text) throw new Error("empty response");
-    await db.insert(postmortem).values({ userId, labSlug: lab, step, designHash, response: text, model });
+    await db.insert(postmortem).values({ userId, drillSlug: drill, step, designHash, response: text, model });
     return Response.json({ text, source: "ai" });
   } catch (err) {
     console.error("postmortem failed", err);

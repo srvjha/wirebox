@@ -8,7 +8,7 @@
  * A lesson is "live" when it has an MDX file registered in ./lessons/index.ts.
  */
 
-export type LessonKind = "read" | "visual" | "lab";
+export type LessonKind = "read" | "visual" | "drill";
 
 export type LessonMeta = {
   slug: string;
@@ -16,8 +16,8 @@ export type LessonMeta = {
   kind: LessonKind;
   minutes: number;
   summary: string;
-  /** For kind "lab": the lab slug under /labs. */
-  lab?: string;
+  /** For kind "drill": the drill slug under /drills. */
+  drill?: string;
 };
 
 export type ModuleMeta = {
@@ -43,8 +43,8 @@ const L = (
   minutes: number,
   summary: string,
   kind: LessonKind = "read",
-  lab?: string,
-): LessonMeta => ({ slug, title, minutes, summary, kind, lab });
+  drill?: string,
+): LessonMeta => ({ slug, title, minutes, summary, kind, drill });
 
 export const course: PartMeta[] = [
   {
@@ -84,7 +84,7 @@ export const course: PartMeta[] = [
           L("sql-vs-nosql", "SQL or NoSQL?", 11, "What each kind of database is good at, and how to choose."),
           L("indexes", "Indexes", 11, "Why one query takes 2 ms and another takes 2 seconds.", "visual"),
           L("latency-numbers", "Latency numbers to know", 8, "How long memory, disk and network actually take.", "visual"),
-          L("lab-url-shortener", "Drill: design a URL shortener", 50, "Design, scale and break a link shortener, from one server to 50,000 requests a second.", "lab", "url-shortener"),
+          L("drill-url-shortener", "Drill: design a URL shortener", 50, "Design, scale and break a link shortener, from one server to 50,000 requests a second.", "drill", "url-shortener"),
         ],
       },
       {

@@ -5,17 +5,17 @@ import { useSyncExternalStore } from "react";
 import { useSession } from "@/lib/auth-client";
 
 /**
- * Read-only view of the learner's progress for the site pages (/labs, /me).
+ * Read-only view of the learner's progress for the site pages (/drills, /me).
  * The writers live elsewhere: /learn owns `wirebox:lessons:v1` and
- * GET /api/progress; the lab player owns `wirebox:lab:<slug>:v<version>` and
- * GET /api/labs/progress. Local and server progress are merged, so it works
+ * GET /api/progress; the drill player owns `wirebox:drill:<slug>:v<version>` and
+ * GET /api/drills/progress. Local and server progress are merged, so it works
  * signed out and syncs once signed in.
  */
 
 export const LESSONS_KEY = "wirebox:lessons:v1";
-const LAB_KEY = /^wirebox:lab:(.+):v(\d+)$/;
+const DRILL_KEY = /^wirebox:drill:(.+):v(\d+)$/;
 
-export type LabProgress = {
+export type DrillProgress = {
   slug: string;
   stepsDone: number;
   totalSteps: number | null;
@@ -23,12 +23,12 @@ export type LabProgress = {
   updatedAt: string | null;
 };
 
-type ServerLab = { slug: string; stepsDone: number; totalSteps: number; completedAt: string | null; updatedAt: string };
+type ServerDrill = { slug: string; stepsDone: number; totalSteps: number; completedAt: string | null; updatedAt: string };
 
 // --- localStorage snapshot (stable between changes for useSyncExternalStore) ---
 
-let cache: { raw: string; lessons: string[]; labs: LabProgress[] } | null = null;
-const EMPTY = { lessons: [] as string[], labs: [] as LabProgress[] };
+let cache: { raw: string; lessons: string[]; drills: DrillProgress[] } | null = null;
+const EMPTY = { lessons: [] as string[], drills: [] as DrillProgress[] };
 
 function safeParse(s: string | null): unknown {
   if (!s) return null;
@@ -59,7 +59,7 @@ function count(v: unknown): number | null {
   return null;
 }
 
-function parseLab(slug: string, v: unknown): LabProgress | null {
+function parseDrill(slug: string, v: unknown): DrillProgress | null {
   if (!v || typeof v !== "object") return null;
   const o = ((v as { state?: unknown }).state ?? v) as Record<string, unknown>;
   const done =
@@ -76,7 +76,7 @@ function readLocal() {
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && (k === LESSONS_KEY || LAB_KEY.test(k))) entries.push([k, localStorage.getItem(k) ?? ""]);
+      if (k && (k === LESSONS_KEY || DRILL_KEY.test(k))) entries.push([k, localStorage.getItem(k) ?? ""]);
     }
   } catch {
     return EMPTY;
@@ -86,19 +86,19 @@ function readLocal() {
   if (cache && cache.raw === raw) return cache;
 
   let lessons: string[] = [];
-  const labs = new Map<string, { v: number; p: LabProgress }>();
+  const drills = new Map<string, { v: number; p: DrillProgress }>();
   for (const [k, val] of entries) {
     if (k === LESSONS_KEY) {
       lessons = parseLessons(safeParse(val));
       continue;
     }
-    const m = LAB_KEY.exec(k);
+    const m = DRILL_KEY.exec(k);
     if (!m) continue;
-    const p = parseLab(m[1], safeParse(val));
+    const p = parseDrill(m[1], safeParse(val));
     const v = Number(m[2]);
-    if (p && (!labs.has(m[1]) || labs.get(m[1])!.v < v)) labs.set(m[1], { v, p });
+    if (p && (!drills.has(m[1]) || drills.get(m[1])!.v < v)) drills.set(m[1], { v, p });
   }
-  cache = { raw, lessons, labs: [...labs.values()].map((x) => x.p) };
+  cache = { raw, lessons, drills: [...drills.values()].map((x) => x.p) };
   return cache;
 }
 
@@ -132,18 +132,18 @@ export function useServerProgress() {
     queryFn: () => getJson<{ lessons: string[] }>("/api/progress"),
     enabled: signedIn,
   });
-  const labs = useQuery({
-    queryKey: ["site", "progress", "labs", session?.user.id],
-    queryFn: () => getJson<{ labs: ServerLab[] }>("/api/labs/progress"),
+  const drills = useQuery({
+    queryKey: ["site", "progress", "drills", session?.user.id],
+    queryFn: () => getJson<{ drills: ServerDrill[] }>("/api/drills/progress"),
     enabled: signedIn,
   });
   return {
     signedIn,
     sessionPending: isPending,
     user: session?.user ?? null,
-    loading: signedIn && (lessons.isPending || labs.isPending),
+    loading: signedIn && (lessons.isPending || drills.isPending),
     lessons: lessons.data?.lessons ?? [],
-    labs: labs.data?.labs ?? [],
+    drills: drills.data?.drills ?? [],
   };
 }
 
@@ -154,11 +154,11 @@ export function useProgress() {
 
   const lessons = new Set([...local.lessons, ...server.lessons]);
 
-  const labs = new Map<string, LabProgress>();
-  for (const l of local.labs) labs.set(l.slug, l);
-  for (const s of server.labs) {
-    const l = labs.get(s.slug);
-    labs.set(s.slug, {
+  const drills = new Map<string, DrillProgress>();
+  for (const l of local.drills) drills.set(l.slug, l);
+  for (const s of server.drills) {
+    const l = drills.get(s.slug);
+    drills.set(s.slug, {
       slug: s.slug,
       stepsDone: Math.max(s.stepsDone, l?.stepsDone ?? 0),
       totalSteps: s.totalSteps ?? l?.totalSteps ?? null,
@@ -167,10 +167,10 @@ export function useProgress() {
     });
   }
 
-  return { ...server, lessons, labs };
+  return { ...server, lessons, drills };
 }
 
-export function labPercent(p: LabProgress | undefined) {
+export function drillPercent(p: DrillProgress | undefined) {
   if (!p) return 0;
   if (p.completedAt) return 100;
   if (!p.totalSteps) return p.stepsDone > 0 ? 5 : 0;

@@ -19,7 +19,7 @@ export type Constraint =
   | { type: "asyncOnTime"; min: number }
   /** Flow steps: share of one flow's requests that succeed. */
   | { type: "flowSuccess"; flow: string; min: number; label?: string }
-  /** A lab-defined check (see DesignStep.customChecks); never graded by `grade`. */
+  /** A drill-defined check (see DesignStep.customChecks); never graded by `grade`. */
   | { type: "custom"; id: string; label: string };
 
 export type Metrics = {

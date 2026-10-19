@@ -5,10 +5,10 @@ import { Faq } from "@/components/home/faq";
 import { HeroDiagram } from "@/components/home/hero-diagram";
 import { HowItWorks } from "@/components/home/how-it-works";
 import { Eyebrow, Section } from "@/components/home/section";
-import { LabCard } from "@/components/site/lab-card";
+import { DrillCard } from "@/components/site/drill-card";
 import { TrackedLink } from "@/components/site/tracked-link";
 import { allLessons, courseStats } from "@/content/course";
-import { labCatalog } from "@/content/labs/catalog";
+import { drillCatalog } from "@/content/drills/catalog";
 import { SITE } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -16,9 +16,9 @@ export const metadata: Metadata = {
   description: SITE.description,
 };
 
-const liveLabs = labCatalog.filter((l) => l.status === "live");
-const previewLabs = [...liveLabs, ...labCatalog.filter((l) => l.status === "soon")].slice(0, 6);
-const firstLab = liveLabs[0]?.slug ?? "url-shortener";
+const liveDrills = drillCatalog.filter((l) => l.status === "live");
+const previewDrills = [...liveDrills, ...drillCatalog.filter((l) => l.status === "soon")].slice(0, 6);
+const firstDrill = liveDrills[0]?.slug ?? "url-shortener";
 
 const stats = [
   {
@@ -32,9 +32,9 @@ const stats = [
     note: "short, visual, hands-on",
   },
   {
-    value: labCatalog.length,
+    value: drillCatalog.length,
     label: "product drills",
-    note: `${liveLabs.length} live, more shipping`,
+    note: `${liveDrills.length} live, more shipping`,
   },
   {
     value: `${Math.round(courseStats.minutes / 60)}h`,
@@ -87,7 +87,7 @@ export default function Home() {
               <TrackedLink href="/learn" location="home_hero" size="lg">
                 Start learning <ArrowRight className="size-4" aria-hidden />
               </TrackedLink>
-              <TrackedLink href={`/drills/${firstLab}`} location="home_hero" variant="secondary" size="lg">
+              <TrackedLink href={`/drills/${firstDrill}`} location="home_hero" variant="secondary" size="lg">
                 Try the URL shortener drill
               </TrackedLink>
             </div>
@@ -156,20 +156,20 @@ export default function Home() {
       </Section>
 
       <Section
-        id="labs"
+        id="drills"
         className="border-t border-line"
         eyebrow="Product drills"
         title="Design the products you use every day."
         intro="Each drill is a product brief, a blank canvas and a simulator. Design the API, the schema and the architecture, then watch it hold up, or not, as the traffic climbs."
         action={
-          <TrackedLink href="/drills" location="home_labs" variant="outline" size="sm">
-            All {labCatalog.length} drills <ArrowRight className="size-3.5" aria-hidden />
+          <TrackedLink href="/drills" location="home_drills" variant="outline" size="sm">
+            All {drillCatalog.length} drills <ArrowRight className="size-3.5" aria-hidden />
           </TrackedLink>
         }
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {previewLabs.map((lab) => (
-            <LabCard key={lab.slug} lab={lab} location="home_labs" />
+          {previewDrills.map((drill) => (
+            <DrillCard key={drill.slug} drill={drill} location="home_drills" />
           ))}
         </div>
       </Section>
@@ -253,7 +253,7 @@ export default function Home() {
               <TrackedLink href="/learn" location="home_final" size="lg">
                 Start learning <ArrowRight className="size-4" aria-hidden />
               </TrackedLink>
-              <TrackedLink href={`/drills/${firstLab}`} location="home_final" variant="secondary" size="lg">
+              <TrackedLink href={`/drills/${firstDrill}`} location="home_final" variant="secondary" size="lg">
                 Jump into a drill
               </TrackedLink>
             </div>

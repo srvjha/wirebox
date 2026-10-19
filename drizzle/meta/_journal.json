@@ -15,6 +15,13 @@
       "when": 1792327917204,
       "tag": "0001_massive_puma",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792425707053,
+      "tag": "0002_rename_to_drills",
+      "breakpoints": true
     }
   ]
 }

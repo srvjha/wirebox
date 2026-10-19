@@ -102,7 +102,7 @@ describe("rate limiter", () => {
   });
 });
 
-// Lab calibration: these mirror the URL shortener lab's steps.
+// Drill calibration: these mirror the URL shortener drill's steps.
 const launch: Scenario = { load: { reads: 500, writes: 20, attack: 0 } };
 const vertical: Scenario = { load: { reads: 11_500, writes: 500, attack: 0 } };
 const horizontal: Scenario = { load: { reads: 24_700, writes: 300, attack: 0 } };
@@ -110,7 +110,7 @@ const big = { reads: 58_800, writes: 1_200, attack: 0 };
 const fast: Constraint = { type: "p99", maxMs: 100 };
 const ok999: Constraint = { type: "successRate", min: 0.999 };
 
-describe("URL shortener lab calibration", () => {
+describe("URL shortener drill calibration", () => {
   it("launch: one small server and one database pass", () => {
     const r = test({}, launch, [ok999, fast, { type: "budget", maxUsd: 400 }]);
     expect(failing(r)).toEqual([]);

@@ -100,7 +100,7 @@ export type FlowTestResult = Omit<TestResult, "steady" | "timeline"> & {
   timeline: FlowTimeline | null;
 };
 
-/** Flow-step counterpart of `runTest`. Custom checks are added by the caller (see lib/lab/run.ts). */
+/** Flow-step counterpart of `runTest`. Custom checks are added by the caller (see lib/drill/run.ts). */
 export function runFlowTest(input: FlowTestInput): FlowTestResult {
   const base = {
     nodes: input.nodes,

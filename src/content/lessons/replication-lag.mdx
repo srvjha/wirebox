@@ -1,4 +1,4 @@
-import { ReplicationLagLab } from "@/components/visuals/replication-lag-lab"
+import { ReplicationLagDrill } from "@/components/visuals/replication-lag-drill"
 
 Maya buys a ticket for Saturday's comedy night. The payment page says "Booked!", she taps "My tickets", and the page says she has none. She buys again. Nothing is wrong with the code, and nothing is lost. The write went to the primary and the read went to a replica that hasn't heard about it yet.
 
@@ -30,7 +30,7 @@ Notice that nothing here is a bug in the database. The system is **eventually co
 
 Set the lag to about a second, choose "No fix" and press the quick button. You will see the missing ticket. Then switch through the fixes with the same lag.
 
-<ReplicationLagLab />
+<ReplicationLagDrill />
 
 Which fix worked every time? What did the others cost? Set the lag to 0 for a moment and notice that the problem vanishes. That is why this bug hides in development, where there's one database, and appears in production under load.
 

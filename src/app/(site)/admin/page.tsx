@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ExternalLink } from "lucide-react";
 import { getLesson } from "@/content/course";
-import { getLabMeta } from "@/content/labs/catalog";
+import { getDrillMeta } from "@/content/drills/catalog";
 import { getServerSession, isAdmin } from "@/lib/session";
 import { formatNumber } from "@/lib/utils";
 import { getAdminStats, type AdminStats } from "./queries";
@@ -134,13 +134,13 @@ function Dashboard({ s }: { s: AdminStats }) {
         </Card>
 
         <Card title="Drills">
-          {s.labs.length === 0 ? (
+          {s.drills.length === 0 ? (
             <Empty>No synced drill progress yet.</Empty>
           ) : (
             <Table
               head={["Drill", "Started", "Completed", "Rate"]}
-              rows={s.labs.map((l) => [
-                getLabMeta(l.lab)?.product ?? l.lab,
+              rows={s.drills.map((l) => [
+                getDrillMeta(l.drill)?.product ?? l.drill,
                 formatNumber(l.started),
                 formatNumber(l.completed),
                 pct(l.completed, l.started),
@@ -160,7 +160,7 @@ function Dashboard({ s }: { s: AdminStats }) {
             <Table
               head={["Drill · step", "Runs", "Pass rate", "Median p99"]}
               rows={s.loadTests.byStep.map((r) => [
-                `${getLabMeta(r.lab)?.product ?? r.lab} · ${r.step}`,
+                `${getDrillMeta(r.drill)?.product ?? r.drill} · ${r.step}`,
                 formatNumber(r.n),
                 pct(r.passed, r.n),
                 `${Math.round(r.p99)} ms`,

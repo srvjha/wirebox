@@ -21,7 +21,7 @@ const subscribeHash = (cb: () => void) => {
 export function ContinueButton({ parts, className }: { parts: NavPart[]; className?: string }) {
   const { completed, hydrated } = useLessonProgress();
   const last = useSyncExternalStore(noop, () => readKey(LAST_LESSON_KEY), () => null);
-  const lessons = parts.flatMap((p) => p.modules.flatMap((m) => m.lessons)).filter((l) => l.live && l.kind !== "lab");
+  const lessons = parts.flatMap((p) => p.modules.flatMap((m) => m.lessons)).filter((l) => l.live && l.kind !== "drill");
   const started = hydrated && (completed.size > 0 || !!last);
   const lastLesson = lessons.find((l) => l.slug === last && !completed.has(l.slug));
   const target: NavLesson | undefined = lastLesson ?? lessons.find((l) => !completed.has(l.slug)) ?? lessons[0];

@@ -9,9 +9,9 @@ export type NavLesson = {
   summary: string;
   /** "3.2" style number */
   n: string;
-  /** Written (MDX exists) or, for labs, playable. */
+  /** Written (MDX exists) or, for drills, playable. */
   live: boolean;
-  /** /learn/<slug>, or /labs/<lab> for lab lessons. */
+  /** /learn/<slug>, or /drills/<drill> for drill lessons. */
   href: string;
 };
 
