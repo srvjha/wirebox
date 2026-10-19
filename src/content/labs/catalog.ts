@@ -95,7 +95,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "hard",
     minutes: 65,
     concepts: ["Idempotency keys", "Outbox", "Reconciliation"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "ride-dispatch",
