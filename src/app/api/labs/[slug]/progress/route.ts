@@ -18,8 +18,8 @@ const MAX_STATE_BYTES = 200_000;
 export async function GET(_req: Request, ctx: RouteContext<"/api/labs/[slug]/progress">) {
   const { slug } = await ctx.params;
   const session = await getServerSession();
-  if (!session) return Response.json({ error: "Sign in to sync lab progress." }, { status: 401 });
-  if (!getLab(slug)) return Response.json({ error: "Unknown lab." }, { status: 404 });
+  if (!session) return Response.json({ error: "Sign in to sync drill progress." }, { status: 401 });
+  if (!getLab(slug)) return Response.json({ error: "Unknown drill." }, { status: 404 });
 
   const [row] = await db
     .select()
@@ -38,9 +38,9 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/labs/[slug]/pro
 export async function PUT(req: Request, ctx: RouteContext<"/api/labs/[slug]/progress">) {
   const { slug } = await ctx.params;
   const session = await getServerSession();
-  if (!session) return Response.json({ error: "Sign in to sync lab progress." }, { status: 401 });
+  if (!session) return Response.json({ error: "Sign in to sync drill progress." }, { status: 401 });
   const lab = getLab(slug);
-  if (!lab) return Response.json({ error: "Unknown lab." }, { status: 404 });
+  if (!lab) return Response.json({ error: "Unknown drill." }, { status: 404 });
 
   const text = await req.text();
   if (text.length > MAX_STATE_BYTES) return Response.json({ error: "Progress is too large." }, { status: 413 });
@@ -53,7 +53,7 @@ export async function PUT(req: Request, ctx: RouteContext<"/api/labs/[slug]/prog
   const parsed = body.safeParse(json);
   if (!parsed.success) return Response.json({ error: "Invalid progress." }, { status: 400 });
   const { version, state, stepsDone, completedAt } = parsed.data;
-  if (version !== lab.version) return Response.json({ error: "This lab has a newer version." }, { status: 409 });
+  if (version !== lab.version) return Response.json({ error: "This drill has a newer version." }, { status: 409 });
 
   const now = new Date();
   const values = {

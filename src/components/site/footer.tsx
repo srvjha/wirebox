@@ -11,13 +11,13 @@ export function SiteFooter() {
         </div>
         <nav className="flex flex-wrap gap-x-5 gap-y-2 text-[13px] text-subtle sm:ml-auto">
           <Link href="/learn" className="hover:text-fg">Learn</Link>
-          <Link href="/labs" className="hover:text-fg">Labs</Link>
+          <Link href="/drills" className="hover:text-fg">Drills</Link>
           <Link href="/me" className="hover:text-fg">Your progress</Link>
           <Link href="/sign-in" className="hover:text-fg">Sign in</Link>
         </nav>
       </div>
       <p className="mx-auto max-w-6xl px-4 pb-8 text-[12px] text-subtle sm:px-6">
-        Labs are modeled on well-known products for teaching. Wirebox isn&apos;t affiliated with any of them.
+        Drills are modeled on well-known products for teaching. Wirebox isn&apos;t affiliated with any of them.
       </p>
     </footer>
   );

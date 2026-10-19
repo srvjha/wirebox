@@ -105,7 +105,7 @@ export default function OpengraphImage() {
         <span style={{ color: C.subtle }}>·</span>
         <span>{courseStats.lessons} lessons</span>
         <span style={{ color: C.subtle }}>·</span>
-        <span>{labCatalog.length} product labs</span>
+        <span>{labCatalog.length} product drills</span>
         <span style={{ color: C.subtle }}>·</span>
         <span>{hours} hours</span>
         <span style={{ marginLeft: "auto", color: C.subtle }}>No paywall. No trial.</span>

@@ -117,7 +117,7 @@ export function LabCard({
           </span>
           {live && (
             <span className="ml-auto inline-flex items-center gap-1 font-medium text-fg transition-colors group-hover:text-accent">
-              Open lab <ArrowUpRight className="size-3.5" aria-hidden />
+              Open drill <ArrowUpRight className="size-3.5" aria-hidden />
             </span>
           )}
         </div>
@@ -132,7 +132,7 @@ export function LabCard({
   return (
     <TrackedLink
       plain
-      href={`/labs/${lab.slug}`}
+      href={`/drills/${lab.slug}`}
       location={location}
       className={cn(
         base,

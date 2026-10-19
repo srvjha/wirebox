@@ -15,7 +15,7 @@ function Card({ link, dir }: { link: NeighbourLink; dir: "prev" | "next" }) {
     >
       <span className="flex items-center gap-1.5 font-mono text-[11px] tracking-wider text-subtle uppercase">
         {dir === "prev" && <ArrowLeft className="size-3.5 transition-transform group-hover:-translate-x-0.5" />}
-        {dir === "prev" ? "Previous" : isLab ? "Next · Lab" : "Next"}
+        {dir === "prev" ? "Previous" : isLab ? "Next · Drill" : "Next"}
         {dir === "next" && <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />}
       </span>
       <span className="text-[15px] font-medium text-fg">

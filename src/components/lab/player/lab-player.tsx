@@ -95,8 +95,8 @@ function Player({ lab, store }: { lab: Lab; store: LabStore }) {
           <LogoMark className="size-5" />
         </Link>
         <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px]">
-          <Link href="/labs" className="text-muted hover:text-fg">
-            Labs
+          <Link href="/drills" className="text-muted hover:text-fg">
+            Drills
           </Link>
           <span className="text-subtle">/</span>
           <span className="truncate font-medium text-fg">{lab.product}</span>
@@ -106,7 +106,7 @@ function Player({ lab, store }: { lab: Lab; store: LabStore }) {
           <span className="shrink-0 font-mono text-[11px] text-muted">
             Step {index + 1} of {steps.length}
           </span>
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Lab progress">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Drill progress">
             <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${progress * 100}%` }} />
           </div>
         </div>
@@ -115,20 +115,20 @@ function Player({ lab, store }: { lab: Lab; store: LabStore }) {
           <span className="font-mono text-[11px] text-muted md:hidden">
             {index + 1}/{steps.length}
           </span>
-          <SyncBadge status={sync} returnTo={`/labs/${lab.slug}`} />
+          <SyncBadge status={sync} returnTo={`/drills/${lab.slug}`} />
           <div className="relative">
             <button
               type="button"
               onClick={() => setConfirmReset((o) => !o)}
               className="grid size-8 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg"
-              aria-label="Reset lab"
-              title="Reset lab"
+              aria-label="Reset drill"
+              title="Reset drill"
             >
               <RotateCcw className="size-4" />
             </button>
             {confirmReset && (
               <div className="absolute right-0 z-50 mt-2 w-64 rounded-xl border border-line bg-surface p-3 shadow-card">
-                <p className="text-[13px] font-medium text-fg">Start this lab over?</p>
+                <p className="text-[13px] font-medium text-fg">Start this drill over?</p>
                 <p className="mt-1 text-[12.5px] text-muted">Your API, schema, canvas and passed steps will be cleared.</p>
                 <div className="mt-3 flex gap-2">
                   <button
@@ -140,7 +140,7 @@ function Player({ lab, store }: { lab: Lab; store: LabStore }) {
                     }}
                     className="h-8 rounded-lg bg-err px-3 text-[12.5px] font-medium text-white hover:opacity-90"
                   >
-                    Reset lab
+                    Reset drill
                   </button>
                   <button type="button" onClick={() => setConfirmReset(false)} className="h-8 rounded-lg px-3 text-[12.5px] text-muted hover:bg-surface-2">
                     Cancel

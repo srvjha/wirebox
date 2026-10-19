@@ -359,7 +359,7 @@ export const pastebin: Lab = {
       ],
       after: (
         <p>
-          Same pattern as every choice in this lab: there&apos;s no free option, only a place to put the cost. Note how the
+          Same pattern as every choice in this drill: there&apos;s no free option, only a place to put the cost. Note how the
           unique id in your schema made the random option safe: the database enforces what the code only hopes.
         </p>
       ),

@@ -149,7 +149,7 @@ export const urlShortener: Lab = {
       after: (
         <p>
           Notice what the unique slug buys you: the database itself refuses a duplicate, so no bug in your code can ever point
-          one short link at two URLs. In this lab every engine gets the same per-machine numbers, so your pick won&apos;t change
+          one short link at two URLs. In this drill every engine gets the same per-machine numbers, so your pick won&apos;t change
           the load tests, but it will show up on the canvas.
         </p>
       ),
@@ -425,7 +425,7 @@ export const urlShortener: Lab = {
       body: (
         <>
           <p>
-            One question has been waiting all lab: how does the server pick <code>x7Kp2Qa</code>? Seven characters from a–z, A–Z
+            One question has been waiting all drill: how does the server pick <code>x7Kp2Qa</code>? Seven characters from a–z, A–Z
             and 0–9 give 62<sup>7</sup> ≈ <strong>3.5 trillion</strong> codes. Ten years of links is about 12 billion, a tiny
             fraction. The question is how to pick one that&apos;s free, fast, across many servers at once.
           </p>

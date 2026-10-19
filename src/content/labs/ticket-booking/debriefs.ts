@@ -34,7 +34,7 @@ export const DEBRIEFS = {
     const p = parts(ctx);
     return [
       `Your one ${p.size.vcpu} vCPU server runs at ${pct(p.peak)} and the database at ${pct(p.dbUtil)}. A first gig is a few hundred people, so the boring design is the right one, and it costs ${usd(p.cost)} a month.`,
-      "Nothing here can sell a seat twice yet, because nothing is concurrent yet. That is the trap: the bugs this lab is about only appear when many people want the same row.",
+      "Nothing here can sell a seat twice yet, because nothing is concurrent yet. That is the trap: the bugs this drill is about only appear when many people want the same row.",
     ];
   },
   onsale(ctx: DebriefContext) {

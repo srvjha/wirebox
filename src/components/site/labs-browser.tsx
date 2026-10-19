@@ -65,7 +65,7 @@ function LabProgressBar({ p }: { p: LabProgress | undefined }) {
         aria-valuenow={pct}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label="Lab progress"
+        aria-label="Drill progress"
       >
         <div className={cn("h-full rounded-full", done ? "bg-ok" : "bg-accent")} style={{ width: `${pct}%` }} />
       </div>
@@ -118,7 +118,7 @@ export function LabsBrowser({ labs }: { labs: LabMeta[] }) {
 
       {shown.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-line-strong px-6 py-16 text-center">
-          <p className="text-[15px] text-fg">No labs match those filters yet.</p>
+          <p className="text-[15px] text-fg">No drills match those filters yet.</p>
           <button
             type="button"
             onClick={() => {

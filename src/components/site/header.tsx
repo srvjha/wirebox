@@ -5,7 +5,7 @@ import { UserMenu } from "./user-menu";
 
 const nav = [
   { href: "/learn", label: "Learn" },
-  { href: "/labs", label: "Labs" },
+  { href: "/drills", label: "Drills" },
 ];
 
 export function SiteHeader() {

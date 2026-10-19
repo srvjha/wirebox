@@ -18,7 +18,7 @@ export async function POST(req: Request, ctx: RouteContext<"/api/labs/[slug]/run
   const { slug } = await ctx.params;
   const session = await getServerSession();
   if (!session) return Response.json({ error: "Sign in to record runs." }, { status: 401 });
-  if (!getLab(slug)) return Response.json({ error: "Unknown lab." }, { status: 404 });
+  if (!getLab(slug)) return Response.json({ error: "Unknown drill." }, { status: 404 });
 
   const parsed = body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid run." }, { status: 400 });

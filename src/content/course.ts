@@ -84,7 +84,7 @@ export const course: PartMeta[] = [
           L("sql-vs-nosql", "SQL or NoSQL?", 11, "What each kind of database is good at, and how to choose."),
           L("indexes", "Indexes", 11, "Why one query takes 2 ms and another takes 2 seconds.", "visual"),
           L("latency-numbers", "Latency numbers to know", 8, "How long memory, disk and network actually take.", "visual"),
-          L("lab-url-shortener", "Lab: design a URL shortener", 50, "Design, scale and break a link shortener, from one server to 50,000 requests a second.", "lab", "url-shortener"),
+          L("lab-url-shortener", "Drill: design a URL shortener", 50, "Design, scale and break a link shortener, from one server to 50,000 requests a second.", "lab", "url-shortener"),
         ],
       },
       {

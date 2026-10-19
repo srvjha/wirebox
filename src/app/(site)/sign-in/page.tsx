@@ -38,14 +38,14 @@ export default function SignInPage() {
           Keep your progress on every device.
         </h1>
         <p className="mt-4 max-w-md text-[15.5px] leading-relaxed text-muted">
-          You never need an account to learn. Every lesson and lab works signed out, and your progress saves in this
+          You never need an account to learn. Every lesson and drill works signed out, and your progress saves in this
           browser.
         </p>
         <ul className="mt-8 max-w-md space-y-4 text-[14px] text-muted">
           <li className="flex gap-3">
             <Cloud className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
             <span>
-              <span className="text-fg">Sync.</span> Finished lessons and lab designs follow you from laptop to phone.
+              <span className="text-fg">Sync.</span> Finished lessons and drill designs follow you from laptop to phone.
             </span>
           </li>
           <li className="flex gap-3">

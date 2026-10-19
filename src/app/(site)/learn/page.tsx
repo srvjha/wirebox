@@ -55,7 +55,7 @@ export default function LearnPage() {
             <MousePointerClick className="size-3.5 text-info" /> Interactive: visuals you can poke
           </li>
           <li className="inline-flex items-center gap-1.5">
-            <FlaskConical className="size-3.5 text-accent" /> Lab: design and load-test a product
+            <FlaskConical className="size-3.5 text-accent" /> Drill: design and load-test a product
           </li>
         </ul>
       </section>

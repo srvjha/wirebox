@@ -175,7 +175,7 @@ export const presence: Lab = {
           summary: "A full-duplex connection: heartbeats up, updates down, one socket.",
           pros: ["A lost connection is itself a presence signal", "Lowest overhead per message in both directions"],
           cons: ["Stateful: each user is pinned to a gateway", "Load balancers and deploys need care"],
-          when: "Chat, presence, collaboration, games. The one you'll use in this lab.",
+          when: "Chat, presence, collaboration, games. The one you'll use in this drill.",
         },
       ],
       after: (

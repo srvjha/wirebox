@@ -100,7 +100,7 @@ function LabRow({ p }: { p: LabProgress }) {
         <Bar pct={pct} tone={done ? "ok" : "accent"} label={`${meta?.title ?? p.slug} progress`} />
       </div>
       <TrackedLink
-        href={`/labs/${p.slug}`}
+        href={`/drills/${p.slug}`}
         location="me_labs"
         variant={done ? "ghost" : "secondary"}
         size="sm"
@@ -181,17 +181,17 @@ export function ProgressDashboard({ liveLessons }: { liveLessons: string[] }) {
           label="modules complete"
           sub={`of ${course.reduce((n, p) => n + p.modules.length, 0)}`}
         />
-        <Stat value={startedLabs.length} label="labs started" />
-        <Stat value={labsDone} label="labs completed" />
+        <Stat value={startedLabs.length} label="drills started" />
+        <Stat value={labsDone} label="drills completed" />
       </section>
 
       <section aria-labelledby="labs-title" className="mt-14">
         <div className="mb-4 flex items-center justify-between">
           <h2 id="labs-title" className="text-[20px] font-semibold tracking-tight text-fg">
-            Labs
+            Drills
           </h2>
-          <Link href="/labs" className="text-[13px] text-muted hover:text-fg">
-            All labs
+          <Link href="/drills" className="text-[13px] text-muted hover:text-fg">
+            All drills
           </Link>
         </div>
         {startedLabs.length > 0 ? (
@@ -204,12 +204,12 @@ export function ProgressDashboard({ liveLessons }: { liveLessons: string[] }) {
           <div className="flex flex-col gap-4 rounded-2xl border border-dashed border-line-strong p-5 sm:flex-row sm:items-center">
             <FlaskConical className="size-5 shrink-0 text-subtle" aria-hidden />
             <p className="flex-1 text-[14px] text-muted">
-              You haven&apos;t started a lab yet.
-              {suggestedLab && ` The ${suggestedLab.product.toLowerCase()} lab is a good first one.`}
+              You haven&apos;t started a drill yet.
+              {suggestedLab && ` The ${suggestedLab.product.toLowerCase()} drill is a good first one.`}
             </p>
             {suggestedLab && (
-              <TrackedLink href={`/labs/${suggestedLab.slug}`} location="me_labs" variant="secondary" size="sm">
-                Start the lab
+              <TrackedLink href={`/drills/${suggestedLab.slug}`} location="me_labs" variant="secondary" size="sm">
+                Start the drill
               </TrackedLink>
             )}
           </div>

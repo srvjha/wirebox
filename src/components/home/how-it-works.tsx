@@ -195,7 +195,7 @@ const steps = [
     icon: Hammer,
     verb: "Build it",
     title: "Design a real product",
-    body: "Labs hand you a product brief. You write the API, model the data and wire the architecture yourself, one checked step at a time.",
+    body: "Drills hand you a product brief. You write the API, model the data and wire the architecture yourself, one checked step at a time.",
     art: <BuildIt />,
   },
   {

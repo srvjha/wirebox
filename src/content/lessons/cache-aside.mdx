@@ -107,7 +107,7 @@ The usual choice is to **fail open**: if the cache call errors or takes longer t
 - **Use a short timeout on cache calls.** A cache that hangs for 5 seconds is worse than one that's down, because every request waits 5 seconds before falling back.
 - **Remember what lesson 3.1 said.** If your database is sized for the misses only, failing open sends it the full load. For short blips that's survivable. For a long outage at peak, you'll also need to shed load or serve a simpler page.
 
-In the URL shortener lab at [/labs/url-shortener](/labs/url-shortener) you'll add exactly this kind of cache in front of the redirect lookup, then run a load test to see how far it moves the database's breaking point.
+In the URL shortener drill at [/drills/url-shortener](/drills/url-shortener) you'll add exactly this kind of cache in front of the redirect lookup, then run a load test to see how far it moves the database's breaking point.
 
 ## Key takeaways
 

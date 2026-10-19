@@ -301,8 +301,8 @@ export const newsFeed: Lab = {
       ],
       after: (
         <p>
-          Whichever you pick, notice the pattern from this lab: <strong>decide what must be fresh, then move everything else
-          out of the request</strong>. The ranked-feed lab picks up exactly there.
+          Whichever you pick, notice the pattern from this drill: <strong>decide what must be fresh, then move everything else
+          out of the request</strong>. The ranked-feed drill picks up exactly there.
         </p>
       ),
     },

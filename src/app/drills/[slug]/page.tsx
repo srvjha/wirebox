@@ -11,7 +11,7 @@ export function generateStaticParams() {
   return labCatalog.map((l) => ({ slug: l.slug }));
 }
 
-export async function generateMetadata({ params }: PageProps<"/labs/[slug]">): Promise<Metadata> {
+export async function generateMetadata({ params }: PageProps<"/drills/[slug]">): Promise<Metadata> {
   const { slug } = await params;
   const meta = getLabMeta(slug);
   if (!meta) return {};
@@ -19,7 +19,7 @@ export async function generateMetadata({ params }: PageProps<"/labs/[slug]">): P
 }
 
 // Params are read inside Suspense so navigation stays instant; pages are still prerendered.
-export default function LabPage({ params }: PageProps<"/labs/[slug]">) {
+export default function LabPage({ params }: PageProps<"/drills/[slug]">) {
   return (
     <Suspense fallback={<div className="min-h-dvh bg-bg" aria-hidden />}>
       {params.then(({ slug }) => (

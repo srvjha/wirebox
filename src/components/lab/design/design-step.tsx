@@ -145,7 +145,7 @@ export function DesignStepView({ lab, step, index, store, onNext }: Props) {
     return step.debrief({ graph, configs, result: live.result, dbLabel: live.dbLabel, clientCached: live.clientCached });
   }, [live, step, graph, configs]);
 
-  const returnTo = `/labs/${lab.slug}`;
+  const returnTo = `/drills/${lab.slug}`;
 
   return (
     <div className="flex min-h-full flex-col lg:h-full lg:flex-row">

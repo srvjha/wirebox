@@ -15,7 +15,7 @@ export type LabProgressSummary = {
 /** Every lab the signed-in learner has touched. The /me page relies on this shape. */
 export async function GET() {
   const session = await getServerSession();
-  if (!session) return Response.json({ error: "Sign in to see lab progress." }, { status: 401 });
+  if (!session) return Response.json({ error: "Sign in to see drill progress." }, { status: 401 });
 
   const rows = await db
     .select({

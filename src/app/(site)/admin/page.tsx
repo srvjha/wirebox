@@ -81,7 +81,7 @@ function Dashboard({ s }: { s: AdminStats }) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi label="Total users" value={s.users.total} sub={`+ ${s.users.guests} guest sessions`} />
         <Kpi label="New, last 24h" value={s.users.d1} sub={`${s.users.d7} in 7d · ${s.users.d30} in 30d`} />
-        <Kpi label="Active learners, 7d" value={s.activeLearners7d} sub="lesson, lab or load test" />
+        <Kpi label="Active learners, 7d" value={s.activeLearners7d} sub="lesson, drill or load test" />
         <Kpi label="AI postmortems" value={s.postmortems.n} sub={`${s.postmortems.users} learners`} />
       </div>
 
@@ -133,12 +133,12 @@ function Dashboard({ s }: { s: AdminStats }) {
           )}
         </Card>
 
-        <Card title="Labs">
+        <Card title="Drills">
           {s.labs.length === 0 ? (
-            <Empty>No synced lab progress yet.</Empty>
+            <Empty>No synced drill progress yet.</Empty>
           ) : (
             <Table
-              head={["Lab", "Started", "Completed", "Rate"]}
+              head={["Drill", "Started", "Completed", "Rate"]}
               rows={s.labs.map((l) => [
                 getLabMeta(l.lab)?.product ?? l.lab,
                 formatNumber(l.started),
@@ -158,7 +158,7 @@ function Dashboard({ s }: { s: AdminStats }) {
             <Empty>No load tests run yet.</Empty>
           ) : (
             <Table
-              head={["Lab · step", "Runs", "Pass rate", "Median p99"]}
+              head={["Drill · step", "Runs", "Pass rate", "Median p99"]}
               rows={s.loadTests.byStep.map((r) => [
                 `${getLabMeta(r.lab)?.product ?? r.lab} · ${r.step}`,
                 formatNumber(r.n),
@@ -172,7 +172,7 @@ function Dashboard({ s }: { s: AdminStats }) {
 
       <p className="flex flex-wrap items-center gap-1.5 pt-2 text-[13px] text-subtle">
         These numbers come from Postgres and only cover signed-in learners. Behavioural analytics (page views, funnels,
-        lesson and lab events, session replays) live in PostHog.
+        lesson and drill events, session replays) live in PostHog.
         {posthogHost && (
           <a
             href={posthogHost}

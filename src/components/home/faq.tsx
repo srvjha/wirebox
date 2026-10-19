@@ -10,7 +10,7 @@ const faqs: { q: string; a: ReactNode }[] = [
     q: "Is it really free?",
     a: (
       <>
-        Yes. Every lesson, every lab and every load test. There is no trial, no premium tier and nothing to unlock
+        Yes. Every lesson, every drill and every load test. There is no trial, no premium tier and nothing to unlock
         later. We will never ask for a card.
       </>
     ),
@@ -34,10 +34,10 @@ const faqs: { q: string; a: ReactNode }[] = [
     ),
   },
   {
-    q: "How do the labs work?",
+    q: "How do the drills work?",
     a: (
       <>
-        Each lab gives you a product brief, say a URL shortener. You write its API, model its data and wire up an
+        Each drill gives you a product brief, say a URL shortener. You write its API, model its data and wire up an
         architecture on a canvas. Then a simulator load-tests your design, step by step, from a handful of users to tens
         of thousands of requests a second. When something breaks, you get a debrief explaining why, and you fix it.
       </>
@@ -47,7 +47,7 @@ const faqs: { q: string; a: ReactNode }[] = [
     q: "Will this help with system design interviews?",
     a: (
       <>
-        It should. The labs follow the same loop interviewers look for: requirements, estimates, a high-level design,
+        It should. The drills follow the same loop interviewers look for: requirements, estimates, a high-level design,
         then deep dives into the parts that hurt. We just teach it for real systems first, so the interview is the easy
         part.
       </>
@@ -57,7 +57,7 @@ const faqs: { q: string; a: ReactNode }[] = [
     q: "How long does the course take?",
     a: (
       <>
-        About {hours} hours across {courseStats.lessons} lessons in {courseStats.modules} modules, plus the labs. Most
+        About {hours} hours across {courseStats.lessons} lessons in {courseStats.modules} modules, plus the drills. Most
         lessons take ten minutes or so. Go at whatever pace suits you; your place is saved.
       </>
     ),

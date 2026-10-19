@@ -1,7 +1,7 @@
 import type { Column, DbEngine, SchemaCheck, SchemaDesign, Table } from "../../../lib/lab/types";
 
 export const ENGINES: DbEngine[] = [
-  { id: "postgres", label: "Postgres", family: "SQL", blurb: "Relational, transactional, great constraints.", fit: "A unique (user, post) vote constraint comes free. Hot counters need care (see the labs), but it's a comfortable default." },
+  { id: "postgres", label: "Postgres", family: "SQL", blurb: "Relational, transactional, great constraints.", fit: "A unique (user, post) vote constraint comes free. Hot counters need care (see the drills), but it's a comfortable default." },
   { id: "mysql", label: "MySQL", family: "SQL", blurb: "Relational and ubiquitous.", fit: "Same tradeoffs as Postgres. Row-level locks on a hot counter row are the thing to watch." },
   { id: "cassandra", label: "Cassandra", family: "Wide-column", blurb: "Distributed counters and huge write throughput.", fit: "Counter columns absorb heavy increments across nodes. You give up transactions and ad-hoc ranking queries." },
   { id: "dynamodb", label: "DynamoDB", family: "Key-value", blurb: "Managed key-value, atomic counters.", fit: "Atomic ADD makes counters simple, but one hot key is still capped per partition. Shard the counter key." },

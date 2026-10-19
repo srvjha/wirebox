@@ -56,7 +56,7 @@ export function FinishStepView({ lab, step, index, store }: Props) {
   });
 
   return (
-    <StepFrame eyebrow="Lab complete" title={step.title} wide>
+    <StepFrame eyebrow="Drill complete" title={step.title} wide>
       <div className="flex flex-wrap items-center gap-3">
         <span className="grid size-12 place-items-center rounded-2xl bg-accent-soft text-accent">
           <Trophy className="size-6" />
@@ -136,11 +136,11 @@ export function FinishStepView({ lab, step, index, store }: Props) {
           </ul>
         </section>
         <section>
-          <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">Next lab</h2>
+          <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">Next drill</h2>
           <ul className="mt-3 space-y-2">
             {labs.map((l) => (
               <li key={l.slug}>
-                <Link href={`/labs/${l.slug}`} className="group flex items-center gap-3 rounded-xl border border-line bg-surface px-3.5 py-2.5 hover:border-line-strong">
+                <Link href={`/drills/${l.slug}`} className="group flex items-center gap-3 rounded-xl border border-line bg-surface px-3.5 py-2.5 hover:border-line-strong">
                   <FlaskConical className="size-4 text-info" />
                   <span className="flex-1">
                     <span className="block text-[14px] text-fg">{l.title}</span>
@@ -151,8 +151,8 @@ export function FinishStepView({ lab, step, index, store }: Props) {
               </li>
             ))}
           </ul>
-          <Link href="/labs" className="mt-3 inline-flex items-center gap-1 text-[13px] text-accent hover:underline">
-            All labs <ArrowRight className="size-3.5" />
+          <Link href="/drills" className="mt-3 inline-flex items-center gap-1 text-[13px] text-accent hover:underline">
+            All drills <ArrowRight className="size-3.5" />
           </Link>
         </section>
       </div>

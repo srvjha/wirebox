@@ -33,7 +33,7 @@ const stats = [
   },
   {
     value: labCatalog.length,
-    label: "product labs",
+    label: "product drills",
     note: `${liveLabs.length} live, more shipping`,
   },
   {
@@ -47,7 +47,7 @@ const principles = [
   {
     icon: CreditCard,
     title: "No paywall, no trial",
-    body: "Every lesson and lab is open. Nothing gets locked behind a plan later.",
+    body: "Every lesson and drill is open. Nothing gets locked behind a plan later.",
   },
   {
     icon: UserRoundX,
@@ -81,14 +81,14 @@ export default function Home() {
             </h1>
             <p className="mt-6 max-w-2xl text-[16.5px] leading-relaxed text-pretty text-muted sm:text-[18px]">
               Watch requests flow through living diagrams, turn the knobs yourself, then design real products and
-              load-test them until they break. Every lesson and every lab is free, for everyone, for good.
+              load-test them until they break. Every lesson and every drill is free, for everyone, for good.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
               <TrackedLink href="/learn" location="home_hero" size="lg">
                 Start learning <ArrowRight className="size-4" aria-hidden />
               </TrackedLink>
-              <TrackedLink href={`/labs/${firstLab}`} location="home_hero" variant="secondary" size="lg">
-                Try the URL shortener lab
+              <TrackedLink href={`/drills/${firstLab}`} location="home_hero" variant="secondary" size="lg">
+                Try the URL shortener drill
               </TrackedLink>
             </div>
             <p className="mt-4 text-[13px] text-subtle">No sign-up needed. Your progress saves in this browser.</p>
@@ -158,12 +158,12 @@ export default function Home() {
       <Section
         id="labs"
         className="border-t border-line"
-        eyebrow="Product labs"
+        eyebrow="Product drills"
         title="Design the products you use every day."
-        intro="Each lab is a product brief, a blank canvas and a simulator. Design the API, the schema and the architecture, then watch it hold up, or not, as the traffic climbs."
+        intro="Each drill is a product brief, a blank canvas and a simulator. Design the API, the schema and the architecture, then watch it hold up, or not, as the traffic climbs."
         action={
-          <TrackedLink href="/labs" location="home_labs" variant="outline" size="sm">
-            All {labCatalog.length} labs <ArrowRight className="size-3.5" aria-hidden />
+          <TrackedLink href="/drills" location="home_labs" variant="outline" size="sm">
+            All {labCatalog.length} drills <ArrowRight className="size-3.5" aria-hidden />
           </TrackedLink>
         }
       >
@@ -253,8 +253,8 @@ export default function Home() {
               <TrackedLink href="/learn" location="home_final" size="lg">
                 Start learning <ArrowRight className="size-4" aria-hidden />
               </TrackedLink>
-              <TrackedLink href={`/labs/${firstLab}`} location="home_final" variant="secondary" size="lg">
-                Jump into a lab
+              <TrackedLink href={`/drills/${firstLab}`} location="home_final" variant="secondary" size="lg">
+                Jump into a drill
               </TrackedLink>
             </div>
           </div>

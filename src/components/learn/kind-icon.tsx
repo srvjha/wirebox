@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 export const kindLabel: Record<LessonKind, string> = {
   read: "Read",
   visual: "Interactive",
-  lab: "Lab",
+  lab: "Drill",
 };
 
 const icons = { read: BookOpen, visual: MousePointerClick, lab: FlaskConical } as const;

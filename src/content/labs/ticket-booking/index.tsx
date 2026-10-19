@@ -374,7 +374,7 @@ export const ticketBooking: Lab = {
           You sized for a ten-second spike, kept bots out with a waiting room, made seat claims atomic, let a worker give abandoned
           seats back and put a queue, backoff and idempotency key between your customers and a flaky provider. The pattern repeats
           across the whole domain of money and inventory: <strong>make the claim atomic, expire what is not confirmed, and make
-          every retry safe.</strong> The next lab, payments, goes deeper on that last part.
+          every retry safe.</strong> The next drill, payments, goes deeper on that last part.
         </p>
       ),
     },

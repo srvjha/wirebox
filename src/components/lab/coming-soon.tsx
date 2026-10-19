@@ -14,8 +14,8 @@ export function ComingSoon({ lab }: { lab: LabMeta }) {
           <LogoMark className="size-5" />
         </Link>
         <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px]">
-          <Link href="/labs" className="text-muted hover:text-fg">
-            Labs
+          <Link href="/drills" className="text-muted hover:text-fg">
+            Drills
           </Link>
           <span className="text-subtle">/</span>
           <span className="font-medium text-fg">{lab.product}</span>
@@ -42,16 +42,16 @@ export function ComingSoon({ lab }: { lab: LabMeta }) {
           </ul>
           <p className="mt-6 text-[14px] leading-relaxed text-muted">
             We&apos;re still calibrating the simulator for this one (about {lab.minutes} minutes when it lands).
-            {live.length > 0 && " Meanwhile, the live labs use the same canvas and load tests."}
+            {live.length > 0 && " Meanwhile, the live drills use the same canvas and load tests."}
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
             {live.map((l) => (
-              <LinkButton key={l.slug} href={`/labs/${l.slug}`}>
-                Try the {l.product.toLowerCase()} lab
+              <LinkButton key={l.slug} href={`/drills/${l.slug}`}>
+                Try the {l.product.toLowerCase()} drill
               </LinkButton>
             ))}
-            <LinkButton href="/labs" variant="secondary">
-              <ArrowLeft className="size-4" /> All labs
+            <LinkButton href="/drills" variant="secondary">
+              <ArrowLeft className="size-4" /> All drills
             </LinkButton>
           </div>
         </div>

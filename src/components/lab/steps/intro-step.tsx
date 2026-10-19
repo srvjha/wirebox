@@ -62,7 +62,7 @@ export function IntroStepView({ lab, step, onDone }: { lab: Lab; step: IntroStep
       </section>
 
       <section className="mt-10">
-        <h2 className="text-[18px] font-semibold text-fg">How this lab works</h2>
+        <h2 className="text-[18px] font-semibold text-fg">How this drill works</h2>
         <ol className="mt-4 grid gap-3 sm:grid-cols-2">
           {step.how.map((h, i) => (
             <li key={i} className="flex gap-3 rounded-xl border border-line bg-surface p-3.5">

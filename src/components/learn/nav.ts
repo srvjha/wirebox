@@ -5,7 +5,7 @@ import { liveLessonSlugs } from "@/content/lessons/live";
 import type { NavLesson, NavPart } from "./types";
 
 export function lessonHref(lesson: { slug: string; kind: string; lab?: string }) {
-  return lesson.kind === "lab" && lesson.lab ? `/labs/${lesson.lab}` : `/learn/${lesson.slug}`;
+  return lesson.kind === "lab" && lesson.lab ? `/drills/${lesson.lab}` : `/learn/${lesson.slug}`;
 }
 
 /** A lab lesson is live when its lab is; any other lesson when its MDX file exists. */

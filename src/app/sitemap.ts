@@ -10,13 +10,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: `${base}/`, changeFrequency: "weekly", priority: 1 },
     { url: `${base}/learn`, changeFrequency: "weekly", priority: 0.9 },
-    { url: `${base}/labs`, changeFrequency: "weekly", priority: 0.8 },
+    { url: `${base}/drills`, changeFrequency: "weekly", priority: 0.8 },
     ...allLessons
       .filter((l) => live.has(l.slug))
       .map((l) => ({ url: `${base}/learn/${l.slug}`, changeFrequency: "monthly" as const, priority: 0.7 })),
     ...labCatalog
       .filter((l) => l.status === "live")
-      .map((l) => ({ url: `${base}/labs/${l.slug}`, changeFrequency: "monthly" as const, priority: 0.7 })),
+      .map((l) => ({ url: `${base}/drills/${l.slug}`, changeFrequency: "monthly" as const, priority: 0.7 })),
     { url: `${base}/sign-in`, changeFrequency: "yearly", priority: 0.2 },
   ];
 }
