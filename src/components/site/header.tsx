@@ -10,15 +10,15 @@ const nav = [
 
 export function SiteHeader() {
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-bg/80 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:gap-6 sm:px-6">
+    <header className="sticky top-0 z-40 bg-bg">
+      <div className="flex h-14 items-center gap-3 px-5 sm:gap-8 sm:px-7">
         <Logo />
-        <nav className="flex items-center sm:gap-1">
+        <nav className="flex items-center gap-1 sm:gap-3">
           {nav.map((n) => (
             <Link
               key={n.href}
               href={n.href}
-              className="rounded-lg px-2.5 py-1.5 text-[13.5px] text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+              className="px-2 py-1.5 text-[17px] text-fg underline-offset-4 transition-colors hover:text-accent hover:underline"
             >
               {n.label}
             </Link>

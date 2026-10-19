@@ -20,7 +20,7 @@ type Node = {
 type Orientation = "wide" | "tall";
 
 const H = 52;
-const CYCLE = 12; // seconds per failure/recovery loop
+export const CYCLE = 12; // seconds per failure/recovery loop
 
 function layout(o: Orientation) {
   if (o === "wide") {

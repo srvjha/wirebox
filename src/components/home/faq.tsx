@@ -7,15 +7,6 @@ const hours = Math.round(courseStats.minutes / 60);
 
 const faqs: { q: string; a: ReactNode }[] = [
   {
-    q: "Is it really free?",
-    a: (
-      <>
-        Yes. Every lesson, every drill and every load test. There is no trial, no premium tier and nothing to unlock
-        later. We will never ask for a card.
-      </>
-    ),
-  },
-  {
     q: "Do I need an account?",
     a: (
       <>
@@ -79,17 +70,20 @@ const faqs: { q: string; a: ReactNode }[] = [
 
 export function Faq() {
   return (
-    <div className="divide-y divide-line rounded-2xl border border-line bg-surface">
+    <div className="space-y-4">
       {faqs.map((f) => (
-        <details key={f.q} className="group px-5 [&_summary::-webkit-details-marker]:hidden">
-          <summary className="flex cursor-pointer list-none items-center gap-4 py-4 text-[15px] font-medium text-fg outline-none focus-visible:text-accent">
+        <details
+          key={f.q}
+          className="group -mx-5 px-5 py-3 open:bg-surface-2 open:pb-6 sm:-mx-6 sm:px-6 [&_summary::-webkit-details-marker]:hidden"
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-6 py-2 text-[clamp(1.25rem,1.1rem+0.7vw,1.625rem)] text-fg outline-none hover:text-accent focus-visible:text-accent">
             <span className="flex-1">{f.q}</span>
             <ChevronDown
-              className="size-4 shrink-0 text-subtle transition-transform duration-200 group-open:rotate-180"
+              className="size-6 shrink-0 stroke-[1.5] text-fg transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
               aria-hidden
             />
           </summary>
-          <div className="pb-5 text-[14.5px] leading-relaxed text-muted">{f.a}</div>
+          <div className="mt-3 max-w-[48ch] text-[17px] leading-[1.55] text-fg">{f.a}</div>
         </details>
       ))}
     </div>

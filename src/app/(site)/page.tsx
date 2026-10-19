@@ -1,265 +1,346 @@
 import type { Metadata } from "next";
-import { ArrowRight, BadgeCheck, CreditCard, HeartHandshake, UserRoundX } from "lucide-react";
-import { CourseMap } from "@/components/home/course-map";
+import Image from "next/image";
 import { Faq } from "@/components/home/faq";
-import { HeroDiagram } from "@/components/home/hero-diagram";
-import { HowItWorks } from "@/components/home/how-it-works";
-import { Eyebrow, Section } from "@/components/home/section";
-import { DrillCard } from "@/components/site/drill-card";
+import { LiveSystem } from "@/components/home/live-system";
 import { TrackedLink } from "@/components/site/tracked-link";
-import { allLessons, courseStats } from "@/content/course";
-import { drillCatalog } from "@/content/drills/catalog";
-import { SITE } from "@/lib/utils";
+import { allLessons, course, courseStats } from "@/content/course";
+import { drillCatalog, getDrillMeta } from "@/content/drills/catalog";
+import { photos, selectorClip, type Photo } from "@/content/photos";
+import { cn, formatMinutes, SITE } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: { absolute: `${SITE.name} · Learn system design by building it` },
   description: SITE.description,
 };
 
-const liveDrills = drillCatalog.filter((l) => l.status === "live");
-const previewDrills = [...liveDrills, ...drillCatalog.filter((l) => l.status === "soon")].slice(0, 6);
+const liveDrills = drillCatalog.filter((d) => d.status === "live");
 const firstDrill = liveDrills[0]?.slug ?? "pastebin";
+const hours = Math.round(courseStats.minutes / 60);
 
-const stats = [
-  {
-    value: courseStats.modules,
-    label: "modules",
-    note: `in ${courseStats.parts} parts`,
-  },
-  {
-    value: courseStats.lessons,
-    label: "lessons",
-    note: "short, visual, hands-on",
-  },
-  {
-    value: drillCatalog.length,
-    label: "product drills",
-    note: `${liveDrills.length} live, more shipping`,
-  },
-  {
-    value: `${Math.round(courseStats.minutes / 60)}h`,
-    label: "of material",
-    note: "at your own pace",
-  },
-];
+/** The drills set as a line-up poster, headliners first. */
+const lineUp = ["ticket-booking", "chat", "payments", "video-platform", "collab-editor", "pastebin"]
+  .map(getDrillMeta)
+  .filter((d) => !!d);
 
-const principles = [
-  {
-    icon: CreditCard,
-    title: "No paywall, no trial",
-    body: "Every lesson and drill is open. Nothing gets locked behind a plan later.",
-  },
-  {
-    icon: UserRoundX,
-    title: "No account needed",
-    body: "Progress lives in your browser. Sign in only if you want it on every device.",
-  },
-  {
-    icon: BadgeCheck,
-    title: "No upsell",
-    body: "No ads, no premium tier, no “unlock the full solution”. The full solution is the course.",
-  },
-];
+const minutesOf = (lessons: { minutes: number }[]) => lessons.reduce((n, l) => n + l.minutes, 0);
+
+/** Each part of the course printed as a stop on the itinerary. */
+const itinerary = course.map((part) => {
+  const shown = part.modules.slice(0, 3);
+  const rest = part.modules.slice(3);
+  return {
+    n: part.n,
+    title: part.title,
+    rows: [
+      ...shown.map((m) => ({ label: m.title, value: formatMinutes(minutesOf(m.lessons)) })),
+      ...(rest.length
+        ? [
+            {
+              label: `and ${rest.length} more ${rest.length === 1 ? "module" : "modules"}`,
+              value: formatMinutes(rest.reduce((n, m) => n + minutesOf(m.lessons), 0)),
+            },
+          ]
+        : []),
+    ],
+  };
+});
+
+const frame = "px-5 sm:px-7";
+const gap = "py-[clamp(96px,11vw,200px)]";
+const head = "display text-[clamp(2.5rem,1.6rem+3.6vw,4.5rem)] text-fg text-balance";
+const lead = "text-[clamp(1.25rem,1.1rem+0.7vw,1.625rem)] leading-[1.4] text-fg";
+const body = "text-[17px] leading-[1.55] text-fg";
+
+function Figure({ photo, className, sizes, priority }: { photo: Photo; className?: string; sizes: string; priority?: boolean }) {
+  return (
+    <figure className={className}>
+      <div className="overflow-hidden">
+        <Image
+          src={photo.src}
+          width={photo.width}
+          height={photo.height}
+          alt={photo.alt}
+          sizes={sizes}
+          priority={priority}
+          className="archival drift h-full w-full object-cover"
+        />
+      </div>
+      <figcaption className="mt-3 max-w-[60ch] text-[14px] leading-snug text-muted">{photo.caption}</figcaption>
+    </figure>
+  );
+}
 
 export default function Home() {
   return (
     <>
-      {/* Hero */}
-      <section className="relative overflow-hidden border-b border-line">
-        <div
-          aria-hidden
-          className="bg-grid pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_80%_60%_at_50%_0%,black,transparent)]"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-40 left-1/2 h-80 w-[44rem] -translate-x-1/2 rounded-full bg-accent/10 blur-3xl"
-        />
-        <div className="relative mx-auto max-w-6xl px-4 pt-14 pb-16 sm:px-6 sm:pt-24 sm:pb-20">
-          <div className="max-w-3xl">
-            <h1 className="text-[40px] leading-[1.04] font-semibold tracking-[-0.035em] text-balance text-fg sm:text-[64px]">
-              Learn system design <span className="text-accent">by building it.</span>
-            </h1>
-            <p className="mt-6 max-w-2xl text-[16.5px] leading-relaxed text-pretty text-muted sm:text-[18px]">
-              Watch requests flow through living diagrams, turn the knobs yourself, then design real products and
-              load-test them until they break. Every lesson and every drill is free, for everyone, for good.
-            </p>
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <TrackedLink href="/learn" location="home_hero" size="lg">
-                Start learning <ArrowRight className="size-4" aria-hidden />
-              </TrackedLink>
-              <TrackedLink href={`/drills/${firstDrill}`} location="home_hero" variant="secondary" size="lg">
-                Try the pastebin drill
-              </TrackedLink>
-            </div>
-            <p className="mt-4 text-[13px] text-subtle">No sign-up needed. Your progress saves in this browser.</p>
-          </div>
-
-          <div className="mt-12 sm:mt-16">
-            <div className="rounded-[22px] border border-line bg-sunken/70 p-1.5 shadow-card sm:p-2">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2 font-mono text-[11px] text-subtle">
-                <span className="inline-flex items-center gap-2 text-muted">
-                  <span className="relative flex size-2">
-                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-ok opacity-60 motion-reduce:hidden" />
-                    <span className="relative inline-flex size-2 rounded-full bg-ok" />
-                  </span>
-                  gatepass / prod
-                </span>
-                <span className="ml-auto inline-flex items-center gap-3">
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="size-2 rounded-full bg-req" /> request
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="size-2 rounded-full bg-res" /> response
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="size-2 rounded-full bg-err" /> failure
-                  </span>
-                </span>
-              </div>
-              <HeroDiagram />
-            </div>
-            <p className="mt-3 text-center text-[13px] text-subtle">
-              Gatepass on sale day. Watch API 2 fail its health check and the load balancer route around it.
-            </p>
+      {/* The name, cropped by the screen */}
+      <section className="relative flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden">
+        <h1 className="display hero-word text-fg">
+          <span aria-hidden>Wirebox</span>
+          <span className="sr-only top-1/3 right-0 [writing-mode:horizontal-tb]">Wirebox: learn system design by building it</span>
+        </h1>
+        <div className={cn(frame, "relative z-10 pt-10 max-sm:w-[56%] sm:pt-16")}>
+          <p className={cn(lead, "rise max-w-[34ch]")}>
+            A free system design course. You build Gatepass, a ticketing app for gigs, then flood it with fans until it
+            breaks.
+          </p>
+          <div className="rise rise-2 mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
+            <TrackedLink
+              href="/learn"
+              location="home_hero"
+              plain
+              className="press inline-flex h-12 items-center bg-accent px-6 text-[17px] font-medium text-accent-fg outline-none hover:bg-fg hover:text-bg focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            >
+              Start learning
+            </TrackedLink>
+            <TrackedLink
+              href={`/drills/${firstDrill}`}
+              location="home_hero"
+              plain
+              className="text-[17px] text-fg underline decoration-1 underline-offset-4 hover:text-accent"
+            >
+              Or try a drill
+            </TrackedLink>
           </div>
         </div>
       </section>
 
-      {/* Stats */}
-      <section aria-label="Course at a glance" className="border-b border-line bg-sunken/50">
-        <dl className="mx-auto grid max-w-6xl grid-cols-2 sm:grid-cols-4">
-          {stats.map((s, i) => (
-            <div
-              key={s.label}
-              className={`px-4 py-7 sm:px-6 ${i % 2 === 1 ? "border-l border-line" : ""} ${i >= 2 ? "border-t border-line sm:border-t-0" : ""} ${i === 2 ? "sm:border-l" : ""}`}
-            >
-              <dt className="sr-only">{s.label}</dt>
-              <dd>
-                <span className="block text-[32px] font-semibold tracking-tight text-fg tabular-nums sm:text-[40px]">
+      {/* Two numbers, the same app */}
+      <section aria-labelledby="scale-title" className={cn(frame, "pt-[clamp(96px,11vw,200px)]")}>
+        <div className="grid gap-6 lg:grid-cols-12 lg:gap-x-7">
+          <h2 id="scale-title" className={cn(head, "rise lg:col-span-5")}>
+            Same app, louder nights
+          </h2>
+          <p className={cn(body, "rise rise-2 max-w-[56ch] lg:col-span-5 lg:col-start-7")}>
+            In its first year Gatepass served three requests a second, and one server was plenty. Then a big show opens
+            its seat map and ten thousand phones refresh it every second. The course is the road between those two
+            numbers, one broken assumption at a time.
+          </p>
+        </div>
+        <div className="mt-[12vh] grid gap-y-40 sm:grid-cols-2 sm:gap-7">
+          {[
+            { value: "3", caption: "Requests a second, Gatepass's first year" },
+            { value: "10k", caption: "Requests a second when a big show goes on sale" },
+          ].map((s, i) => (
+            <figure key={s.value} className={cn("rise", i === 1 && "rise-2")}>
+              <div
+                className={cn(
+                  "h-[46vw] overflow-hidden sm:h-[clamp(120px,21vw,330px)]",
+                  i === 1 && "max-sm:bg-fg max-sm:px-3 max-sm:text-bg",
+                )}
+              >
+                <span aria-hidden className="display specimen block">
                   {s.value}
                 </span>
-                <span className="mt-0.5 block text-[14px] text-muted">{s.label}</span>
-                <span className="mt-0.5 block font-mono text-[11px] text-subtle">{s.note}</span>
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      <Section
-        id="how-it-works"
-        eyebrow="How it works"
-        title="See it, try it, build it, break it."
-        intro="Reading about consistent hashing is easy to forget. Watching a node vanish and half your cache go cold is not. Every module moves through the same four steps."
-      >
-        <HowItWorks />
-      </Section>
-
-      <Section
-        id="drills"
-        className="border-t border-line"
-        eyebrow="Product drills"
-        title="Design the products you use every day."
-        intro="Each drill is a product brief, a blank canvas and a simulator. Design the API, the schema and the architecture, then watch it hold up, or not, as the traffic climbs."
-        action={
-          <TrackedLink href="/drills" location="home_drills" variant="outline" size="sm">
-            All {drillCatalog.length} drills <ArrowRight className="size-3.5" aria-hidden />
-          </TrackedLink>
-        }
-      >
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {previewDrills.map((drill) => (
-            <DrillCard key={drill.slug} drill={drill} location="home_drills" />
+                <span className="sr-only">{s.value}</span>
+              </div>
+              <figcaption className="mt-3 text-[17px] text-muted">{s.caption}</figcaption>
+            </figure>
           ))}
         </div>
-      </Section>
+      </section>
 
-      <Section
-        id="course"
-        className="border-t border-line"
-        eyebrow="The course"
-        title="From one server to many cities."
-        intro="Follow Gatepass, a ticketing app for gigs and college fests, from its first two hundred users to sell-outs across the country. Each module starts with a problem it actually hits."
-        action={
-          <TrackedLink href="/learn" location="home_course" variant="outline" size="sm">
-            See every lesson <ArrowRight className="size-3.5" aria-hidden />
-          </TrackedLink>
-        }
-      >
-        <CourseMap />
-      </Section>
+      {/* The live thing */}
+      <section aria-labelledby="live-title" className={cn(frame, gap)}>
+        <div className="grid gap-10 lg:grid-cols-12 lg:gap-x-7">
+          <div className="lg:col-span-4">
+            <h2 id="live-title" className={cn(head, "rise")}>
+              Break it yourself
+            </h2>
+            <p className={cn(body, "rise rise-2 mt-6 max-w-[40ch]")}>
+              This is Gatepass on sale day, the same kind of diagram every lesson is built on. Requests travel, caches
+              hit and miss, servers fail. Lessons let you turn the knobs; drills let you draw the whole system and
+              load-test it.
+            </p>
+            <figure className="rise rise-3 mt-12 max-w-md">
+              <video
+                autoPlay
+                muted
+                loop
+                playsInline
+                poster={selectorClip.poster}
+                width={selectorClip.width}
+                height={selectorClip.height}
+                className="aspect-[4/3] w-full object-cover motion-reduce:hidden"
+                aria-label="Rows of rotary selector switches turning inside a 1947 telephone exchange."
+              >
+                <source src={selectorClip.webm} type="video/webm" />
+                <source src={selectorClip.mp4} type="video/mp4" />
+              </video>
+              {/* eslint-disable-next-line @next/next/no-img-element -- the clip's still frame for reduced motion */}
+              <img
+                src={selectorClip.poster}
+                width={selectorClip.width}
+                height={selectorClip.height}
+                alt="Rotary selector switches inside a 1947 telephone exchange."
+                className="hidden aspect-[4/3] w-full object-cover motion-reduce:block"
+              />
+              <figcaption className="mt-3 text-[14px] leading-snug text-muted">{selectorClip.caption}</figcaption>
+            </figure>
+          </div>
+          <div className="rise rise-3 lg:col-span-8">
+            <LiveSystem />
+          </div>
+        </div>
+      </section>
 
-      {/* Why free */}
-      <section aria-labelledby="why-free-title" className="border-y border-line bg-sunken/50">
-        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-6 sm:py-24 lg:grid-cols-[1.1fr_1fr] lg:gap-16">
-          <div>
-            <Eyebrow>Why it&apos;s free</Eyebrow>
-            <h2
-              id="why-free-title"
-              className="mt-3 text-[28px] leading-[1.15] font-semibold tracking-tight text-balance text-fg sm:text-[36px]"
+      <Figure
+        photo={photos.exchangeHall}
+        sizes="100vw"
+        className="[&>div]:h-[min(78svh,820px)] [&_figcaption]:px-5 sm:[&_figcaption]:px-7"
+      />
+
+      {/* The course as an itinerary */}
+      <section aria-labelledby="course-title" className={cn(frame, gap, "mt-[clamp(96px,11vw,200px)] bg-surface-2")}>
+        <div className="grid gap-12 lg:grid-cols-12 lg:gap-x-7">
+          <div className="lg:col-span-5">
+            <h2 id="course-title" className={cn(head, "rise")}>
+              One server to many cities
+            </h2>
+            <p className={cn(body, "rise rise-2 mt-6 max-w-[34ch]")}>
+              Follow Gatepass from one college fest to sell-outs across the country. Every module opens with a problem it
+              actually hits, and ends with you fixing it.
+            </p>
+            <Figure photo={photos.operator} sizes="(min-width: 1024px) 34vw, 100vw" className="rise rise-3 mt-12 max-w-md [&>div]:aspect-[4/5]" />
+          </div>
+          <div className="rise lg:col-span-5 lg:col-start-7">
+            <div className="slip max-w-[480px] bg-fg px-6 pt-7 pb-12 text-bg sm:px-8">
+              <p className="text-[14px]">Itinerary for one learner</p>
+              {itinerary.map((part) => (
+                <div key={part.n} className="mt-7">
+                  <h3 className="text-[17px] font-semibold">
+                    Part {part.n}: {part.title}
+                  </h3>
+                  <ul className="mt-2 space-y-1.5 text-[16px] tabular-nums">
+                    {part.rows.map((r) => (
+                      <li key={r.label} className="flex flex-wrap">
+                        <span>{r.label}</span>
+                        <span aria-hidden className="leader" />
+                        <span className="ml-auto">{r.value}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              <p className="-mx-6 mt-8 flex h-11 items-center justify-between bg-bg px-6 text-[16px] font-medium text-fg tabular-nums sm:-mx-8 sm:px-8">
+                <span>You can design it and defend it</span>
+                <span>{hours} h</span>
+              </p>
+            </div>
+            <TrackedLink
+              href="/learn"
+              location="home_course"
+              plain
+              className="mt-8 inline-block text-[17px] text-fg underline decoration-1 underline-offset-4 hover:text-accent"
             >
-              Good system design education shouldn&apos;t depend on your salary.
-            </h2>
-            <div className="mt-5 space-y-4 text-[15.5px] leading-relaxed text-pretty text-muted">
-              <p>
-                The engineers who most need this material are often the ones least able to pay for it: students, people
-                switching careers, developers in places where a course subscription costs a week&apos;s pay.
-              </p>
-              <p>
-                So Wirebox is free. Not free for a week, not free for the first module. All of it, for anyone with a
-                browser. If it helps you land the job or ship the system, that&apos;s the whole point.
-              </p>
-            </div>
-            <p className="mt-6 inline-flex items-center gap-2 text-[13.5px] text-subtle">
-              <HeartHandshake className="size-4 text-accent" aria-hidden /> Tell a friend who&apos;s prepping.
-              That&apos;s the only payment we want.
-            </p>
-          </div>
-          <ul className="grid content-start gap-3">
-            {principles.map((p) => (
-              <li key={p.title} className="flex gap-4 rounded-2xl border border-line bg-surface p-5">
-                <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-line bg-surface-2 text-accent">
-                  <p.icon className="size-[18px]" aria-hidden />
-                </div>
-                <div>
-                  <h3 className="text-[15px] font-semibold text-fg">{p.title}</h3>
-                  <p className="mt-1 text-[13.5px] leading-relaxed text-muted">{p.body}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
-
-      <Section id="faq" eyebrow="FAQ" title="Questions, answered." innerClassName="max-w-3xl">
-        <Faq />
-      </Section>
-
-      {/* Final CTA */}
-      <section className="mx-auto max-w-6xl px-4 pb-24 sm:px-6">
-        <div className="relative overflow-hidden rounded-3xl border border-line bg-surface px-6 py-14 text-center shadow-card sm:px-12 sm:py-20">
-          <div
-            aria-hidden
-            className="bg-dots pointer-events-none absolute inset-0 opacity-60 [mask-image:radial-gradient(ellipse_70%_70%_at_50%_100%,black,transparent)]"
-          />
-          <div className="relative">
-            <h2 className="mx-auto max-w-2xl text-[30px] leading-[1.1] font-semibold tracking-tight text-balance text-fg sm:text-[44px]">
-              Start with one server. Finish with a system that survives sale day.
-            </h2>
-            <p className="mx-auto mt-4 max-w-xl text-[15.5px] text-muted">
-              The first lesson takes {allLessons[0].minutes} minutes. No sign-up, no card, no catch.
-            </p>
-            <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-              <TrackedLink href="/learn" location="home_final" size="lg">
-                Start learning <ArrowRight className="size-4" aria-hidden />
-              </TrackedLink>
-              <TrackedLink href={`/drills/${firstDrill}`} location="home_final" variant="secondary" size="lg">
-                Jump into a drill
-              </TrackedLink>
-            </div>
+              See all {courseStats.lessons} lessons
+            </TrackedLink>
           </div>
         </div>
       </section>
+
+      {/* The drills as a line-up poster */}
+      <section aria-labelledby="drills-title" className={cn(frame, gap)}>
+        <h2 id="drills-title" className={cn(head, "rise")}>
+          {drillCatalog.length} drills on the bill
+        </h2>
+        <p className={cn(body, "rise rise-2 mt-6 max-w-[52ch]")}>
+          Each drill is a real product: you write its API, model its data, wire the architecture and survive the load
+          test. Here are six of them.
+        </p>
+        <ul className="mt-14">
+          {lineUp.map((d) => (
+            <li key={d.slug} className="rise">
+              <TrackedLink
+                href={`/drills/${d.slug}`}
+                location="home_lineup"
+                plain
+                className="group flex flex-col py-1 outline-none sm:flex-row sm:items-baseline sm:justify-between sm:gap-8"
+              >
+                <span className="display text-[12vw] text-fg transition-colors group-hover:text-accent group-focus-visible:text-accent sm:text-[clamp(64px,8.5vw,150px)] sm:leading-[0.92]">
+                  {d.product}
+                </span>
+                <span className="mt-1.5 mb-5 shrink-0 text-[17px] text-muted tabular-nums sm:my-0">
+                  {d.minutes} min, {d.difficulty}
+                </span>
+              </TrackedLink>
+            </li>
+          ))}
+        </ul>
+        <TrackedLink
+          href="/drills"
+          location="home_drills"
+          plain
+          className="mt-12 inline-block text-[17px] text-fg underline decoration-1 underline-offset-4 hover:text-accent"
+        >
+          See all {drillCatalog.length} drills
+        </TrackedLink>
+      </section>
+
+      {/* Why it's free */}
+      <section aria-labelledby="free-title" className={cn(frame, "pb-[clamp(96px,11vw,200px)]")}>
+        <div className="grid gap-10 lg:grid-cols-[34%_1fr] lg:gap-x-0">
+          <div className="lg:pr-10">
+            <h2 id="free-title" className={cn(head, "rise")}>
+              Free, for good
+            </h2>
+            <dl className="rise rise-2 mt-8 grid grid-cols-3 gap-5 text-[14px] lg:grid-cols-1">
+              {[
+                ["Price", "Nothing, all of it"],
+                ["Account", "Optional"],
+                ["Ads and upsells", "None"],
+              ].map(([k, v]) => (
+                <div key={k}>
+                  <dt className="text-muted">{k}</dt>
+                  <dd className="mt-0.5 text-[17px] text-fg">{v}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+          <div className="space-y-6">
+            <p className={cn(lead, "rise max-w-[52ch]")}>
+              The engineers who most need this material are often the ones least able to pay for it: students, people
+              switching careers, developers in places where a course subscription costs a week&apos;s pay.
+            </p>
+            <p className={cn(lead, "rise rise-2 max-w-[52ch]")}>
+              So Wirebox is free. Not for a week, not for the first module. All of it, for anyone with a browser. Your
+              progress saves where you are; sign in only to carry it between devices.
+            </p>
+          </div>
+        </div>
+        <div className="mt-[clamp(64px,8vw,120px)] grid gap-7 sm:grid-cols-[3fr_2fr] lg:ml-[34%]">
+          <Figure photo={photos.wacOperators} sizes="(min-width: 1024px) 40vw, 100vw" className="rise [&>div]:aspect-[4/3]" />
+          <Figure photo={photos.fieldSwitchboard} sizes="(min-width: 1024px) 26vw, 100vw" className="rise rise-2 [&>div]:aspect-[4/5]" />
+        </div>
+      </section>
+
+      {/* Questions */}
+      <section aria-labelledby="faq-title" className={cn(frame, "pb-[clamp(160px,13vw,220px)]")}>
+        <h2 id="faq-title" className="display rise text-[clamp(2.75rem,5.5vw,6rem)] text-balance text-fg">
+          Questions people ask
+        </h2>
+        <div className="mt-20 lg:ml-[33.333%]">
+          <Faq />
+        </div>
+      </section>
+
+      {/* One word is the button */}
+      <TrackedLink
+        href="/learn"
+        location="home_final"
+        plain
+        className="group relative flex min-h-[46svh] flex-col justify-between gap-[clamp(120px,14vw,220px)] bg-accent px-5 pt-5 pb-6 text-accent-fg outline-none hover:bg-fg hover:text-bg focus-visible:bg-fg focus-visible:text-bg sm:min-h-[60svh] sm:px-7 sm:pt-7"
+      >
+        <span className="flex items-start justify-between gap-6">
+          <span className={cn(lead, "max-w-[30ch] text-current")}>
+            The first lesson takes {allLessons[0].minutes} minutes. No sign-up, no card.
+          </span>
+          <svg viewBox="0 0 48 48" className="size-8 shrink-0 sm:size-12" aria-hidden>
+            <path d="M12 36 36 12M16 12h20v20" fill="none" stroke="currentColor" strokeWidth="3" />
+          </svg>
+        </span>
+        <span className="display -mb-[0.08em] block text-[52vw] leading-[0.8] tracking-[-0.02em]">Start</span>
+      </TrackedLink>
     </>
   );
 }
