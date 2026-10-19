@@ -134,7 +134,7 @@ export function ProgressDashboard({ liveLessons }: { liveLessons: string[] }) {
     <div className="mx-auto max-w-4xl px-4 py-14 sm:px-6 sm:py-20">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="font-mono text-[11px] tracking-[0.14em] text-accent uppercase">Dashboard</p>
+          <p className="text-[13px] text-accent">Dashboard</p>
           <h1 className="mt-3 text-[34px] leading-[1.1] font-semibold tracking-tight text-fg sm:text-[40px]">
             Your progress
           </h1>
@@ -223,7 +223,7 @@ export function ProgressDashboard({ liveLessons }: { liveLessons: string[] }) {
         {course.map((part) => (
           <div key={part.n} className="mt-6">
             <div className="flex items-center gap-2">
-              <p className="font-mono text-[11px] tracking-[0.12em] text-subtle uppercase">
+              <p className="text-[13px] text-subtle">
                 Part {part.n} · {part.title}
               </p>
               {part.modules.every((m) => m.lessons.every((l) => done.has(l.slug))) && <Badge tone="ok">Done</Badge>}

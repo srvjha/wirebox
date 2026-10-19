@@ -55,7 +55,7 @@ export function StepList({ steps, current, passed, frontier, onGo }: Props) {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] leading-tight font-medium">{s.short ?? s.title}</span>
-                <span className="block font-mono text-[10px] tracking-wide text-subtle uppercase">
+                <span className="block text-[13px] text-subtle">
                   {s.type === "design" ? `Load test ${designN}` : s.type === "read" ? "Concept" : s.type === "choose" ? "Deep dive" : s.type}
                   {" · "}
                   {s.minutes}m

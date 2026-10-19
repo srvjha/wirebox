@@ -282,7 +282,7 @@ function CanvasInner({ drill, store, palette, replicas = true, dbLabel, selected
 
       {!locked && items.length > 0 && (
         <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-1.5 rounded-xl border border-line bg-surface/90 p-1.5 shadow-card backdrop-blur">
-          <span className="hidden self-center px-1.5 font-mono text-[10px] tracking-wider text-subtle uppercase sm:inline">Add</span>
+          <span className="hidden self-center px-1.5 text-[13px] text-subtle sm:inline">Add</span>
           {items.map((kind) => {
             const m = KIND_META[kind];
             const Icon = m.icon;

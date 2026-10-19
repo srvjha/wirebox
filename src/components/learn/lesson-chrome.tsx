@@ -32,7 +32,7 @@ export function ChapterList({ slug, chapters }: { slug: string; chapters: Chapte
   if (!chapters.length) return null;
   return (
     <nav aria-label="What you'll learn" className="mt-8 rounded-2xl border border-line bg-surface p-5">
-      <p className="mb-3 flex items-center gap-2 font-mono text-[11px] tracking-wider text-subtle uppercase">
+      <p className="mb-3 flex items-center gap-2 text-[13px] text-subtle">
         <ListOrdered className="size-3.5" /> What you&apos;ll learn
       </p>
       <ol className="grid gap-1 sm:grid-cols-2 sm:gap-x-6">
@@ -93,7 +93,7 @@ export function OnThisPage({ slug, chapters }: { slug: string; chapters: Chapter
   if (!chapters.length) return null;
   return (
     <nav aria-label="On this page">
-      <p className="mb-3 font-mono text-[11px] tracking-wider text-subtle uppercase">On this page</p>
+      <p className="mb-3 text-[13px] text-subtle">On this page</p>
       <ul className="space-y-0.5 border-l border-line">
         {chapters.map((c) => (
           <li key={c.id}>

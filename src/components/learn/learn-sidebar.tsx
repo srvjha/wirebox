@@ -107,7 +107,7 @@ export function LearnSidebar({ parts, current }: { parts: NavPart[]; current?: s
               transition={{ type: "tween", duration: 0.22, ease: "easeOut" }}
             >
               <div className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4">
-                <span className="font-mono text-[11px] tracking-wider text-subtle uppercase">Course contents</span>
+                <span className="text-[13px] text-subtle">Course contents</span>
                 <button
                   type="button"
                   onClick={() => setDrawer(false)}

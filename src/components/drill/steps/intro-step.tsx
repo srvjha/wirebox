@@ -19,7 +19,7 @@ export function IntroStepView({ drill, step, onDone }: { drill: Drill; step: Int
 
       <div className="mt-10 grid gap-4 md:grid-cols-2">
         <section className="rounded-2xl border border-line bg-surface p-5">
-          <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">What it must do</h2>
+          <h2 className="text-[13px] text-subtle">What it must do</h2>
           <ul className="mt-3 space-y-3">
             {functional.map((r) => (
               <li key={r.text} className="flex gap-2.5">
@@ -33,7 +33,7 @@ export function IntroStepView({ drill, step, onDone }: { drill: Drill; step: Int
           </ul>
         </section>
         <section className="rounded-2xl border border-line bg-surface p-5">
-          <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">How well it must do it</h2>
+          <h2 className="text-[13px] text-subtle">How well it must do it</h2>
           <ul className="mt-3 space-y-3">
             {nonFunctional.map((r) => (
               <li key={r.text} className="flex gap-2.5">
@@ -49,7 +49,7 @@ export function IntroStepView({ drill, step, onDone }: { drill: Drill; step: Int
       </div>
 
       <section className="mt-4 rounded-2xl border border-line bg-surface p-5">
-        <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">Back of the envelope</h2>
+        <h2 className="text-[13px] text-subtle">Back of the envelope</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {drill.estimates.map((e) => (
             <div key={e.label} className="rounded-xl border border-line bg-surface-2 p-3">

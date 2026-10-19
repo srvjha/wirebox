@@ -34,7 +34,7 @@ export default function NotFound() {
               404
             </Tag>
           </Diagram>
-          <p className="mt-10 font-mono text-[11px] tracking-[0.14em] text-accent uppercase">404 · no route</p>
+          <p className="mt-10 text-[13px] text-accent">404 · no route</p>
           <h1 className="mt-3 text-[30px] font-semibold tracking-tight text-fg sm:text-[36px]">
             This page doesn&apos;t exist.
           </h1>

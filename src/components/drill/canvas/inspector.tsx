@@ -331,7 +331,7 @@ export function KnobSelect({ knob, value, onChange }: { knob: CustomKnob; value:
   const id = `knob-${knob.id}`;
   return (
     <div>
-      <label htmlFor={id} className="mb-1.5 block font-mono text-[10.5px] tracking-wider text-subtle uppercase">
+      <label htmlFor={id} className="mb-1.5 block text-[13px] text-subtle">
         {knob.label}
       </label>
       <select
@@ -430,7 +430,7 @@ function LimiterKnobs({
         </div>
       </Field>
       <div className="rounded-lg border border-line bg-surface-2 p-2.5">
-        <p className="mb-1.5 font-mono text-[10px] tracking-wider text-subtle uppercase">Real traffic per source IP</p>
+        <p className="mb-1.5 text-[13px] text-subtle">Real traffic per source IP</p>
         <ul className="space-y-1 text-[12px]">
           {IP_PROFILE.map((p) => (
             <li key={p.label} className="flex justify-between gap-2">
@@ -455,7 +455,7 @@ function LockedNote() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-line bg-surface-2 px-2.5 py-1.5">
-      <p className="font-mono text-[10px] tracking-wider text-subtle uppercase">{label}</p>
+      <p className="text-[13px] text-subtle">{label}</p>
       <p className="font-mono text-[13px] text-fg">{value}</p>
     </div>
   );
@@ -464,7 +464,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div>
-      <p className="mb-1.5 font-mono text-[10.5px] tracking-wider text-subtle uppercase">{label}</p>
+      <p className="mb-1.5 text-[13px] text-subtle">{label}</p>
       {children}
       {hint && <p className="mt-1 text-[11.5px] text-subtle">{hint}</p>}
     </div>

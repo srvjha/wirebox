@@ -84,7 +84,7 @@ export function ModuleCard({ module, defaultOpen = false }: { module: NavModule;
         <span className="min-w-0 flex-1">
           <span className="block text-[16px] font-semibold tracking-tight text-fg">{module.title}</span>
           <span className="mt-0.5 block text-[14px] leading-relaxed text-muted">{module.summary}</span>
-          <span className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-subtle">
+          <span className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-subtle tabular-nums">
             <span>{total} lessons</span>
             <span>{Math.round(minutes / 6) / 10}h</span>
             {liveCount < total && <span>{liveCount === 0 ? "Being written" : `${liveCount} out now`}</span>}
@@ -102,13 +102,13 @@ export function ModuleCard({ module, defaultOpen = false }: { module: NavModule;
         <div id={`${module.slug}-body`} className="border-t border-line px-4 pt-4 pb-3 sm:px-5">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl bg-surface-2 p-3.5">
-              <p className="flex items-center gap-1.5 font-mono text-[10.5px] tracking-wider text-accent uppercase">
+              <p className="flex items-center gap-1.5 text-[13px] text-accent">
                 <Flag className="size-3" /> The problem
               </p>
               <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">{module.story}</p>
             </div>
             <div className="rounded-xl bg-surface-2 p-3.5">
-              <p className="flex items-center gap-1.5 font-mono text-[10.5px] tracking-wider text-ok uppercase">
+              <p className="flex items-center gap-1.5 text-[13px] text-ok">
                 <Target className="size-3" /> You&apos;ll leave with
               </p>
               <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">{module.outcome}</p>
@@ -144,7 +144,7 @@ function LessonRow({ lesson, done }: { lesson: NavLesson; done: boolean }) {
             <KindIcon kind={lesson.kind} /> {kindLabel[lesson.kind]}
           </span>
         ) : (
-          <span className="rounded-full border border-line px-2 py-0.5 font-mono text-[10px] tracking-wide uppercase">
+          <span className="rounded-full border border-line px-2 py-0.5 text-[13px]">
             Being written
           </span>
         )}

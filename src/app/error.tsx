@@ -21,7 +21,7 @@ export default function ErrorPage({ error, retry }: { error: unknown; retry: () 
       </header>
       <main className="flex flex-1 items-center">
         <div className="mx-auto max-w-xl px-4 py-20 text-center sm:px-6">
-          <p className="font-mono text-[11px] tracking-[0.14em] text-err uppercase">500 · something broke</p>
+          <p className="text-[13px] text-err">500 · something broke</p>
           <h1 className="mt-3 text-[30px] font-semibold tracking-tight text-fg sm:text-[36px]">
             A server fell over. Fittingly.
           </h1>

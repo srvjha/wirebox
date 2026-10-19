@@ -233,7 +233,7 @@ export function DesignStepView({ drill, step, index, store, onNext }: Props) {
           ) : (
             <div className="space-y-5">
               <section className="rounded-2xl border border-line bg-surface p-4">
-                <p className="font-mono text-[10.5px] tracking-wider text-accent uppercase">Scenario · {step.scenario.label}</p>
+                <p className="text-[13px] text-accent">Scenario · {step.scenario.label}</p>
                 <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">{step.story}</p>
                 {step.flows ? (
                   <ul className="mt-3 space-y-1.5">
@@ -272,7 +272,7 @@ export function DesignStepView({ drill, step, index, store, onNext }: Props) {
 
               {globalKnobs.length > 0 && (
                 <section className="space-y-4 rounded-2xl border border-line bg-surface p-4">
-                  <h3 className="font-mono text-[10.5px] tracking-wider text-subtle uppercase">Design choices</h3>
+                  <h3 className="text-[13px] text-subtle">Design choices</h3>
                   {globalKnobs.map((k) => (
                     <KnobSelect
                       key={k.id}
@@ -288,7 +288,7 @@ export function DesignStepView({ drill, step, index, store, onNext }: Props) {
               )}
 
               <section>
-                <h3 className="mb-2 font-mono text-[10.5px] tracking-wider text-subtle uppercase">To pass</h3>
+                <h3 className="mb-2 text-[13px] text-subtle">To pass</h3>
                 <ul className="space-y-1.5">
                   {step.constraints.map((c, i) => (
                     <li key={i} className="flex items-center gap-2 text-[13px] text-fg">
@@ -306,7 +306,7 @@ export function DesignStepView({ drill, step, index, store, onNext }: Props) {
               </section>
 
               <section>
-                <h3 className="mb-2 font-mono text-[10.5px] tracking-wider text-subtle uppercase">Concepts</h3>
+                <h3 className="mb-2 text-[13px] text-subtle">Concepts</h3>
                 <ul className="space-y-2">
                   {step.concepts.map((c) => (
                     <li key={c.term} className="rounded-xl border border-line bg-surface px-3 py-2.5">
@@ -323,7 +323,7 @@ export function DesignStepView({ drill, step, index, store, onNext }: Props) {
               </section>
 
               <section>
-                <h3 className="mb-2 font-mono text-[10.5px] tracking-wider text-subtle uppercase">Hints</h3>
+                <h3 className="mb-2 text-[13px] text-subtle">Hints</h3>
                 <ol className="space-y-2">
                   {step.hints.slice(0, hintsOpen).map((h, i) => (
                     <li key={i} className="flex gap-2 rounded-xl border border-warn/25 bg-warn/5 px-3 py-2 text-[12.5px] leading-relaxed text-muted">
@@ -363,7 +363,7 @@ export function DesignStepView({ drill, step, index, store, onNext }: Props) {
 function Num({ label, value, tone }: { label: string; value: string; tone?: "err" }) {
   return (
     <div className="rounded-lg border border-line bg-surface-2 px-2.5 py-1.5">
-      <dt className="font-mono text-[10px] tracking-wider text-subtle uppercase">{label}</dt>
+      <dt className="text-[13px] text-subtle">{label}</dt>
       <dd className={cn("font-mono text-[14px] font-semibold", tone === "err" ? "text-err" : "text-fg")}>{value}</dd>
     </div>
   );

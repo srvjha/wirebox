@@ -23,13 +23,11 @@ export default function LearnPage() {
   return (
     <div className="mx-auto w-full max-w-4xl px-4 pb-24 sm:px-6">
       <section className="pt-12 pb-10 sm:pt-20">
-        <p className="font-mono text-[11.5px] tracking-wider text-accent uppercase">The path</p>
-        <h1 className="mt-3 max-w-2xl text-[2.2rem] leading-[1.1] font-semibold tracking-tight text-balance text-fg sm:text-5xl">
-          From one server to many cities, one decision at a time.
-        </h1>
-        <p className="mt-4 max-w-2xl text-[17px] leading-relaxed text-pretty text-muted">
-          Follow Gatepass, a ticketing app for gigs, comedy nights and college fests, as it grows. Every module starts
-          with a problem it hits and ends with the design that fixes it. Free, no sign-up needed.
+        <h1 className="display text-[clamp(2.25rem,1.9rem+1.4vw,3rem)] text-fg">The course</h1>
+        <p className="mt-4 max-w-2xl text-[17px] leading-relaxed text-pretty text-fg">
+          From one server to many cities, one decision at a time. Follow Gatepass, a ticketing app for gigs, comedy
+          nights and college fests, as it grows. Every module starts with a problem it hits and ends with the design
+          that fixes it.
         </p>
         <dl className="mt-8 grid max-w-2xl grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-4">
           {stats.map((s) => (
@@ -63,7 +61,7 @@ export default function LearnPage() {
       {parts.map((part) => (
         <section key={part.n} id={`part-${part.n}`} className="scroll-mt-20 pt-10">
           <div className="mb-5 flex flex-col gap-1 border-b border-line pb-4">
-            <p className="font-mono text-[11px] tracking-wider text-subtle uppercase">Part {part.n}</p>
+            <p className="text-[13px] text-subtle">Part {part.n}</p>
             <h2 className="text-2xl font-semibold tracking-tight text-fg">{part.title}</h2>
             <p className="text-[15px] text-muted">{part.summary}</p>
           </div>

@@ -36,7 +36,7 @@ export function YourTurn({
 
   return (
     <section className="not-prose my-8 rounded-2xl border border-line bg-surface p-5">
-      <p className="mb-1 flex items-center gap-2 font-mono text-[11px] tracking-wider text-accent uppercase">
+      <p className="mb-1 flex items-center gap-2 text-[13px] text-accent">
         <PenLine className="size-3.5" /> Your turn
       </p>
       <p className="text-[15.5px] font-medium text-fg">{prompt}</p>
@@ -116,7 +116,7 @@ export function Quiz({
   const done = choice !== null;
   return (
     <section className="not-prose my-8 rounded-2xl border border-line bg-surface p-5">
-      <p className="mb-1 font-mono text-[11px] tracking-wider text-info uppercase">Check yourself</p>
+      <p className="mb-1 text-[13px] text-info">Check yourself</p>
       <p className="text-[15.5px] font-medium text-fg">{question}</p>
       <div className="mt-4 grid gap-2">
         {options.map((o, i) => {

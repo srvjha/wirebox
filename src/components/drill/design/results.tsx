@@ -76,7 +76,7 @@ export function Results({ result, graph, dbLabel, incident, stale, debrief, post
 
       {nodes.length > 0 && (
         <div>
-          <p className="mb-2 font-mono text-[10.5px] tracking-wider text-subtle uppercase">Utilisation at peak</p>
+          <p className="mb-2 text-[13px] text-subtle">Utilisation at peak</p>
           <ul className="space-y-1.5">
             {nodes.map((n) => {
               const s = result.steady.nodes[n.id];
@@ -103,7 +103,7 @@ export function Results({ result, graph, dbLabel, incident, stale, debrief, post
 
       {result.steady.issues.length > 0 && (
         <div>
-          <p className="mb-2 font-mono text-[10.5px] tracking-wider text-subtle uppercase">What the simulator noticed</p>
+          <p className="mb-2 text-[13px] text-subtle">What the simulator noticed</p>
           <ul className="space-y-1.5 text-[12.5px] leading-relaxed text-muted">
             {result.steady.issues.map((issue) => (
               <li key={issue} className="flex gap-2">
@@ -146,7 +146,7 @@ function FlowRows({ flow, timeline }: { flow: FlowResult; timeline: FlowTimeline
   const pctOf = (x: number) => `${(x * 100).toFixed(x > 0.99 && x < 1 ? 2 : 1).replace(/\.0$/, "")}%`;
   return (
     <div>
-      <p className="mb-2 font-mono text-[10.5px] tracking-wider text-subtle uppercase">Traffic by flow</p>
+      <p className="mb-2 text-[13px] text-subtle">Traffic by flow</p>
       <ul className="space-y-2">
         {flow.flows.map((f) => {
           const t = timeline?.flowTotals[f.id];
@@ -187,7 +187,7 @@ function FlowRows({ flow, timeline }: { flow: FlowResult; timeline: FlowTimeline
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="rounded-lg border border-line bg-surface-2 px-2.5 py-2">
-      <p className="font-mono text-[10px] tracking-wider text-subtle uppercase">{label}</p>
+      <p className="text-[13px] text-subtle">{label}</p>
       <p className="font-mono text-[14px] font-semibold text-fg">
         {value}
         {sub && <span className="text-[10.5px] font-normal text-subtle">{sub}</span>}

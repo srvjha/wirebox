@@ -33,7 +33,7 @@ export default function SignInPage() {
   return (
     <div className="mx-auto grid max-w-5xl gap-10 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[1fr_420px] lg:gap-16">
       <div className="lg:pt-6">
-        <p className="font-mono text-[11px] tracking-[0.14em] text-accent uppercase">Optional account</p>
+        <p className="text-[13px] text-accent">Optional account</p>
         <h1 className="mt-3 text-[32px] leading-[1.1] font-semibold tracking-tight text-balance text-fg sm:text-[40px]">
           Keep your progress on every device.
         </h1>

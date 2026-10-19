@@ -13,7 +13,7 @@ function Card({ link, dir }: { link: NeighbourLink; dir: "prev" | "next" }) {
         dir === "next" && "sm:items-end sm:text-right",
       )}
     >
-      <span className="flex items-center gap-1.5 font-mono text-[11px] tracking-wider text-subtle uppercase">
+      <span className="flex items-center gap-1.5 text-[13px] text-subtle">
         {dir === "prev" && <ArrowLeft className="size-3.5 transition-transform group-hover:-translate-x-0.5" />}
         {dir === "prev" ? "Previous" : isDrill ? "Next · Drill" : "Next"}
         {dir === "next" && <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />}
@@ -50,7 +50,7 @@ export function LessonPager({
               aria-disabled="true"
               className="flex flex-col gap-1 rounded-2xl border border-dashed border-line p-4 sm:items-end sm:text-right"
             >
-              <span className="font-mono text-[11px] tracking-wider text-subtle uppercase">Next · coming soon</span>
+              <span className="text-[13px] text-subtle">Next · coming soon</span>
               <span className="text-[15px] font-medium text-muted">{skipped[0].title}</span>
               <span className="text-[12.5px] text-subtle">Being written. Check back soon.</span>
             </div>
@@ -59,7 +59,7 @@ export function LessonPager({
       </div>
       {next && soon.length > 0 && (
         <div className="mt-4 rounded-2xl border border-dashed border-line px-4 py-3">
-          <p className="flex items-center gap-1.5 font-mono text-[11px] tracking-wider text-subtle uppercase">
+          <p className="flex items-center gap-1.5 text-[13px] text-subtle">
             <Clock className="size-3.5" /> Coming soon, skipped for now
           </p>
           <ul className="mt-1.5 space-y-0.5 text-[13.5px] text-subtle">

@@ -232,7 +232,7 @@ export function SignInForm({ providers, guest = false }: { providers: Provider[]
               );
             })}
           </div>
-          <div className="my-6 flex items-center gap-3 font-mono text-[10.5px] tracking-wider text-subtle uppercase">
+          <div className="my-6 flex items-center gap-3 text-[13px] text-subtle">
             <span className="h-px flex-1 bg-line" /> or with email <span className="h-px flex-1 bg-line" />
           </div>
         </>

@@ -57,15 +57,14 @@ function DrillState({ p }: { p: DrillProgress | undefined }) {
   return <span className="text-muted transition-colors group-hover:text-fg">Start</span>;
 }
 
-function DrillRow({ drill, number, p }: { drill: DrillMeta; number: number; p: DrillProgress | undefined }) {
+function DrillRow({ drill, p }: { drill: DrillMeta; p: DrillProgress | undefined }) {
   return (
     <TrackedLink
       plain
       href={`/drills/${drill.slug}`}
       location="drills_index"
-      className="group grid grid-cols-[auto_1fr_auto] items-start gap-x-4 gap-y-3 px-4 py-5 outline-none hover:bg-surface-2/60 focus-visible:bg-surface-2 sm:grid-cols-[2.5rem_auto_1fr_auto] sm:items-center sm:px-5"
+      className="group grid grid-cols-[auto_1fr_auto] items-start gap-x-4 gap-y-3 px-4 py-5 outline-none hover:bg-surface-2/60 focus-visible:bg-surface-2 sm:items-center sm:px-5"
     >
-      <span className="hidden font-mono text-[13px] text-subtle tabular-nums sm:block">{String(number).padStart(2, "0")}</span>
       <span className="grid size-10 place-items-center rounded-lg border border-line bg-surface-2 text-muted transition-colors group-hover:border-accent/40 group-hover:text-accent">
         <DrillIcon slug={drill.slug} className="size-[18px]" />
       </span>
@@ -98,7 +97,6 @@ export function DrillIndex({ drills }: { drills: DrillMeta[] }) {
   const [difficulty, setDifficulty] = useState<DifficultyFilter>("all");
   const progress = useProgress();
   const bySlug = new Map(drills.map((l) => [l.slug, l]));
-  const numberOf = new Map(drillTracks.flatMap((t) => t.slugs).map((s, i) => [s, i + 1]));
 
   const tracks = drillTracks.map((t) => {
     const all = t.slugs.map((s) => bySlug.get(s)).filter((l): l is DrillMeta => !!l && l.status === "live");
@@ -110,7 +108,7 @@ export function DrillIndex({ drills }: { drills: DrillMeta[] }) {
   return (
     <div className="grid gap-10 lg:grid-cols-[220px_1fr]">
       <aside className="lg:sticky lg:top-24 lg:self-start">
-        <p className="font-mono text-[11px] tracking-wider text-subtle uppercase">Difficulty</p>
+        <p className="text-[13px] text-subtle">Difficulty</p>
         <div role="group" aria-label="Filter by difficulty" className="mt-2 flex flex-wrap gap-1.5">
           {(["all", "easy", "medium", "hard"] as const).map((d) => (
             <button
@@ -129,14 +127,14 @@ export function DrillIndex({ drills }: { drills: DrillMeta[] }) {
         </div>
 
         <nav aria-label="Tracks" className="mt-8 hidden lg:block">
-          <p className="font-mono text-[11px] tracking-wider text-subtle uppercase">Tracks</p>
+          <p className="text-[13px] text-subtle">Tracks</p>
           <ol className="mt-2 space-y-1">
             {tracks.map((t, i) => (
               <li key={t.id}>
                 <a href={`#${t.id}`} className="flex items-center gap-3 rounded-lg px-2 py-2 text-[13.5px] text-muted hover:bg-surface hover:text-fg">
-                  <span className="font-mono text-[11px] text-subtle">{i + 1}</span>
+                  <span className="text-[13px] text-subtle tabular-nums">{i + 1}</span>
                   <span className="flex-1">{t.title}</span>
-                  <span className="font-mono text-[11px] text-subtle">
+                  <span className="text-[13px] text-subtle tabular-nums">
                     {t.done}/{t.all.length}
                   </span>
                 </a>
@@ -151,7 +149,7 @@ export function DrillIndex({ drills }: { drills: DrillMeta[] }) {
           <section key={t.id} id={t.id} aria-labelledby={`${t.id}-title`} className="scroll-mt-24">
             <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-1 border-b border-line pb-3">
               <div>
-                <p className="font-mono text-[11px] tracking-wider text-accent uppercase">Track {i + 1}</p>
+                <p className="text-[13px] text-accent">Track {i + 1}</p>
                 <h2 id={`${t.id}-title`} className="mt-1 text-[20px] font-semibold tracking-tight text-fg">
                   {t.title}
                 </h2>
@@ -170,7 +168,7 @@ export function DrillIndex({ drills }: { drills: DrillMeta[] }) {
               <ul className="divide-y divide-line">
                 {t.shown.map((drill) => (
                   <li key={drill.slug}>
-                    <DrillRow drill={drill} number={numberOf.get(drill.slug) ?? 0} p={progress.drills.get(drill.slug)} />
+                    <DrillRow drill={drill} p={progress.drills.get(drill.slug)} />
                   </li>
                 ))}
               </ul>

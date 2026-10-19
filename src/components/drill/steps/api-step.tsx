@@ -273,7 +273,7 @@ function Fields({ fields, onChange, empty }: { fields: ApiField[]; onChange: (f:
 function Label({ text, children }: { text: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-1.5 font-mono text-[10.5px] tracking-wider text-subtle uppercase">{text}</p>
+      <p className="mb-1.5 text-[13px] text-subtle">{text}</p>
       {children}
     </div>
   );

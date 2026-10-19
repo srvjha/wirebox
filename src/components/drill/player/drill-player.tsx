@@ -155,7 +155,7 @@ function Player({ drill, store }: { drill: Drill; store: DrillStore }) {
 
       <div className="flex min-h-0 flex-1">
         <aside className={cn("hidden w-[248px] shrink-0 overflow-y-auto border-r border-line bg-surface/40", listOpen && "lg:block")}>
-          <p className="px-4 pt-4 font-mono text-[10.5px] tracking-wider text-subtle uppercase">{drill.title}</p>
+          <p className="px-4 pt-4 text-[13px] text-subtle">{drill.title}</p>
           {list}
         </aside>
 
@@ -164,7 +164,7 @@ function Player({ drill, store }: { drill: Drill; store: DrillStore }) {
             <button type="button" className="absolute inset-0 bg-black/50" aria-label="Close steps" onClick={() => setDrawer(false)} />
             <div className="absolute inset-y-0 left-0 w-[280px] max-w-[85%] overflow-y-auto border-r border-line bg-bg shadow-card">
               <div className="flex items-center justify-between px-4 pt-4">
-                <p className="font-mono text-[10.5px] tracking-wider text-subtle uppercase">{drill.title}</p>
+                <p className="text-[13px] text-subtle">{drill.title}</p>
                 <button type="button" onClick={() => setDrawer(false)} className="grid size-7 place-items-center rounded-lg text-muted hover:bg-surface-2" aria-label="Close steps">
                   <X className="size-4" />
                 </button>

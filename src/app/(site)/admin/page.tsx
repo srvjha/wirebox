@@ -22,7 +22,7 @@ function pct(a: number, b: number) {
 function Card({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
     <section className={`rounded-2xl border border-line bg-surface p-5 ${className ?? ""}`}>
-      <h2 className="mb-4 font-mono text-[11px] tracking-[0.12em] text-subtle uppercase">{title}</h2>
+      <h2 className="mb-4 text-[13px] text-subtle">{title}</h2>
       {children}
     </section>
   );
@@ -196,7 +196,7 @@ async function AdminGate() {
   return (
     <>
       <header className="mb-8">
-        <p className="font-mono text-[11px] tracking-[0.14em] text-accent uppercase">Admin</p>
+        <p className="text-[13px] text-accent">Admin</p>
         <h1 className="mt-2 text-[30px] font-semibold tracking-tight text-fg">Wirebox stats</h1>
       </header>
       <Dashboard s={stats} />

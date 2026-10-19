@@ -32,7 +32,7 @@ export function ComingSoon({ drill }: { drill: DrillMeta }) {
           </div>
           <h1 className="mt-5 text-[26px] leading-tight font-semibold tracking-tight text-fg">{drill.title}</h1>
           <p className="mt-2 text-[15.5px] leading-relaxed text-muted">{drill.tagline}</p>
-          <p className="mt-6 font-mono text-[10.5px] tracking-wider text-subtle uppercase">You&apos;ll practise</p>
+          <p className="mt-6 text-[13px] text-subtle">You&apos;ll practise</p>
           <ul className="mt-2 flex flex-wrap gap-2">
             {drill.concepts.map((c) => (
               <li key={c} className="rounded-full border border-line bg-surface-2 px-3 py-1 text-[13px] text-fg">

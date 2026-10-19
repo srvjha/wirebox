@@ -73,14 +73,14 @@ export function FinishStepView({ drill, step, index, store }: Props) {
       <div className="mt-6 max-w-[680px] space-y-3 text-[15.5px] leading-relaxed text-muted [&_strong]:text-fg">{step.body}</div>
 
       <section className="mt-10">
-        <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">Your final architecture</h2>
+        <h2 className="text-[13px] text-subtle">Your final architecture</h2>
         <div className="mt-3 h-[380px] overflow-hidden rounded-2xl border border-line">
           <DesignCanvas drill={drill.slug} store={store} palette={[]} dbLabel={dbLabel} selected={null} onSelect={() => {}} frame={null} locked />
         </div>
       </section>
 
       <section className="mt-10">
-        <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">What you built, step by step</h2>
+        <h2 className="text-[13px] text-subtle">What you built, step by step</h2>
         <ol className="mt-3 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
           {designs.map((d) => {
             const r = runs[d.id];
@@ -105,7 +105,7 @@ export function FinishStepView({ drill, step, index, store }: Props) {
       </section>
 
       <section className="mt-10">
-        <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">Concepts you used</h2>
+        <h2 className="text-[13px] text-subtle">Concepts you used</h2>
         <div className="mt-3 flex flex-wrap gap-2">
           {concepts.map((c) => (
             <span key={c.term} title={c.text} className="rounded-full border border-line bg-surface px-3 py-1 text-[13px] text-fg">
@@ -117,7 +117,7 @@ export function FinishStepView({ drill, step, index, store }: Props) {
 
       <div className="mt-10 grid gap-4 md:grid-cols-2">
         <section>
-          <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">Go deeper</h2>
+          <h2 className="text-[13px] text-subtle">Go deeper</h2>
           <ul className="mt-3 space-y-2">
             {lessons.map((l) => (
               <li key={l.slug}>
@@ -136,7 +136,7 @@ export function FinishStepView({ drill, step, index, store }: Props) {
           </ul>
         </section>
         <section>
-          <h2 className="font-mono text-[11px] tracking-wider text-subtle uppercase">Next drill</h2>
+          <h2 className="text-[13px] text-subtle">Next drill</h2>
           <ul className="mt-3 space-y-2">
             {drills.map((l) => (
               <li key={l.slug}>

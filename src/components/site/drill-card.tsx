@@ -97,7 +97,7 @@ export function DrillCard({
           <Badge>Coming soon</Badge>
         )}
       </div>
-      <p className="mt-4 font-mono text-[10.5px] tracking-[0.08em] text-subtle uppercase">{drill.product}</p>
+      <p className="mt-4 text-[13px] text-subtle">{drill.product}</p>
       <h3 className="mt-1 text-[16px] font-semibold tracking-tight text-fg">{drill.title}</h3>
       <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">{drill.tagline}</p>
       <ul className="mt-4 flex flex-wrap gap-1.5" aria-label="Concepts">

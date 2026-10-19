@@ -123,7 +123,7 @@ export function CourseTree({
       <nav aria-label="Course contents" className="space-y-5 pb-6">
         {shown.map((part) => (
           <div key={part.n}>
-            <p className="px-4 pb-1.5 font-mono text-[10.5px] tracking-wider text-subtle uppercase">
+            <p className="px-4 pb-1.5 text-[13px] text-subtle">
               Part {part.n} · {part.title}
             </p>
             <ul className="space-y-0.5 px-2">
@@ -212,7 +212,7 @@ function TreeLesson({
       {lesson.live ? (
         <KindIcon kind={lesson.kind} className="mt-0.5" />
       ) : (
-        <span className="mt-px shrink-0 font-mono text-[9.5px] tracking-wide text-subtle uppercase">soon</span>
+        <span className="mt-px shrink-0 text-[13px] text-subtle">soon</span>
       )}
     </>
   );

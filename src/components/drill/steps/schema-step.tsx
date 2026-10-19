@@ -59,7 +59,7 @@ export function SchemaStepView({ drill, step, index, store, onNext }: Props) {
         {step.body}
       </div>
 
-      <h2 className="mt-8 font-mono text-[11px] tracking-wider text-subtle uppercase">1 · Pick a database</h2>
+      <h2 className="mt-8 text-[13px] text-subtle">1 · Pick a database</h2>
       <div className="mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3" role="radiogroup">
         {step.engines.map((e) => (
           <button
@@ -78,7 +78,7 @@ export function SchemaStepView({ drill, step, index, store, onNext }: Props) {
           >
             <span className="flex items-center justify-between gap-2">
               <span className="text-[14.5px] font-semibold text-fg">{e.label}</span>
-              <span className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[9.5px] tracking-wide text-subtle uppercase">{e.family}</span>
+              <span className="rounded-full border border-line px-1.5 py-0.5 text-[13px] text-subtle">{e.family}</span>
             </span>
             <span className="mt-1 block text-[12.5px] leading-snug text-muted">{e.blurb}</span>
           </button>
@@ -86,7 +86,7 @@ export function SchemaStepView({ drill, step, index, store, onNext }: Props) {
       </div>
       {engine && <p className="mt-3 rounded-xl border border-line bg-surface px-4 py-3 text-[13.5px] leading-relaxed text-muted">{engine.fit}</p>}
 
-      <h2 className="mt-8 font-mono text-[11px] tracking-wider text-subtle uppercase">
+      <h2 className="mt-8 text-[13px] text-subtle">
         2 · Design the {sqlish ? "tables" : engine?.family === "Document" ? "collections" : "tables"}
       </h2>
       {!sqlish && (
@@ -116,7 +116,7 @@ export function SchemaStepView({ drill, step, index, store, onNext }: Props) {
               </button>
             </header>
             <div className="divide-y divide-line">
-              <div className="hidden grid-cols-[1fr_150px_52px_60px_32px] gap-2 px-3 py-1.5 font-mono text-[10px] tracking-wider text-subtle uppercase sm:grid">
+              <div className="hidden grid-cols-[1fr_150px_52px_60px_32px] gap-2 px-3 py-1.5 text-[13px] text-subtle sm:grid">
                 <span>Column</span>
                 <span>Type</span>
                 <span className="text-center">PK</span>

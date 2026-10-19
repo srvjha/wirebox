@@ -18,7 +18,7 @@ export function StepFrame({
 }) {
   return (
     <div className={cn("mx-auto w-full px-4 py-10 sm:px-6 sm:py-14", wide ? "max-w-[880px]" : "max-w-[720px]")}>
-      <p className="font-mono text-[11px] tracking-wider text-accent uppercase">{eyebrow}</p>
+      <p className="text-[13px] text-accent">{eyebrow}</p>
       <h1 className="mt-2 text-[28px] leading-tight font-semibold tracking-tight text-fg sm:text-[32px]">{title}</h1>
       <div className="mt-6">{children}</div>
       {footer && <div className="mt-10 flex flex-wrap items-center gap-3 border-t border-line pt-6">{footer}</div>}

@@ -85,7 +85,7 @@ async function Lesson({ slug }: { slug: string }) {
                     {lesson.module.title}
                   </Link>
                 </nav>
-                <p className="mt-6 font-mono text-[11.5px] tracking-wider text-accent uppercase">
+                <p className="mt-6 text-[13px] text-accent">
                   Module {lesson.module.n} · Lesson {lesson.index + 1} of {lesson.module.lessons.length}
                 </p>
                 <h1 className="mt-2 text-[2rem] leading-[1.15] font-semibold tracking-tight text-balance text-fg sm:text-[2.4rem]">
