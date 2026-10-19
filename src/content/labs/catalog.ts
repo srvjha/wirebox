@@ -85,7 +85,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 55,
     concepts: ["Seat holds", "Locking", "Double-booking"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "payments",
@@ -95,7 +95,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "hard",
     minutes: 65,
     concepts: ["Idempotency keys", "Outbox", "Reconciliation"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "ride-dispatch",
@@ -105,7 +105,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "hard",
     minutes: 60,
     concepts: ["Geo-indexing", "Matching", "Location updates"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "collab-editor",
