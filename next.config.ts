@@ -11,13 +11,6 @@ const nextConfig: NextConfig = {
   pageExtensions: ["ts", "tsx", "md", "mdx"],
   // PostHog API calls use trailing slashes.
   skipTrailingSlashRedirect: true,
-  // Labs were renamed to drills; keep old links working.
-  async redirects() {
-    return [
-      { source: "/labs", destination: "/drills", permanent: true },
-      { source: "/labs/:slug", destination: "/drills/:slug", permanent: true },
-    ];
-  },
   async rewrites() {
     return [
       { source: "/ingest/static/:path*", destination: `${posthogAssets}/static/:path*` },

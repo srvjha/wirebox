@@ -169,6 +169,36 @@ export const labCatalog: LabMeta[] = [
   },
 ];
 
+export type DrillTrack = { id: string; title: string; blurb: string; slugs: string[] };
+
+/** How the drills index groups the catalogue. Every slug appears exactly once. */
+export const drillTracks: DrillTrack[] = [
+  {
+    id: "reads",
+    title: "Serve it fast",
+    blurb: "Read-heavy products where caching, storage and the edge do most of the work.",
+    slugs: ["url-shortener", "pastebin", "search-autocomplete", "video-platform"],
+  },
+  {
+    id: "fanout",
+    title: "Fan it out",
+    blurb: "One write, many readers: queues, workers and precomputed timelines.",
+    slugs: ["notifications", "news-feed", "ranked-feed"],
+  },
+  {
+    id: "realtime",
+    title: "Keep it live",
+    blurb: "Open connections, pub/sub and state that changes every second.",
+    slugs: ["chat", "presence", "collab-editor", "ride-dispatch"],
+  },
+  {
+    id: "correct",
+    title: "Get it exactly right",
+    blurb: "Money, seats and files, where a race or a retry costs real people.",
+    slugs: ["ticket-booking", "payments", "file-sync", "key-value-store"],
+  },
+];
+
 export function getLabMeta(slug: string) {
   return labCatalog.find((l) => l.slug === slug);
 }
