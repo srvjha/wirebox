@@ -35,7 +35,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "easy",
     minutes: 40,
     concepts: ["Object storage", "CDN", "TTL & expiry"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "notifications",
@@ -45,7 +45,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 50,
     concepts: ["Queues", "Workers", "Retries", "Idempotency"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "video-platform",
@@ -145,7 +145,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 45,
     concepts: ["Heartbeats", "Pub/sub", "Fan-out"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "search-autocomplete",
@@ -155,7 +155,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 50,
     concepts: ["Tries", "Top-k", "Caching"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "key-value-store",

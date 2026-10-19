@@ -5,9 +5,13 @@ import { collabEditor } from "./collab-editor";
 import { fileSync } from "./file-sync";
 import { keyValueStore } from "./key-value-store";
 import { newsFeed } from "./news-feed";
+import { notifications } from "./notifications";
+import { pastebin } from "./pastebin";
 import { payments } from "./payments";
+import { presence } from "./presence";
 import { rankedFeed } from "./ranked-feed";
 import { rideDispatch } from "./ride-dispatch";
+import { searchAutocomplete } from "./search-autocomplete";
 import { ticketBooking } from "./ticket-booking";
 import { urlShortener } from "./url-shortener";
 import { videoPlatform } from "./video-platform";
@@ -18,15 +22,19 @@ import { videoPlatform } from "./video-platform";
  */
 const labs: Lab[] = [
   urlShortener,
+  pastebin,
+  notifications,
   videoPlatform,
   chat,
   newsFeed,
-  rankedFeed,
   ticketBooking,
   payments,
   rideDispatch,
   collabEditor,
   fileSync,
+  rankedFeed,
+  presence,
+  searchAutocomplete,
   keyValueStore,
 ];
 
