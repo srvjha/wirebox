@@ -35,7 +35,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "easy",
     minutes: 40,
     concepts: ["Object storage", "CDN", "TTL & expiry"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "notifications",
