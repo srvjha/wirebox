@@ -1,7 +1,7 @@
 // Relative imports keep this file runnable under vitest (no path aliases there).
 import type { Constraint, CustomKnob, Flow, FlowIncident, NodeConfig } from "../../../sim";
 import type { CustomCheckContext } from "../../../lib/lab/types";
-import { build, type Spec } from "./graph";
+import type { Spec } from "./graph";
 
 /**
  * Traffic, knobs, checks and pass conditions for each canvas step of the video
