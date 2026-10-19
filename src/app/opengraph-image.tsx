@@ -13,7 +13,7 @@ const C = {
   fg: "#ededec",
   muted: "#a3a3a0",
   subtle: "#6f6f6c",
-  accent: "#3ecf8e",
+  accent: "#f76b15",
   ok: "#3ccf8e",
   err: "#f0605d",
 };

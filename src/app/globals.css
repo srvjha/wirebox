@@ -6,7 +6,7 @@
 :root,
 [data-theme="dark"] {
   color-scheme: dark;
-  /* Supabase-style dark: neutral charcoal surfaces with an emerald brand. */
+  /* Neutral charcoal surfaces with an orange brand. Success states stay green. */
   --bg: #121212;
   --bg-sunken: #0d0d0d;
   --surface: #171717;
@@ -17,10 +17,10 @@
   --fg: #ededed;
   --fg-muted: #a0a0a0;
   --fg-subtle: #8f8f8f;
-  --accent: #3ecf8e;
-  --accent-strong: #5fdca4;
-  --accent-fg: #04140c;
-  --accent-soft: rgb(62 207 142 / 0.12);
+  --accent: #f76b15;
+  --accent-strong: #ff8b3e;
+  --accent-fg: #1a0b02;
+  --accent-soft: rgb(247 107 21 / 0.12);
   --req: #f5a524;
   --res: #3ecf8e;
   --info: #b89cff;
@@ -43,10 +43,10 @@
   --fg: #171717;
   --fg-muted: #565656;
   --fg-subtle: #6b6b6b;
-  --accent: #15965f;
-  --accent-strong: #0f7d4e;
+  --accent: #c2410c;
+  --accent-strong: #9a3412;
   --accent-fg: #ffffff;
-  --accent-soft: rgb(21 150 95 / 0.09);
+  --accent-soft: rgb(194 65 12 / 0.09);
   --req: #d97b06;
   --res: #15965f;
   --info: #7c5cff;

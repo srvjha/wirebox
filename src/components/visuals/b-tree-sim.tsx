@@ -100,7 +100,7 @@ export function BTreeSim() {
     <VisualFrame
       eyebrow="Simulation · B-tree"
       title="Insert, split, search"
-      caption="Each box is a node (a disk page) with room for order − 1 keys. Green: the path the last insert took. Yellow: nodes created by a split. Violet: the search path."
+      caption="Each box is a node (a disk page) with room for order − 1 keys. Orange: the path the last insert took. Yellow: nodes created by a split. Violet: the search path."
     >
       <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
         <Segmented

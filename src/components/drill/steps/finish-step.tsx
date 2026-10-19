@@ -37,7 +37,7 @@ export function FinishStepView({ drill, step, index, store }: Props) {
       track("drill_completed", { drill: drill.slug, seconds: Math.round((Date.now() - (s.startedAt ?? Date.now())) / 1000) });
     }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const colors = ["#3ecf8e", "#f5a524", "#b89cff", "#ededed"];
+    const colors = ["#f76b15", "#3ecf8e", "#b89cff", "#ededed"];
     confetti({ particleCount: 110, spread: 75, origin: { y: 0.35 }, colors, disableForReducedMotion: true });
     const t = setTimeout(() => confetti({ particleCount: 60, spread: 110, origin: { y: 0.45 }, colors, disableForReducedMotion: true }), 350);
     return () => clearTimeout(t);

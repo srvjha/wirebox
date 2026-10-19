@@ -82,7 +82,7 @@ export function PollingVsPush() {
   return (
     <VisualFrame
       title="How much does “any change?” cost?"
-      hint="One phone's minute on the seat map, three ways. Green marks are seats being booked. Move the sliders and watch the server load below."
+      hint="One phone's minute on the seat map, three ways. Orange marks are seats being booked. Move the sliders and watch the server load below."
     >
       <div className="grid gap-4 sm:grid-cols-3">
         <RangeControl

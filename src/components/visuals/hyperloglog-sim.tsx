@@ -49,7 +49,7 @@ function RegisterGrid({ regs, p }: { regs: Uint8Array; p: number }) {
     const ctx = c.getContext("2d");
     if (!ctx) return;
     const css = getComputedStyle(c);
-    const accent = css.getPropertyValue("--accent").trim() || "#3ecf8e";
+    const accent = css.getPropertyValue("--accent").trim() || "#f76b15";
     const empty = css.getPropertyValue("--surface-3").trim() || "#222";
     const cell = (size / cols) * dpr;
     const gap = cols <= 32 ? Math.max(1, cell * 0.08) : 0;

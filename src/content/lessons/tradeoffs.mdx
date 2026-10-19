@@ -44,7 +44,7 @@ A handful of tradeoffs show up in nearly every system. Learn their names now; ea
   <circle cx={160} cy={244} r={6} fill="var(--accent)" />
 </Diagram>
 
-The green dots show where Gatepass sits on day zero: close to the left on everything. That's the right place for a small app. The dots will drift right as the app grows, but only when a real problem pushes them.
+The orange dots show where Gatepass sits on day zero: close to the left on everything. That's the right place for a small app. The dots will drift right as the app grows, but only when a real problem pushes them.
 
 - **Latency vs consistency.** Reading from a nearby copy or a cache is fast but might be stale. Always reading the primary database is correct but slower and puts all the load in one place.
 - **Simplicity vs scalability.** One server is easy to understand and debug. Ten servers handle more traffic but bring load balancing, shared sessions and partial failures.

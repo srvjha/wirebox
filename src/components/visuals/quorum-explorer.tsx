@@ -53,7 +53,7 @@ export function QuorumExplorer() {
     <VisualFrame
       eyebrow="Try it · quorums"
       title="Does the read see the write?"
-      hint="A write of v2 reached the first W replicas (green). The read asks R replicas (violet ring). Click replicas to choose which ones the read hits."
+      hint="A write of v2 reached the first W replicas (orange). The read asks R replicas (violet ring). Click replicas to choose which ones the read hits."
     >
       <div className="grid gap-x-5 gap-y-3 sm:grid-cols-3">
         <Slider

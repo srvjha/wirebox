@@ -19,8 +19,8 @@ export default function Icon() {
     >
       <svg width="50" height="50" viewBox="0 0 24 24">
         <rect x="2.5" y="2.5" width="8" height="8" rx="2" fill="none" stroke="#ededec" strokeWidth="2" />
-        <rect x="13.5" y="13.5" width="8" height="8" rx="2" fill="#3ecf8e" />
-        <path d="M10.5 6.5h3.5a3 3 0 0 1 3 3v4" fill="none" stroke="#3ecf8e" strokeWidth="2" strokeLinecap="round" />
+        <rect x="13.5" y="13.5" width="8" height="8" rx="2" fill="#f76b15" />
+        <path d="M10.5 6.5h3.5a3 3 0 0 1 3 3v4" fill="none" stroke="#f76b15" strokeWidth="2" strokeLinecap="round" />
       </svg>
     </div>,
     size,
