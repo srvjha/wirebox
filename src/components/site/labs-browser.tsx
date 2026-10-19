@@ -77,6 +77,7 @@ export function LabsBrowser({ labs }: { labs: LabMeta[] }) {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [difficulty, setDifficulty] = useState<DifficultyFilter>("all");
   const progress = useProgress();
+  const anySoon = labs.some((l) => l.status === "soon");
 
   const byStatus = (s: StatusFilter) => labs.filter((l) => s === "all" || l.status === s);
   const byDifficulty = (d: DifficultyFilter) => labs.filter((l) => d === "all" || l.difficulty === d);
@@ -87,20 +88,22 @@ export function LabsBrowser({ labs }: { labs: LabMeta[] }) {
   return (
     <div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Segmented
-          label="Filter by status"
-          value={status}
-          onChange={setStatus}
-          options={[
-            { value: "all", label: "All", count: byDifficulty(difficulty).length },
-            { value: "live", label: "Live", count: byDifficulty(difficulty).filter((l) => l.status === "live").length },
-            {
-              value: "soon",
-              label: "Coming soon",
-              count: byDifficulty(difficulty).filter((l) => l.status === "soon").length,
-            },
-          ]}
-        />
+        {anySoon && (
+          <Segmented
+            label="Filter by status"
+            value={status}
+            onChange={setStatus}
+            options={[
+              { value: "all", label: "All", count: byDifficulty(difficulty).length },
+              { value: "live", label: "Live", count: byDifficulty(difficulty).filter((l) => l.status === "live").length },
+              {
+                value: "soon",
+                label: "Coming soon",
+                count: byDifficulty(difficulty).filter((l) => l.status === "soon").length,
+              },
+            ]}
+          />
+        )}
         <Segmented
           label="Filter by difficulty"
           value={difficulty}

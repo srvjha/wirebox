@@ -5,7 +5,6 @@ import { ArrowRight, BookOpen, CircleCheck, FlaskConical, Trophy } from "lucide-
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
-import { Badge } from "@/components/ui/badge";
 import { getLesson } from "@/content/course";
 import { getLabMeta } from "@/content/labs/catalog";
 import { track } from "@/lib/analytics";
@@ -50,8 +49,11 @@ export function FinishStepView({ lab, step, index, store }: Props) {
   const dbLabel = dbLabelOf(lab, schema);
   const lessons = lab.related.lessons.map(getLesson).filter((l) => !!l);
   const labs = lab.related.labs.map(getLabMeta).filter((l) => !!l);
-  const choose = lab.steps.find((s) => s.type === "choose");
-  const picked = choose?.type === "choose" ? choose.options.find((o) => o.id === choices[choose.id]) : undefined;
+  const picks = lab.steps.flatMap((s) => {
+    if (s.type !== "choose") return [];
+    const option = s.options.find((o) => o.id === choices[s.id]);
+    return option ? [{ id: s.id, label: s.short ?? s.title, option }] : [];
+  });
 
   return (
     <StepFrame eyebrow="Lab complete" title={step.title} wide>
@@ -64,7 +66,7 @@ export function FinishStepView({ lab, step, index, store }: Props) {
             {passed.filter((id) => designs.some((d) => d.id === id)).length} load tests passed
             {minutes ? ` in ${formatMinutes(minutes)}` : ""}.
           </p>
-          <p>From one small server to a design that shrugs off scrapers and dead machines.</p>
+          <p>From one small server to a design that holds up under real traffic and real failures.</p>
         </div>
       </div>
 
@@ -95,11 +97,11 @@ export function FinishStepView({ lab, step, index, store }: Props) {
             );
           })}
         </ol>
-        {picked && (
-          <p className="mt-3 text-[13.5px] text-muted">
-            Slug strategy you picked: <span className="font-medium text-fg">{picked.title}</span>.
+        {picks.map((p) => (
+          <p key={p.id} className="mt-3 text-[13.5px] text-muted">
+            {p.label}, your pick: <span className="font-medium text-fg">{p.option.title}</span>.
           </p>
-        )}
+        ))}
       </section>
 
       <section className="mt-10">
@@ -144,7 +146,7 @@ export function FinishStepView({ lab, step, index, store }: Props) {
                     <span className="block text-[14px] text-fg">{l.title}</span>
                     <span className="block text-[12px] text-subtle">{l.tagline}</span>
                   </span>
-                  {l.status === "soon" ? <Badge>Soon</Badge> : <ArrowRight className="size-4 text-subtle" />}
+                  <ArrowRight className="size-4 text-subtle" />
                 </Link>
               </li>
             ))}

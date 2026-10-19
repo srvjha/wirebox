@@ -23,7 +23,9 @@ export default function LabsPage() {
           Each lab is a product brief and a blank canvas. You write the API, model the data and wire up the
           architecture, then a simulator throws real traffic at it, step by step, until something gives.{" "}
           <span className="text-fg">
-            {live} live, {labCatalog.length - live} on the way.
+            {live === labCatalog.length
+              ? `${live} labs, all playable.`
+              : `${live} live, ${labCatalog.length - live} on the way.`}
           </span>
         </p>
       </header>
