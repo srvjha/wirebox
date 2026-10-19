@@ -55,7 +55,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 60,
     concepts: ["Upload pipelines", "Transcoding", "Adaptive bitrate", "CDN"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "chat",
@@ -65,7 +65,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 60,
     concepts: ["WebSockets", "Ordering", "Offline delivery", "Receipts"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "news-feed",
@@ -75,7 +75,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 55,
     concepts: ["Fan-out", "Timeline cache", "Hot users"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "ticket-booking",
@@ -135,7 +135,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 50,
     concepts: ["Counters", "Ranking", "Write-heavy"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "presence",

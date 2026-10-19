@@ -1,12 +1,16 @@
 import type { Lab } from "@/lib/lab/types";
 import { getLabMeta } from "./catalog";
+import { chat } from "./chat";
 import { collabEditor } from "./collab-editor";
 import { fileSync } from "./file-sync";
 import { keyValueStore } from "./key-value-store";
+import { newsFeed } from "./news-feed";
 import { payments } from "./payments";
+import { rankedFeed } from "./ranked-feed";
 import { rideDispatch } from "./ride-dispatch";
 import { ticketBooking } from "./ticket-booking";
 import { urlShortener } from "./url-shortener";
+import { videoPlatform } from "./video-platform";
 
 /**
  * Playable labs. A lab is live when it's registered here and its catalogue
@@ -14,6 +18,10 @@ import { urlShortener } from "./url-shortener";
  */
 const labs: Lab[] = [
   urlShortener,
+  videoPlatform,
+  chat,
+  newsFeed,
+  rankedFeed,
   ticketBooking,
   payments,
   rideDispatch,
