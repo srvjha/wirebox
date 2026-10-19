@@ -65,7 +65,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 60,
     concepts: ["WebSockets", "Ordering", "Offline delivery", "Receipts"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "news-feed",
