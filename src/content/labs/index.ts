@@ -1,6 +1,7 @@
 import type { Lab } from "@/lib/lab/types";
 import { getLabMeta } from "./catalog";
 import { payments } from "./payments";
+import { rideDispatch } from "./ride-dispatch";
 import { ticketBooking } from "./ticket-booking";
 import { urlShortener } from "./url-shortener";
 
@@ -8,7 +9,7 @@ import { urlShortener } from "./url-shortener";
  * Playable labs. A lab is live when it's registered here and its catalogue
  * entry says "live"; everything else in the catalogue shows "coming soon".
  */
-const labs: Lab[] = [urlShortener, ticketBooking, payments];
+const labs: Lab[] = [urlShortener, ticketBooking, payments, rideDispatch];
 
 export function liveLabs(): Lab[] {
   return labs.filter((l) => getLabMeta(l.slug)?.status === "live");

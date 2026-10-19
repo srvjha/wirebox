@@ -105,7 +105,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "hard",
     minutes: 60,
     concepts: ["Geo-indexing", "Matching", "Location updates"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "collab-editor",
