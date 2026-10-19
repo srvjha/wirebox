@@ -115,7 +115,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "hard",
     minutes: 65,
     concepts: ["OT & CRDTs", "Presence", "Sync"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "file-sync",
