@@ -145,7 +145,7 @@ export const labCatalog: LabMeta[] = [
     difficulty: "medium",
     minutes: 45,
     concepts: ["Heartbeats", "Pub/sub", "Fan-out"],
-    status: "soon",
+    status: "live",
   },
   {
     slug: "search-autocomplete",
