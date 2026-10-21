@@ -1,22 +1,12 @@
 import { ImageResponse } from "next/og";
 import { courseStats } from "@/content/course";
 import { drillCatalog } from "@/content/drills/catalog";
+import { OG as C, OG_SIZE, OgLogo, ogBackground } from "@/lib/og-card";
 
 export const alt = "Wirebox: learn system design by building it. Free for everyone.";
-export const size = { width: 1200, height: 630 };
+export const size = OG_SIZE;
 export const contentType = "image/png";
 
-const C = {
-  bg: "#121212",
-  surface: "#19191b",
-  border: "#353538",
-  fg: "#ededec",
-  muted: "#a3a3a0",
-  subtle: "#6f6f6c",
-  accent: "#f76b15",
-  ok: "#3ccf8e",
-  err: "#f0605d",
-};
 
 function Node({ label, tone }: { label: string; tone?: string }) {
   return (
@@ -59,27 +49,12 @@ export default function OpengraphImage() {
         display: "flex",
         flexDirection: "column",
         padding: "64px 72px",
-        background: C.bg,
-        backgroundImage: `radial-gradient(circle at 85% 0%, rgba(251,124,60,0.18), transparent 45%), radial-gradient(${C.border} 1.2px, transparent 1.2px)`,
-        backgroundSize: "100% 100%, 26px 26px",
+        ...ogBackground,
         color: C.fg,
         fontFamily: "sans-serif",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <svg width="44" height="44" viewBox="0 0 24 24">
-          <rect x="2.5" y="2.5" width="8" height="8" rx="2" fill="none" stroke={C.fg} strokeWidth="1.6" />
-          <rect x="13.5" y="13.5" width="8" height="8" rx="2" fill={C.accent} />
-          <path
-            d="M10.5 6.5h3.5a3 3 0 0 1 3 3v4"
-            fill="none"
-            stroke={C.accent}
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-        </svg>
-        <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: -1 }}>Wirebox</div>
-      </div>
+      <OgLogo />
 
       <div style={{ display: "flex", flexDirection: "column", marginTop: 56 }}>
         <div style={{ fontSize: 76, fontWeight: 700, letterSpacing: -3, lineHeight: 1.02 }}>Learn system design</div>
