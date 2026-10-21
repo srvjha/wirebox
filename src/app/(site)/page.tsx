@@ -8,6 +8,7 @@ import { CacheHitRateExplorer } from "@/components/visuals/cache-hit-rate-explor
 import { allLessons, course, courseStats } from "@/content/course";
 import { drillCatalog, getDrillMeta } from "@/content/drills/catalog";
 import { cn, formatMinutes, SITE } from "@/lib/utils";
+import { AUTH_ENABLED } from "@/lib/features";
 
 export const metadata: Metadata = {
   title: { absolute: `${SITE.name} · Learn system design by building it` },
@@ -194,7 +195,7 @@ export default function Home() {
             <p className={cn(body, "rise rise-2 mt-5 max-w-[46ch]")}>
               The people who most need this material are often the ones least able to pay for it: students, people
               switching careers, developers where a course subscription costs a week&apos;s pay. So there is no paywall,
-              no trial and no upsell. Sign in only to sync progress between devices.
+              no trial and no upsell.{AUTH_ENABLED && " Sign in only to sync progress between devices."}
             </p>
           </div>
           <div>

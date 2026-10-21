@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Logo } from "./logo";
 import { ThemeToggle } from "./theme-toggle";
+import { AUTH_ENABLED } from "@/lib/features";
 import { UserMenu } from "./user-menu";
 
 const nav = [
@@ -26,7 +27,7 @@ export function SiteHeader() {
         </nav>
         <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
           <ThemeToggle />
-          <UserMenu />
+          {AUTH_ENABLED && <UserMenu />}
         </div>
       </div>
     </header>

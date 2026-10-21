@@ -34,8 +34,8 @@ export function Postmortem({ input, returnTo }: { input: PostmortemInput; return
   const signIn = (
     <div className="rounded-xl border border-info/30 bg-info/10 p-3 text-[12.5px] text-muted">
       <p>
-        <span className="font-medium text-fg">Sign in to ask the mentor.</span> It reads your design and points at the
-        bottleneck, without handing you the answer. Free, like everything here.
+        <span className="font-medium text-fg">The AI mentor needs you signed in.</span> It reads your design and points
+        at the bottleneck, without handing you the answer. Free, like everything here.
       </p>
       <Link href={`/sign-in?next=${encodeURIComponent(returnTo)}`} className={buttonClass("secondary", "sm", "mt-2")}>
         Sign in

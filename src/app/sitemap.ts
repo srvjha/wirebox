@@ -3,6 +3,7 @@ import { allLessons } from "@/content/course";
 import { drillCatalog } from "@/content/drills/catalog";
 import { liveLessonSlugs } from "@/content/lessons/live";
 import { SITE } from "@/lib/utils";
+import { AUTH_ENABLED } from "@/lib/features";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = SITE.url.replace(/\/$/, "");
@@ -17,6 +18,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...drillCatalog
       .filter((l) => l.status === "live")
       .map((l) => ({ url: `${base}/drills/${l.slug}`, changeFrequency: "monthly" as const, priority: 0.7 })),
-    { url: `${base}/sign-in`, changeFrequency: "yearly", priority: 0.2 },
+    ...(AUTH_ENABLED ? [{ url: `${base}/sign-in`, changeFrequency: "yearly" as const, priority: 0.2 }] : []),
   ];
 }

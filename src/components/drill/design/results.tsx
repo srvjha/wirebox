@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { compact, nodeTitle } from "../canvas/meta";
 import { Postmortem, type PostmortemInput } from "./postmortem";
 import { QueueLagChart, TimelineChart } from "./timeline-chart";
+import { AUTH_ENABLED } from "@/lib/features";
 
 type Props = {
   result: TestResult;
@@ -115,7 +116,7 @@ export function Results({ result, graph, dbLabel, incident, stale, debrief, post
         </div>
       )}
 
-      {!result.pass && <Postmortem input={postmortem} returnTo={returnTo} />}
+      {!result.pass && AUTH_ENABLED && <Postmortem input={postmortem} returnTo={returnTo} />}
 
       {result.pass && debrief && (
         <div className="rounded-xl border border-accent/30 bg-accent-soft p-3.5">

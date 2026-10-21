@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { AUTH_ENABLED } from "@/lib/features";
 import { LogoMark } from "./logo";
 
 const links = [
   { href: "/learn", label: "Course" },
   { href: "/drills", label: "Drills" },
   { href: "/me", label: "Your progress" },
-  { href: "/sign-in", label: "Sign in" },
+  ...(AUTH_ENABLED ? [{ href: "/sign-in", label: "Sign in" }] : []),
 ];
 
 export function SiteFooter() {

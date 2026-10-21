@@ -8,6 +8,7 @@ import { LogoMark } from "@/components/site/logo";
 import { ThemeToggle } from "@/components/site/theme-toggle";
 import { getDrill } from "@/content/drills";
 import { track } from "@/lib/analytics";
+import { AUTH_ENABLED } from "@/lib/features";
 import { frontier as frontierOf, getDrillStore, type DrillStore } from "@/lib/drill/store";
 import { useDrillSync, type SyncStatus } from "@/lib/drill/sync";
 import type { Drill } from "@/lib/drill/types";
@@ -186,6 +187,13 @@ function Player({ drill, store }: { drill: Drill; store: DrillStore }) {
 }
 
 function SyncBadge({ status, returnTo }: { status: SyncStatus; returnTo: string }) {
+  if (status === "local" && !AUTH_ENABLED) {
+    return (
+      <span className="hidden items-center gap-1.5 px-2 text-[12px] text-subtle sm:flex" title="Progress is saved in this browser.">
+        <CloudOff className="size-3.5" /> Saved locally
+      </span>
+    );
+  }
   if (status === "local") {
     return (
       <Link

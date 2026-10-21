@@ -10,6 +10,7 @@ import { TrackedLink } from "@/components/site/tracked-link";
 import { allLessons, course, type ModuleMeta } from "@/content/course";
 import { getDrillMeta, drillCatalog } from "@/content/drills/catalog";
 import { cn } from "@/lib/utils";
+import { AUTH_ENABLED } from "@/lib/features";
 
 function Bar({ pct, tone = "accent", label }: { pct: number; tone?: "accent" | "ok"; label: string }) {
   return (
@@ -160,7 +161,7 @@ export function ProgressDashboard({ liveLessons }: { liveLessons: string[] }) {
         )}
       </header>
 
-      {!sessionPending && !signedIn && (
+      {AUTH_ENABLED && !sessionPending && !signedIn && (
         <div className="mt-8 flex flex-col gap-4 rounded-2xl border border-accent/30 bg-accent-soft p-5 sm:flex-row sm:items-center">
           <div className="flex-1">
             <p className="text-[14.5px] font-medium text-fg">Sign in to keep this on every device.</p>

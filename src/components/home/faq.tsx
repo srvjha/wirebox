@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { courseStats } from "@/content/course";
+import { AUTH_ENABLED } from "@/lib/features";
 
 const hours = Math.round(courseStats.minutes / 60);
 
@@ -10,8 +11,9 @@ const faqs: { q: string; a: ReactNode }[] = [
     q: "Do I need an account?",
     a: (
       <>
-        No. Your progress saves in this browser as you go. Sign in only if you want it synced across devices. Accounts
-        also help us count how many people are learning, which keeps the project going.
+        No. Your progress saves in this browser as you go.
+        {AUTH_ENABLED &&
+          " Sign in only if you want it synced across devices. Accounts also help us count how many people are learning, which keeps the project going."}
       </>
     ),
   },

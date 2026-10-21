@@ -3,6 +3,7 @@ import { BookOpen, FlaskConical, MousePointerClick } from "lucide-react";
 import { getCourseNav } from "@/components/learn/nav";
 import { ContinueButton, ModuleCard, OverallProgress } from "@/components/learn/path-overview";
 import { courseStats } from "@/content/course";
+import { AUTH_ENABLED } from "@/lib/features";
 
 export const metadata: Metadata = {
   title: "The path",
@@ -41,7 +42,7 @@ export default function LearnPage() {
         <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
           <ContinueButton parts={parts} className="max-w-full" />
           <p className="text-[15px] text-subtle">
-            {live} of {courseStats.lessons} lessons out now. Progress saves in your browser; sign in to keep it everywhere.
+            {live} of {courseStats.lessons} lessons out now. Progress saves in your browser{AUTH_ENABLED ? "; sign in to keep it everywhere and to use the AI mentor in drills." : "."}
           </p>
         </div>
         <OverallProgress parts={parts} />
