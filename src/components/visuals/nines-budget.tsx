@@ -43,7 +43,7 @@ export function NinesBudget() {
         label="Availability target"
         value={target}
         onChange={(v) => {
-          track("target", v);
+          track();
           setTarget(v);
         }}
         options={TARGETS.map((x) => ({ value: x, label: `${x}%` }))}
@@ -66,8 +66,8 @@ export function NinesBudget() {
         max={120}
         value={outage}
         onChange={(e) => setOutage(Number(e.target.value))}
-        onPointerUp={() => track("outage_minutes", outage)}
-        onKeyUp={() => track("outage_minutes", outage)}
+        onPointerUp={() => track()}
+        onKeyUp={() => track()}
         className="mt-1 w-full accent-[var(--accent)]"
       />
       <div className="mt-2 h-3 overflow-hidden rounded-full bg-surface-3" role="img" aria-label={`${Math.round(burn * 100)} percent of the error budget used`}>
@@ -93,8 +93,8 @@ export function NinesBudget() {
             value={chain}
             aria-label="Number of services in the request path"
             onChange={(e) => setChain(Number(e.target.value))}
-            onPointerUp={() => track("chain", chain)}
-            onKeyUp={() => track("chain", chain)}
+            onPointerUp={() => track()}
+            onKeyUp={() => track()}
             className="w-28 accent-[var(--accent)]"
           />
           <span className="font-mono text-fg">{chain}</span>
@@ -104,7 +104,7 @@ export function NinesBudget() {
             type="checkbox"
             checked={redundant}
             onChange={(e) => {
-              track("redundant", e.target.checked);
+              track();
               setRedundant(e.target.checked);
             }}
             className="size-3.5 accent-[var(--accent)]"

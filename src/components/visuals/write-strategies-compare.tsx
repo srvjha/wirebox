@@ -55,7 +55,7 @@ export function WriteStrategiesCompare() {
       },
       around: { ...c.around, cache: null, db: v, lastMs: DB_MS, note: "Database updated, old cached copy deleted. Next read is a miss.", tone: "ok" },
     }));
-    trackVisual(VISUAL, "write", v);
+    trackVisual(VISUAL);
   }
 
   function read() {
@@ -77,7 +77,7 @@ export function WriteStrategiesCompare() {
       }
       return out;
     });
-    trackVisual(VISUAL, "read", true);
+    trackVisual(VISUAL);
   }
 
   function flush() {
@@ -92,7 +92,7 @@ export function WriteStrategiesCompare() {
         tone: c.back.dirty ? "ok" : "muted",
       },
     }));
-    trackVisual(VISUAL, "flush", true);
+    trackVisual(VISUAL);
   }
 
   function crash() {
@@ -115,7 +115,7 @@ export function WriteStrategiesCompare() {
       }
       return out;
     });
-    trackVisual(VISUAL, "crash_cache", true);
+    trackVisual(VISUAL);
   }
 
   return (
@@ -143,7 +143,7 @@ export function WriteStrategiesCompare() {
           onClick={() => {
             setCols(initial());
             setNext(START + 500);
-            trackVisual(VISUAL, "reset", true);
+            trackVisual(VISUAL);
           }}
         >
           <RotateCcw className="size-3.5" /> Reset

@@ -45,3 +45,6 @@ next-env.d.ts
 /.agents
 /.claude
 .taste-skill/
+
+# local review notes
+REVIEW_REPORT.md

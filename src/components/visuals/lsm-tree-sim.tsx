@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { BookOpen, Layers, PenLine, RotateCcw, Trash2 } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { mulberry32 } from "./algo-hash";
 import { SimButton, Stat, VisualFrame } from "./algo-kit";
@@ -117,21 +117,21 @@ export function LsmTreeSim() {
       for (let i = 0; i < n; i++) next = put(next, randKey(), `v${next.seq + 1}`);
       return next;
     });
-    track("visual_interacted", { visual: VISUAL, control: n > 1 ? "write_10" : "write", value: s.userWrites + n });
+    trackVisual(VISUAL);
   }
 
   function del() {
     setProbe(null);
     const key = randKey();
     setS((cur) => put(cur, key, null));
-    track("visual_interacted", { visual: VISUAL, control: "delete", value: key });
+    trackVisual(VISUAL);
   }
 
   function doRead(key: string) {
     setReadKey(key);
     const r = read(s, key);
     setProbe(r);
-    track("visual_interacted", { visual: VISUAL, control: "read", value: r.diskReads });
+    trackVisual(VISUAL);
   }
 
   return (
@@ -153,7 +153,7 @@ export function LsmTreeSim() {
         <SimButton
           onClick={() => {
             setS((cur) => ({ ...cur, autoCompact: !cur.autoCompact }));
-            track("visual_interacted", { visual: VISUAL, control: "auto_compact", value: !s.autoCompact });
+            trackVisual(VISUAL);
           }}
           className={cn(!s.autoCompact && "border-warn/50 text-warn")}
         >
@@ -163,7 +163,7 @@ export function LsmTreeSim() {
           onClick={() => {
             setProbe(null);
             setS((cur) => compactAll(cur));
-            track("visual_interacted", { visual: VISUAL, control: "compact_now", value: s.l0.length });
+            trackVisual(VISUAL);
           }}
           disabled={!s.l0.length && !s.l1}
         >
@@ -173,7 +173,7 @@ export function LsmTreeSim() {
           onClick={() => {
             setS(START);
             setProbe(null);
-            track("visual_interacted", { visual: VISUAL, control: "reset", value: true });
+            trackVisual(VISUAL);
           }}
         >
           <RotateCcw className="size-3.5" /> Reset

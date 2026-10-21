@@ -121,22 +121,22 @@ export function KafkaLogExplorer() {
   const note = s.note;
 
   function produce(key: string) {
-    t("produce", key);
+    t();
     dispatch({ type: "produce", key });
   }
 
   function consume(g: Group) {
-    t(`consume-${g}`, true);
+    t();
     dispatch({ type: "consume", group: g });
   }
 
   function rewind(g: Group) {
-    t(`rewind-${g}`, true);
+    t();
     dispatch({ type: "rewind", group: g });
   }
 
   function tick() {
-    t("advance-hour", s.hour + 1);
+    t();
     dispatch({ type: "tick", retention });
   }
 
@@ -242,7 +242,7 @@ export function KafkaLogExplorer() {
           label="Retention"
           value={String(retention)}
           onChange={(v) => {
-            t("retention", Number(v));
+            t();
             setRetention(Number(v));
           }}
           options={[2, 3, 5].map((h) => ({ value: String(h), label: `${h} h` }))}
@@ -252,7 +252,7 @@ export function KafkaLogExplorer() {
           label="Partitions"
           value={String(s.partitions)}
           onChange={(v) => {
-            t("partitions", Number(v));
+            t();
             dispatch({
               type: "reset",
               partitions: Number(v),
@@ -263,7 +263,7 @@ export function KafkaLogExplorer() {
         />
         <VisualButton
           onClick={() => {
-            t("reset", true);
+            t();
             dispatch({ type: "reset", partitions: s.partitions, note: "Empty topic. Produce a few events." });
           }}
           title="Reset"

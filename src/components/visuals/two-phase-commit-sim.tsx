@@ -214,7 +214,7 @@ export function TwoPhaseCommitSim() {
         <VisualButton
           tone="accent"
           onClick={() => {
-            t("next", s.phase + 1);
+            t();
             dispatch({ type: "next" });
           }}
           disabled={s.crashed || s.phase >= 5}
@@ -224,7 +224,7 @@ export function TwoPhaseCommitSim() {
         <VisualButton
           tone="err"
           onClick={() => {
-            t("crash", s.phase);
+            t();
             dispatch({ type: "crash" });
           }}
           disabled={s.crashed || s.phase === 0 || s.phase >= 5}
@@ -234,7 +234,7 @@ export function TwoPhaseCommitSim() {
         <VisualButton
           tone="ok"
           onClick={() => {
-            t("restart", s.stuck);
+            t();
             dispatch({ type: "restart" });
           }}
           disabled={!s.crashed}
@@ -243,7 +243,7 @@ export function TwoPhaseCommitSim() {
         </VisualButton>
         <VisualButton
           onClick={() => {
-            t("reset", true);
+            t();
             dispatch({ type: "reset" });
           }}
           title="Reset"
@@ -263,7 +263,7 @@ export function TwoPhaseCommitSim() {
             disabled={s.phase >= 2}
             aria-pressed={!s.votes[i]}
             onClick={() => {
-              t(`vote-${p.id}`, !s.votes[i]);
+              t();
               dispatch({ type: "vote", i });
             }}
             className={cn(

@@ -118,7 +118,7 @@ export function EvictionPlayground() {
             setPolicy(p);
             setState(EMPTY);
             setRunning(null);
-            trackVisual(VISUAL, "policy", p);
+            trackVisual(VISUAL);
           }}
         />
         <Button
@@ -127,7 +127,7 @@ export function EvictionPlayground() {
           onClick={() => {
             setState(EMPTY);
             setRunning(null);
-            trackVisual(VISUAL, "reset", true);
+            trackVisual(VISUAL);
           }}
         >
           <RotateCcw className="size-3.5" /> Empty cache
@@ -146,7 +146,7 @@ export function EvictionPlayground() {
               disabled={running !== null}
               onClick={() => {
                 setState((s) => access(s, k, policy));
-                trackVisual(VISUAL, "access", k);
+                trackVisual(VISUAL);
               }}
               className={cn(
                 "rounded-lg border px-2.5 py-1 font-mono text-[12px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-50",
@@ -231,7 +231,7 @@ export function EvictionPlayground() {
                   if (running?.seq === i) return setRunning(null);
                   setState(EMPTY);
                   setRunning({ seq: i, pos: 0 });
-                  trackVisual(VISUAL, "sequence", `${seq.id}:${policy}`);
+                  trackVisual(VISUAL);
                 }}
               >
                 {running?.seq === i ? <Square className="size-3.5" /> : <Play className="size-3.5" />}

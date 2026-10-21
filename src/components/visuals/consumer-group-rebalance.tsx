@@ -198,7 +198,7 @@ export function ConsumerGroupRebalance() {
 
   function setConsumers(n: number) {
     if (n < 1 || n > 8 || n === s.consumers) return;
-    t("consumers", n);
+    t();
     dispatch({ type: "consumers", n });
   }
 
@@ -211,7 +211,7 @@ export function ConsumerGroupRebalance() {
         <VisualButton
           tone="accent"
           onClick={() => {
-            t("running", !s.running);
+            t();
             dispatch({ type: "running", running: !s.running });
           }}
         >
@@ -245,7 +245,7 @@ export function ConsumerGroupRebalance() {
           label="Partition key"
           value={s.keyed ? "keyed" : "none"}
           onChange={(v) => {
-            t("keyed", v === "keyed");
+            t();
             dispatch({ type: "keyed", keyed: v === "keyed" });
           }}
           options={[
@@ -255,7 +255,7 @@ export function ConsumerGroupRebalance() {
         />
         <VisualButton
           onClick={() => {
-            t("reset", true);
+            t();
             dispatch({ type: "reset" });
           }}
           title="Reset"

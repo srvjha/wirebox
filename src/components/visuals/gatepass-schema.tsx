@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { ArrowLeft, ArrowRight, KeyRound, Link2 } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { VisualFrame } from "./foundations-kit";
 
@@ -115,7 +115,7 @@ export function GatepassSchema() {
             aria-checked={selected === x.id}
             onClick={() => {
               setSelected(x.id);
-              track("visual_interacted", { visual: "gatepass-schema", control: "query", value: x.id });
+              trackVisual("gatepass-schema");
             }}
             className={cn(
               "rounded-full border px-3 py-1 text-[12.5px] transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none",

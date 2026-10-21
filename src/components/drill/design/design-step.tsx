@@ -102,10 +102,7 @@ export function DesignStepView({ drill, step, index, store, onNext }: Props) {
           }),
         }).catch(() => {});
       }
-      if (result.pass && !store.getState().passed.includes(step.id)) {
-        store.getState().pass(step.id);
-        track("drill_step_completed", { drill: drill.slug, step: index, type: step.type });
-      }
+      if (result.pass) store.getState().pass(step.id);
     };
 
     const reduce = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -278,10 +275,7 @@ export function DesignStepView({ drill, step, index, store, onNext }: Props) {
                       key={k.id}
                       knob={k}
                       value={knobChoices[k.id] ?? k.default}
-                      onChange={(v) => {
-                        store.getState().setConfigs({ custom: { [k.id]: v } });
-                        track("drill_knob_changed", { drill: drill.slug, knob: `custom_${k.id}`, value: v });
-                      }}
+                      onChange={(v) => store.getState().setConfigs({ custom: { [k.id]: v } })}
                     />
                   ))}
                 </section>

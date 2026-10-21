@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { Segmented, Toggle, VisualFrame } from "./foundations-kit";
 
@@ -75,10 +75,10 @@ export function RequestJourney() {
     return () => cancelAnimationFrame(raf.current);
   }, [playing]);
 
-  const change = (control: string, value: string | boolean) => {
+  const change = () => {
     setT(1);
     setPlaying(false);
-    track("visual_interacted", { visual: "request-journey", control, value });
+    trackVisual("request-journey");
   };
 
   return (
@@ -92,7 +92,7 @@ export function RequestJourney() {
           value={where}
           onChange={(w) => {
             setWhere(w);
-            change("distance", w);
+            change();
           }}
           options={[
             { value: "city", label: "Server in the same city" },
@@ -107,7 +107,7 @@ export function RequestJourney() {
           checked={cachedDns}
           onChange={(v) => {
             setCachedDns(v);
-            change("cached_dns", v);
+            change();
           }}
         />
         <Toggle
@@ -116,7 +116,7 @@ export function RequestJourney() {
           checked={reuse}
           onChange={(v) => {
             setReuse(v);
-            change("keep_alive", v);
+            change();
           }}
         />
       </div>
@@ -174,7 +174,7 @@ export function RequestJourney() {
             const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
             setT(reduce ? 1 : 0);
             setPlaying(!reduce);
-            track("visual_interacted", { visual: "request-journey", control: "play", value: where });
+            trackVisual("request-journey");
           }}
           disabled={playing}
           className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-3 text-[13px] text-fg hover:bg-surface-3 disabled:opacity-60"

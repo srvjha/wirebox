@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ListTree, X } from "lucide-react";
-import { track } from "@/lib/analytics";
 import { useLessonProgress } from "@/lib/progress";
 import { CourseTree } from "./course-tree";
 import { ProgressBar } from "./progress-ui";
@@ -42,10 +41,7 @@ export function LearnSidebar({ parts, current }: { parts: NavPart[]; current?: s
     i: currentModule.lessons.findIndex((l) => l.slug === current),
   };
 
-  const setDrawer = (next: boolean) => {
-    setOpen(next);
-    track("sidebar_toggled", { open: next });
-  };
+  const setDrawer = (next: boolean) => setOpen(next);
 
   useEffect(() => {
     if (!open) return;

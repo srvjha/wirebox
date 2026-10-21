@@ -98,9 +98,9 @@ export function HealthCheckFailover() {
   const lastEvent = [...sim.history].reverse().find((h) => h.event)?.event;
   const worstCase = cfg.interval * cfg.threshold;
 
-  function update(p: Partial<Cfg>, control: string, value: string | number | boolean) {
+  function update(p: Partial<Cfg>) {
     setCfg((c) => ({ ...c, ...p }));
-    trackVisual(VISUAL, control, value);
+    trackVisual(VISUAL);
   }
 
   return (
@@ -114,7 +114,7 @@ export function HealthCheckFailover() {
           label="Health checks"
           description="Balancer calls GET /healthz on every server."
           checked={cfg.checks}
-          onChange={(v) => update({ checks: v }, "checks", v)}
+          onChange={(v) => update({ checks: v })}
         />
         <RangeField
           label="Traffic"
@@ -123,20 +123,20 @@ export function HealthCheckFailover() {
           max={95}
           step={5}
           onChange={(v) => setCfg((c) => ({ ...c, loadPct: v }))}
-          onCommit={(v) => trackVisual(VISUAL, "load", v)}
+          onCommit={() => trackVisual(VISUAL)}
           format={(v) => `${fmt((v / 100) * N * CAP)} req/s (${v}% of 3 servers)`}
         />
         <Segmented
           label="Check every"
           value={String(cfg.interval)}
           options={[2, 5, 10, 30].map((v) => ({ value: String(v), label: `${v} s` }))}
-          onChange={(v) => update({ interval: Number(v) }, "interval", Number(v))}
+          onChange={(v) => update({ interval: Number(v) })}
         />
         <Segmented
           label="Failures before removal"
           value={String(cfg.threshold)}
           options={[1, 2, 3, 5].map((v) => ({ value: String(v), label: String(v) }))}
-          onChange={(v) => update({ threshold: Number(v) }, "threshold", Number(v))}
+          onChange={(v) => update({ threshold: Number(v) })}
         />
       </div>
 
@@ -164,7 +164,7 @@ export function HealthCheckFailover() {
                   removedAt: x.alive ? null : s.removedAt,
                   history: s.history.map((h, k) => (k === s.history.length - 1 ? { ...h, event: x.alive ? `API ${i + 1} died` : `API ${i + 1} restarted` } : h)),
                 }));
-                trackVisual(VISUAL, x.alive ? "kill" : "revive", i + 1);
+                trackVisual(VISUAL);
               }}
             >
               {x.alive ? <Skull className="size-3" /> : <Power className="size-3" />}
@@ -230,7 +230,7 @@ export function HealthCheckFailover() {
           variant="ghost"
           onClick={() => {
             setSim(fresh());
-            trackVisual(VISUAL, "reset", true);
+            trackVisual(VISUAL);
           }}
         >
           <RotateCcw className="size-3.5" /> Reset

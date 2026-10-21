@@ -2,7 +2,7 @@
 
 import { useCallback, useId, type ReactNode } from "react";
 import { MotionConfig } from "motion/react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 
 /**
@@ -41,7 +41,7 @@ export function VisualFrame({
 /** Returns a tracker bound to one visual: `t("control", value)`. */
 export function useVisualTracker(visual: string) {
   return useCallback(
-    (control: string, value: string | number | boolean) => track("visual_interacted", { visual, control, value }),
+    () => trackVisual(visual),
     [visual],
   );
 }

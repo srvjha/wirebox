@@ -81,7 +81,6 @@ export function ShardKeyPicker() {
     >
       <Segmented
         visual={VISUAL}
-        control="shard_key"
         label="Shard key"
         value={key}
         onChange={setKey}

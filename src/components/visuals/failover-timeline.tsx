@@ -40,9 +40,9 @@ export function FailoverTimeline() {
     { label: "Normal again", len: 8, cls: "bg-ok" },
   ];
 
-  function set(p: Partial<Cfg>, control: string, value: string | number | boolean) {
+  function set(p: Partial<Cfg>) {
     setCfg((c) => ({ ...c, ...p }));
-    trackVisual(VISUAL, control, value);
+    trackVisual(VISUAL);
   }
 
   return (
@@ -59,19 +59,19 @@ export function FailoverTimeline() {
             { value: "auto", label: "Automatic" },
             { value: "human", label: "On-call human" },
           ]}
-          onChange={(v) => set({ auto: v === "auto" }, "decider", v)}
+          onChange={(v) => set({ auto: v === "auto" })}
         />
         <Segmented
           label="Failure detected after"
           value={String(cfg.detect)}
           options={[3, 10, 30].map((v) => ({ value: String(v), label: `${v} s` }))}
-          onChange={(v) => set({ detect: Number(v) }, "detect", Number(v))}
+          onChange={(v) => set({ detect: Number(v) })}
         />
         <Toggle
           label="Synchronous replication"
           description="Primary waits for the replica before confirming a write."
           checked={cfg.sync}
-          onChange={(v) => set({ sync: v }, "sync", v)}
+          onChange={(v) => set({ sync: v })}
         />
         <RangeField
           label="Replica lag when it died"
@@ -80,14 +80,14 @@ export function FailoverTimeline() {
           max={2000}
           step={100}
           onChange={(v) => setCfg((c) => ({ ...c, lagMs: v }))}
-          onCommit={(v) => trackVisual(VISUAL, "lag", v)}
+          onCommit={() => trackVisual(VISUAL)}
           format={(v) => (cfg.sync ? "0 ms (sync)" : `${v} ms`)}
         />
         <Toggle
           label="Fence the old primary"
           description="Cut it off so it can't accept writes if it comes back."
           checked={cfg.fencing}
-          onChange={(v) => set({ fencing: v }, "fencing", v)}
+          onChange={(v) => set({ fencing: v })}
         />
       </div>
 
@@ -140,7 +140,7 @@ export function FailoverTimeline() {
           onClick={() => {
             setT(0);
             setReturnedAt(null);
-            trackVisual(VISUAL, "kill_primary", cfg.auto ? "auto" : "human");
+            trackVisual(VISUAL);
           }}
         >
           <Skull className="size-3.5" /> Kill the primary
@@ -151,7 +151,7 @@ export function FailoverTimeline() {
           disabled={!dead || returnedAt !== null || now < promotedAt}
           onClick={() => {
             setReturnedAt(now);
-            trackVisual(VISUAL, "old_primary_returns", cfg.fencing);
+            trackVisual(VISUAL);
           }}
         >
           <Undo2 className="size-3.5" /> Old primary comes back
@@ -162,7 +162,7 @@ export function FailoverTimeline() {
           onClick={() => {
             setT(null);
             setReturnedAt(null);
-            trackVisual(VISUAL, "reset", true);
+            trackVisual(VISUAL);
           }}
         >
           <RotateCcw className="size-3.5" /> Reset

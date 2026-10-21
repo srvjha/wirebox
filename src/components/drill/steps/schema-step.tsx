@@ -27,11 +27,8 @@ export function SchemaStepView({ drill, step, index, store, onNext }: Props) {
     const r = step.checks.map((c) => ({ label: c.label, problem: c.check(schema, api) }));
     const problems = r.filter((x) => x.problem).length;
     setResults(r);
-    track("drill_schema_checked", { drill: drill.slug, step: index, ok: problems === 0, problems });
-    if (problems === 0 && !passed) {
-      store.getState().pass(step.id);
-      track("drill_step_completed", { drill: drill.slug, step: index, type: step.type });
-    }
+    track("drill_step_checked", { drill: drill.slug, step: index, type: "schema", ok: problems === 0, problems });
+    if (problems === 0 && !passed) store.getState().pass(step.id);
   };
 
   const updateTable = (id: string, patch: Partial<Table>) =>
@@ -67,10 +64,7 @@ export function SchemaStepView({ drill, step, index, store, onNext }: Props) {
             type="button"
             role="radio"
             aria-checked={schema.engine === e.id}
-            onClick={() => {
-              set({ ...schema, engine: e.id });
-              track("drill_knob_changed", { drill: drill.slug, knob: "db_engine", value: e.id });
-            }}
+            onClick={() => set({ ...schema, engine: e.id })}
             className={cn(
               "rounded-xl border p-3.5 text-left transition-colors",
               schema.engine === e.id ? "border-accent/60 bg-accent-soft" : "border-line bg-surface hover:border-line-strong",

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import { GitCompareArrows, Play, RotateCcw, Shuffle, StepForward, Wrench } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn, formatNumber } from "@/lib/utils";
 import { hash32, hex32 } from "./algo-hash";
 import { SimButton, Stat, VisualFrame } from "./algo-kit";
@@ -79,17 +79,17 @@ export function MerkleTreeDiff() {
     return () => clearTimeout(t);
   }, [running, done, cmp, a, b, reduce]);
 
-  function changeB(next: string[], control: string, value: string | number) {
+  function changeB(next: string[]) {
     setBBlocks(next);
     setCmp(freshCompare());
     setRunning(false);
-    track("visual_interacted", { visual: VISUAL, control, value });
+    trackVisual(VISUAL);
   }
 
   function toggleBlock(i: number) {
     const next = [...bBlocks];
     next[i] = next[i] === A_BLOCKS[i] ? A_BLOCKS[i].replace("@v1", "@v2") : A_BLOCKS[i];
-    changeB(next, "toggle_block", i);
+    changeB(next);
   }
 
   const bigN = 2 ** 20;
@@ -102,10 +102,10 @@ export function MerkleTreeDiff() {
       caption="Replica A and replica B each hash 16 key ranges into a Merkle tree. Click blocks on replica B to make them differ, then compare: matching hashes end the search for that whole subtree."
     >
       <div className="flex flex-wrap gap-2">
-        <SimButton primary onClick={() => { setRunning(true); track("visual_interacted", { visual: VISUAL, control: "run", value: truthDiff }); }} disabled={done || running}>
+        <SimButton primary onClick={() => { setRunning(true); trackVisual(VISUAL); }} disabled={done || running}>
           <Play className="size-3.5" /> Compare
         </SimButton>
-        <SimButton onClick={() => { setCmp((c) => step(c, a, b)); track("visual_interacted", { visual: VISUAL, control: "step", value: cmp.compared + 1 }); }} disabled={done || running}>
+        <SimButton onClick={() => { setCmp((c) => step(c, a, b)); trackVisual(VISUAL); }} disabled={done || running}>
           <StepForward className="size-3.5" /> Step
         </SimButton>
         <SimButton
@@ -113,15 +113,15 @@ export function MerkleTreeDiff() {
             const i = Math.floor(Math.random() * LEAVES);
             const next = [...bBlocks];
             next[i] = `${blockLabel(i)} @v${2 + Math.floor(Math.random() * 90)}`;
-            changeB(next, "random_change", i);
+            changeB(next);
           }}
         >
           <Shuffle className="size-3.5" /> Change a random block on B
         </SimButton>
-        <SimButton onClick={() => changeB(bBlocks.map((x, i) => (cmp.diffLeaves.includes(i) ? A_BLOCKS[i] : x)), "repair", cmp.diffLeaves.length)} disabled={!done || !cmp.diffLeaves.length}>
+        <SimButton onClick={() => changeB(bBlocks.map((x, i) => (cmp.diffLeaves.includes(i) ? A_BLOCKS[i] : x)))} disabled={!done || !cmp.diffLeaves.length}>
           <Wrench className="size-3.5" /> Repair found blocks
         </SimButton>
-        <SimButton onClick={() => changeB([...A_BLOCKS], "reset", 0)}>
+        <SimButton onClick={() => changeB([...A_BLOCKS])}>
           <RotateCcw className="size-3.5" /> In sync
         </SimButton>
       </div>

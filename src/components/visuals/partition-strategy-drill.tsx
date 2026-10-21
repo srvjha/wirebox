@@ -73,7 +73,7 @@ export function PartitionStrategyDrill() {
           value={strategy}
           onChange={(v) => {
             setStrategy(v);
-            tr("strategy", v);
+            tr();
           }}
           options={[
             { value: "range", label: "Range" },
@@ -81,7 +81,7 @@ export function PartitionStrategyDrill() {
             { value: "directory", label: "Directory" },
           ]}
         />
-        <Toggle label="One blockbuster show (hot key)" checked={hot} onChange={(v) => { setHot(v); tr("hot-key", v); }} />
+        <Toggle label="One blockbuster show (hot key)" checked={hot} onChange={(v) => { setHot(v); tr(); }} />
       </div>
       <p className="mt-2 text-[13px] leading-relaxed text-muted">{COPY[strategy]}</p>
 
@@ -99,7 +99,7 @@ export function PartitionStrategyDrill() {
             );
           })}
         </div>
-        <Slider label="Scan window start (20 shows)" value={from} min={0} max={KEYS - span} onChange={setFrom} onCommit={(v) => tr("scan", v)} className="mt-3" />
+        <Slider label="Scan window start (20 shows)" value={from} min={0} max={KEYS - span} onChange={setFrom} onCommit={tr} className="mt-3" />
       </div>
 
       <div className="mt-3 space-y-1.5" role="list" aria-label="Traffic per partition">

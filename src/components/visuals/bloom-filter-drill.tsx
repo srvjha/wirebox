@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Plus, RotateCcw, Search } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { bloomFpr, bloomHas, bloomPositions, buildBloom } from "./bloom-core";
 import { Range, Segmented, SimButton, Stat, VisualFrame, pct } from "./algo-kit";
@@ -40,12 +40,12 @@ export function BloomFilterDrill() {
   const qReal = set.has(q);
   const addedPos = lastAdded ? bloomPositions(lastAdded, m, k) : [];
 
-  function add(list: string[], control: string) {
+  function add(list: string[]) {
     const fresh = [...new Set(list.map((w) => w.trim().toLowerCase()))].filter((w) => w && !set.has(w));
     if (!fresh.length) return;
     setWords((ws) => [...ws, ...fresh.filter((w) => !ws.includes(w))]);
     setLastAdded(fresh[fresh.length - 1]);
-    track("visual_interacted", { visual: VISUAL, control, value: n + fresh.length });
+    trackVisual(VISUAL);
   }
 
   function addBatch() {
@@ -55,7 +55,7 @@ export function BloomFilterDrill() {
       const w = `user-${n + i++}`;
       if (!set.has(w)) batch.push(w);
     }
-    add(batch, "add_10");
+    add(batch);
   }
 
   // Plot: expected FPR against n, for the current m and k.
@@ -82,7 +82,7 @@ export function BloomFilterDrill() {
           options={[32, 64, 128, 256].map((v) => ({ value: v, label: String(v) }))}
           onChange={(v) => {
             setM(v);
-            track("visual_interacted", { visual: VISUAL, control: "m", value: v });
+            trackVisual(VISUAL);
           }}
         />
         <Range
@@ -91,7 +91,7 @@ export function BloomFilterDrill() {
           max={8}
           value={k}
           onChange={setK}
-          onCommit={(v) => track("visual_interacted", { visual: VISUAL, control: "k", value: v })}
+          onCommit={() => trackVisual(VISUAL)}
         />
       </div>
 
@@ -134,7 +134,7 @@ export function BloomFilterDrill() {
             className="flex gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              add([draft], "insert");
+              add([draft]);
               setDraft("");
             }}
           >
@@ -155,7 +155,7 @@ export function BloomFilterDrill() {
               onClick={() => {
                 setWords(START);
                 setLastAdded(null);
-                track("visual_interacted", { visual: VISUAL, control: "reset", value: true });
+                trackVisual(VISUAL);
               }}
             >
               <RotateCcw className="size-3.5" /> Reset
@@ -168,7 +168,7 @@ export function BloomFilterDrill() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onBlur={() => track("visual_interacted", { visual: VISUAL, control: "check", value: qHit })}
+              onBlur={() => trackVisual(VISUAL)}
               aria-label="Name to check"
               className="h-8 w-full rounded-lg border border-line bg-bg px-3 font-mono text-[13px] text-fg outline-none focus:border-accent/60"
             />

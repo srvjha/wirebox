@@ -78,7 +78,7 @@ export function CacheHitRateExplorer() {
           min={0}
           max={SIZES.length - 1}
           onChange={setSizeIdx}
-          onCommit={(v) => trackVisual(VISUAL, "cache_size", SIZES[v])}
+          onCommit={() => trackVisual(VISUAL)}
           format={(v) => `${fmt(SIZES[v])} pages · ${SIZES[v] * KB_PER_PAGE >= 1000 ? `${fmt((SIZES[v] * KB_PER_PAGE) / 1000, 1)} MB` : `${SIZES[v] * KB_PER_PAGE} KB`}`}
         />
         <RangeField
@@ -87,7 +87,7 @@ export function CacheHitRateExplorer() {
           min={0}
           max={SKEWS.length - 1}
           onChange={setSkewIdx}
-          onCommit={(v) => trackVisual(VISUAL, "skew", SKEWS[v].label)}
+          onCommit={() => trackVisual(VISUAL)}
           format={(v) => SKEWS[v].label}
         />
       </div>

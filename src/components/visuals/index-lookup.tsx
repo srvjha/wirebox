@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Play, RotateCcw } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { Slider, VisualFrame, compact, duration } from "./foundations-kit";
 
@@ -51,7 +51,7 @@ export function IndexLookup() {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     setT(reduce ? 1 : 0);
     setRunning(!reduce);
-    track("visual_interacted", { visual: "index-lookup", control: "run", value: rows });
+    trackVisual("index-lookup");
   };
 
   const scanned = Math.min(TARGET + 1, Math.floor((t * CELLS * 1.1) / 1)); // rows checked so far
@@ -81,7 +81,7 @@ export function IndexLookup() {
             setT(0);
             setRunning(false);
           }}
-          onCommit={(v) => track("visual_interacted", { visual: "index-lookup", control: "rows", value: Math.round(10 ** v) })}
+          onCommit={() => trackVisual("index-lookup")}
         />
       </div>
 

@@ -105,7 +105,7 @@ export function ThunderingHerdSim() {
   function set(key: keyof Opts, v: boolean) {
     setOpts((o) => ({ ...o, [key]: v }));
     setProgress(0);
-    trackVisual(VISUAL, key, v);
+    trackVisual(VISUAL);
   }
 
   const bad = sim.over > 0;
@@ -177,7 +177,7 @@ export function ThunderingHerdSim() {
             variant="ghost"
             onClick={() => {
               setProgress(0);
-              trackVisual(VISUAL, "replay", true);
+              trackVisual(VISUAL);
             }}
           >
             <RotateCcw className="size-3.5" /> Replay

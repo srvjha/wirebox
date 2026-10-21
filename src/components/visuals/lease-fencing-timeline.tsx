@@ -124,7 +124,7 @@ export function LeaseFencingTimeline() {
             setTtl(v);
             reset();
           }}
-          onCommit={(v) => tr("lease", v)}
+          onCommit={tr}
           format={(v) => `${v} s`}
         />
         <Slider
@@ -136,7 +136,7 @@ export function LeaseFencingTimeline() {
             setPause(v);
             reset();
           }}
-          onCommit={(v) => tr("pause", v)}
+          onCommit={tr}
           format={(v) => `${v} s`}
         />
       </div>
@@ -147,7 +147,7 @@ export function LeaseFencingTimeline() {
           onChange={(v) => {
             setFencing(v);
             reset();
-            tr("fencing", v);
+            tr();
           }}
         />
         <Button
@@ -159,7 +159,7 @@ export function LeaseFencingTimeline() {
             } else {
               setCursor(0);
               setPlaying(true);
-              tr("play", true);
+              tr();
             }
           }}
         >

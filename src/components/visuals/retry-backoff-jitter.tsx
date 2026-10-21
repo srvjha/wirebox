@@ -96,17 +96,15 @@ export function RetryBackoffJitter() {
     >
       <Segmented
         visual={VISUAL}
-        control="strategy"
         label="Retry strategy"
         value={strategy}
         onChange={setStrategy}
         options={(Object.keys(LABELS) as Strategy[]).map((s) => ({ value: s, label: LABELS[s] }))}
       />
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <RangeControl visual={VISUAL} control="outage_seconds" label="Outage length" value={outage} min={2} max={20} onChange={setOutage} format={(v) => `${v} s`} />
+        <RangeControl visual={VISUAL} label="Outage length" value={outage} min={2} max={20} onChange={setOutage} format={(v) => `${v} s`} />
         <RangeControl
           visual={VISUAL}
-          control="capacity"
           label="Provider capacity once back"
           value={capacity}
           min={100}

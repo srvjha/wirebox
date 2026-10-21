@@ -48,7 +48,7 @@ export function RaftElectionSim() {
 
   const killLeader = () => {
     if (leader < 0) return;
-    tr("kill-leader", true);
+    tr();
     setSim((s) => {
       const nodes = s.nodes.map((n, i) => (i === leader ? { ...n, alive: false } : n));
       return { ...s, nodes, log: [`${nm(leader)} crashes. Followers stop hearing heartbeats.`, ...s.log].slice(0, 8) };
@@ -56,7 +56,7 @@ export function RaftElectionSim() {
   };
 
   const toggleAlive = (i: number) => {
-    tr("toggle-node", i + 1);
+    tr();
     setSim((s) => {
       const nodes = s.nodes.map((n, k) => (k === i ? { ...n, alive: !n.alive } : n));
       const msg = nodes[i].alive ? `${nm(i)} comes back (term ${nodes[i].term}).` : `${nm(i)} goes down.`;
@@ -65,7 +65,7 @@ export function RaftElectionSim() {
   };
 
   const election = () => {
-    tr("election", split ? "split" : "normal");
+    tr();
     setSim((s) => {
       if (s.nodes.some((n) => n.role === "leader" && n.alive)) {
         return { ...s, log: ["A live leader exists, so nobody times out. Kill it first.", ...s.log].slice(0, 8) };
@@ -162,13 +162,13 @@ export function RaftElectionSim() {
               variant="ghost"
               onClick={() => {
                 setSim(initial());
-                tr("reset", true);
+                tr();
               }}
             >
               <RotateCcw className="size-3.5" /> Reset
             </Button>
           </div>
-          <Toggle label="Two nodes time out together (split vote)" checked={split} onChange={(v) => { setSplit(v); tr("split", v); }} />
+          <Toggle label="Two nodes time out together (split vote)" checked={split} onChange={(v) => { setSplit(v); tr(); }} />
           <ol className="flex-1 space-y-1.5 rounded-xl border border-line bg-surface-2 p-3 text-[12.5px] leading-relaxed" aria-live="polite">
             {sim.log.map((l, i) => (
               <li key={`${l}-${i}`} className={cn(i === 0 ? "text-fg" : "text-muted")}>

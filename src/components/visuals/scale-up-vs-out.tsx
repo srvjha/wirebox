@@ -72,7 +72,7 @@ export function ScaleUpVsOut() {
         min={0}
         max={LOADS.length - 1}
         onChange={setIdx}
-        onCommit={(v) => trackVisual(VISUAL, "load", LOADS[v])}
+        onCommit={() => trackVisual(VISUAL)}
         format={(v) => `${fmt(LOADS[v])} req/s`}
       />
 

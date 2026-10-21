@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { RangeControl, Stat, VisualFrame, fmtMs } from "./scale-visual-parts";
 
@@ -37,7 +37,7 @@ export function SyncAsyncLatency() {
       else next.add(id);
       return next;
     });
-    track("visual_interacted", { visual: VISUAL, control: `defer_${id}`, value: !deferred.has(id) });
+    trackVisual(VISUAL);
   };
 
   return (
@@ -48,7 +48,6 @@ export function SyncAsyncLatency() {
       <div className="grid gap-4 sm:grid-cols-[1fr_1.2fr]">
         <RangeControl
           visual={VISUAL}
-          control="sms_latency"
           label="SMS provider response time"
           value={smsMs}
           min={100}

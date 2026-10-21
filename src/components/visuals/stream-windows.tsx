@@ -90,7 +90,7 @@ export function StreamWindows() {
           label="Window type"
           value={kind}
           onChange={(v) => {
-            track("window", v);
+            track();
             setKind(v);
           }}
           options={[
@@ -163,8 +163,8 @@ export function StreamWindows() {
             max={20}
             value={delay}
             onChange={(e) => setDelay(Number(e.target.value))}
-            onPointerUp={() => track("watermark_delay", delay)}
-            onKeyUp={() => track("watermark_delay", delay)}
+            onPointerUp={() => track()}
+            onKeyUp={() => track()}
             className="mt-1 w-full accent-[var(--accent)]"
           />
         </div>
@@ -182,8 +182,8 @@ export function StreamWindows() {
             max={ARRIVALS.length}
             value={n}
             onChange={(e) => setN(Number(e.target.value))}
-            onPointerUp={() => track("arrived", n)}
-            onKeyUp={() => track("arrived", n)}
+            onPointerUp={() => track()}
+            onKeyUp={() => track()}
             className="mt-1 w-full accent-[var(--accent)]"
           />
         </div>

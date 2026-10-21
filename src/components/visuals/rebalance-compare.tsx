@@ -91,7 +91,7 @@ export function RebalanceCompare() {
           value={scheme}
           onChange={(v) => {
             setScheme(v);
-            tr("scheme", v);
+            tr();
           }}
           options={[
             { value: "mod", label: "hash mod N" },
@@ -99,7 +99,7 @@ export function RebalanceCompare() {
             { value: "ring", label: "Consistent hashing" },
           ]}
         />
-        <Slider className="min-w-44 flex-1" label="Nodes before" value={nodes} min={2} max={9} onChange={setNodes} onCommit={(v) => tr("nodes", v)} />
+        <Slider className="min-w-44 flex-1" label="Nodes before" value={nodes} min={2} max={9} onChange={setNodes} onCommit={tr} />
       </div>
       <p className="mt-2 text-[13px] leading-relaxed text-muted">{COPY[scheme]}</p>
 

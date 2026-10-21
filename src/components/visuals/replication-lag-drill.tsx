@@ -38,7 +38,7 @@ export function ReplicationLagDrill() {
 
   function buy() {
     setWrites((w) => [...w, now]);
-    trackVisual(VISUAL, "buy_ticket", mode);
+    trackVisual(VISUAL);
   }
 
   function read(at: number, writesNow: number[]) {
@@ -62,14 +62,14 @@ export function ReplicationLagDrill() {
 
   function openNow() {
     read(now, writes);
-    trackVisual(VISUAL, "open_tickets", mode);
+    trackVisual(VISUAL);
   }
 
   function buyAndOpen() {
     const w = [...writes, now];
     setWrites(w);
     read(now + STEP, w);
-    trackVisual(VISUAL, "buy_and_open", mode);
+    trackVisual(VISUAL);
   }
 
   return (
@@ -86,7 +86,7 @@ export function ReplicationLagDrill() {
           max={3000}
           step={100}
           onChange={setLag}
-          onCommit={(v) => trackVisual(VISUAL, "lag", v)}
+          onCommit={() => trackVisual(VISUAL)}
           format={(v) => (v === 0 ? "0 ms (instant)" : `${v} ms`)}
         />
         <Segmented
@@ -95,7 +95,7 @@ export function ReplicationLagDrill() {
           options={MODES.map((m) => ({ value: m.value, label: m.label }))}
           onChange={(v) => {
             setMode(v);
-            trackVisual(VISUAL, "fix", v);
+            trackVisual(VISUAL);
           }}
         />
       </div>
@@ -137,7 +137,7 @@ export function ReplicationLagDrill() {
           onClick={() => {
             setWrites([]);
             setReads([]);
-            trackVisual(VISUAL, "reset", true);
+            trackVisual(VISUAL);
           }}
         >
           <RotateCcw className="size-3.5" /> Reset

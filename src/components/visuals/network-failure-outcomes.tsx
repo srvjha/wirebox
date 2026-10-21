@@ -74,7 +74,7 @@ export function NetworkFailureOutcomes() {
         value={scenario}
         onChange={(v) => {
           setScenario(v);
-          t("scenario", v);
+          t();
         }}
         options={(Object.keys(SCEN) as Scenario[]).map((k) => ({ value: k, label: SCEN[k].label }))}
       />
@@ -86,7 +86,7 @@ export function NetworkFailureOutcomes() {
           max={3000}
           step={100}
           onChange={setTimeoutMs}
-          onCommit={(v) => t("timeout", v)}
+          onCommit={t}
           format={(v) => `${v} ms`}
         />
         <div className="flex flex-wrap items-center gap-x-4">
@@ -95,7 +95,7 @@ export function NetworkFailureOutcomes() {
             checked={retry}
             onChange={(v) => {
               setRetry(v);
-              t("retry", v);
+              t();
             }}
           />
           <Toggle
@@ -103,7 +103,7 @@ export function NetworkFailureOutcomes() {
             checked={idem}
             onChange={(v) => {
               setIdem(v);
-              t("idempotency", v);
+              t();
             }}
           />
         </div>

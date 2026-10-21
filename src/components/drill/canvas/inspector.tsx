@@ -4,7 +4,6 @@ import { Lock, Trash, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { IP_PROFILE, MAX_SHARDS, SERVER_SIZES, SPECS, WS_CONN_CAP, nodeCap, nodeCost, nodeMachine, type CustomKnob, type LimiterBy } from "@/sim";
-import { track } from "@/lib/analytics";
 import type { DrillStore } from "@/lib/drill/store";
 import { stepKnobs } from "@/lib/drill/run";
 import type { DesignStep, Knob, Drill } from "@/lib/drill/types";
@@ -28,7 +27,6 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
   const { updateNode, setConfigs, removeNodes } = store.getState();
   if (!node) return null;
   const has = (k: Knob) => knobs.includes(k);
-  const knob = (name: string, value: string | number | boolean) => track("drill_knob_changed", { drill: drill.slug, knob: name, value });
   const meta = KIND_META[node.kind];
   const Icon = meta.icon;
   const lockedNote = <LockedNote />;
@@ -69,10 +67,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
                   <button
                     key={s.id}
                     type="button"
-                    onClick={() => {
-                      updateNode(node.id, { size: s.id });
-                      knob("server_size", s.id);
-                    }}
+                    onClick={() => updateNode(node.id, { size: s.id })}
                     className={cn(
                       "flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors",
                       (node.size ?? "s") === s.id ? "border-accent/60 bg-accent-soft" : "border-line hover:bg-surface-2",
@@ -104,10 +99,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
             {has("healthChecks") ? (
               <Toggle
                 checked={configs.resilience.healthChecks}
-                onChange={(v) => {
-                  setConfigs({ resilience: { healthChecks: v } });
-                  knob("health_checks", v);
-                }}
+                onChange={(v) => setConfigs({ resilience: { healthChecks: v } })}
                 label="Ping each server every second; stop routing to one that fails 3 in a row."
               />
             ) : (
@@ -118,7 +110,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
 
         {(node.kind === "cache" || node.kind === "cdn") && has("hitRate") && (
           <Field label="Hit rate" hint="Share of cacheable requests answered here. Hot, popular content caches well; one-off content doesn't.">
-            <HitRate value={node.hitRate ?? step?.nodeDefaults?.[node.kind]?.hitRate ?? 0.9} onChange={(v) => updateNode(node.id, { hitRate: v })} onCommit={(v) => knob("hit_rate", v)} />
+            <HitRate value={node.hitRate ?? step?.nodeDefaults?.[node.kind]?.hitRate ?? 0.9} onChange={(v) => updateNode(node.id, { hitRate: v })} />
           </Field>
         )}
 
@@ -130,7 +122,6 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
                   <input
                     value={configs.cache.key}
                     onChange={(e) => setConfigs({ cache: { key: e.target.value } })}
-                    onBlur={(e) => knob("cache_key", e.target.value)}
                     placeholder={`link:{${drill.cacheParam}}`}
                     spellCheck={false}
                     className="w-full rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[13px] text-fg outline-none focus:border-accent/60"
@@ -151,10 +142,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
                 <Field label="Value stored">
                   <select
                     value={configs.cache.value ?? ""}
-                    onChange={(e) => {
-                      setConfigs({ cache: { value: e.target.value || null } });
-                      knob("cache_value", e.target.value);
-                    }}
+                    onChange={(e) => setConfigs({ cache: { value: e.target.value || null } })}
                     className="w-full rounded-lg border border-line bg-bg px-3 py-2 text-[13px] text-fg outline-none focus:border-accent/60"
                   >
                     <option value="">Choose a value…</option>
@@ -177,10 +165,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
                     { v: "each", label: "Every request queries" },
                     { v: "coalesce", label: "Coalesce" },
                   ]}
-                  onChange={(v) => {
-                    setConfigs({ cache: { onMiss: v as "each" | "coalesce" } });
-                    knob("cache_on_miss", v);
-                  }}
+                  onChange={(v) => setConfigs({ cache: { onMiss: v as "each" | "coalesce" } })}
                 />
                 <p className="mt-1.5 text-[11.5px] text-subtle">
                   Coalesce: when many requests miss the same key at once, one fetches from the database and the rest wait for it.
@@ -191,10 +176,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
               <Field label="On create">
                 <Toggle
                   checked={configs.cache.writeThrough}
-                  onChange={(v) => {
-                    setConfigs({ cache: { writeThrough: v } });
-                    knob("cache_write_through", v);
-                  }}
+                  onChange={(v) => setConfigs({ cache: { writeThrough: v } })}
                   label="Write-through: put each new link in Redis as soon as it's saved."
                 />
               </Field>
@@ -208,12 +190,8 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
               <LimiterKnobs
                 by={configs.limiter.by}
                 rate={configs.limiter.rate}
-                onBy={(by) => {
-                  setConfigs({ limiter: { by } });
-                  knob("limiter_by", by);
-                }}
+                onBy={(by) => setConfigs({ limiter: { by } })}
                 onRate={(rate) => setConfigs({ limiter: { rate } })}
-                onRateCommit={(rate) => knob("limiter_rate", rate)}
               />
             ) : flowStep ? (
               <p className="text-[12.5px] text-muted">Drops most abusive traffic at the edge so it never reaches your servers.</p>
@@ -233,10 +211,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
                     { v: "primary", label: "Primary" },
                     { v: "replica", label: "Replica" },
                   ]}
-                  onChange={(v) => {
-                    updateNode(node.id, { role: v as "primary" | "replica" });
-                    knob("db_role", v);
-                  }}
+                  onChange={(v) => updateNode(node.id, { role: v as "primary" | "replica" })}
                 />
                 <p className="mt-1.5 text-[11.5px] text-subtle">
                   The primary takes every write. A replica copies them a moment later and can serve reads.
@@ -247,10 +222,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
               <Field label="Failover">
                 <Toggle
                   checked={configs.resilience.failover}
-                  onChange={(v) => {
-                    setConfigs({ resilience: { failover: v } });
-                    knob("failover", v);
-                  }}
+                  onChange={(v) => setConfigs({ resilience: { failover: v } })}
                   label="Automatically promote a replica if the primary stops answering."
                 />
               </Field>
@@ -263,10 +235,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
                     { v: "any", label: "Any copy" },
                     { v: "primary", label: "Primary only" },
                   ]}
-                  onChange={(v) => {
-                    setConfigs({ resilience: { readFrom: v as "any" | "primary" } });
-                    knob("read_from", v);
-                  }}
+                  onChange={(v) => setConfigs({ resilience: { readFrom: v as "any" | "primary" } })}
                 />
               </Field>
             )}
@@ -280,8 +249,6 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
                     step={1}
                     value={node.shards ?? 1}
                     onChange={(e) => updateNode(node.id, { shards: Number(e.target.value) })}
-                    onPointerUp={() => knob("db_shards", node.shards ?? 1)}
-                    onKeyUp={() => knob("db_shards", node.shards ?? 1)}
                     className="flex-1 accent-[var(--accent)]"
                     aria-label="Number of shards"
                   />
@@ -300,10 +267,7 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
             key={k.id}
             knob={k}
             value={chosen[k.id] ?? k.default}
-            onChange={(v) => {
-              setConfigs({ custom: { [k.id]: v } });
-              knob(`custom_${k.id}`, v);
-            }}
+            onChange={(v) => setConfigs({ custom: { [k.id]: v } })}
           />
         ))}
 
@@ -312,7 +276,6 @@ export function Inspector({ drill, store, knobs, step, nodeId, dbLabel, onClose 
             type="button"
             onClick={() => {
               removeNodes([node.id]);
-              track("drill_component_removed", { drill: drill.slug, kind: node.kind });
               onClose();
             }}
             className="flex items-center gap-1.5 text-[12.5px] text-subtle hover:text-err"
@@ -352,7 +315,7 @@ export function KnobSelect({ knob, value, onChange }: { knob: CustomKnob; value:
   );
 }
 
-function HitRate({ value, onChange, onCommit }: { value: number; onChange: (v: number) => void; onCommit: (v: number) => void }) {
+function HitRate({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <div className="flex items-center gap-3">
       <input
@@ -362,8 +325,6 @@ function HitRate({ value, onChange, onCommit }: { value: number; onChange: (v: n
         step={5}
         value={Math.round(value * 100)}
         onChange={(e) => onChange(Number(e.target.value) / 100)}
-        onPointerUp={() => onCommit(value)}
-        onKeyUp={() => onCommit(value)}
         className="flex-1 accent-[var(--accent)]"
         aria-label="Hit rate"
       />
@@ -377,13 +338,11 @@ function LimiterKnobs({
   rate,
   onBy,
   onRate,
-  onRateCommit,
 }: {
   by: LimiterBy;
   rate: number;
   onBy: (b: LimiterBy) => void;
   onRate: (r: number) => void;
-  onRateCommit: (r: number) => void;
 }) {
   const [draft, setDraft] = useState(String(rate));
   return (
@@ -411,8 +370,6 @@ function LimiterKnobs({
               onRate(Number(e.target.value));
               setDraft(e.target.value);
             }}
-            onPointerUp={() => onRateCommit(rate)}
-            onKeyUp={() => onRateCommit(rate)}
             className="flex-1 accent-[var(--accent)]"
             aria-label="Rate limit"
           />
@@ -424,7 +381,6 @@ function LimiterKnobs({
               const n = Number(e.target.value);
               if (Number.isFinite(n) && n > 0) onRate(n);
             }}
-            onBlur={() => onRateCommit(rate)}
             className="w-20 rounded-lg border border-line bg-bg px-2 py-1.5 text-right font-mono text-[13px] text-fg outline-none focus:border-accent/60"
           />
         </div>

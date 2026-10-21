@@ -32,8 +32,7 @@ export function FinishStepView({ drill, step, index, store }: Props) {
     const s = store.getState();
     if (!s.completedAt) {
       s.complete();
-      if (!s.passed.includes(step.id)) s.pass(step.id);
-      track("drill_step_completed", { drill: drill.slug, step: index, type: step.type });
+      s.pass(step.id);
       track("drill_completed", { drill: drill.slug, seconds: Math.round((Date.now() - (s.startedAt ?? Date.now())) / 1000) });
     }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;

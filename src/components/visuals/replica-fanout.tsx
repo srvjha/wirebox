@@ -42,7 +42,7 @@ export function ReplicaFanout() {
           max={6000}
           step={100}
           onChange={setTraffic}
-          onCommit={(v) => trackVisual(VISUAL, "traffic", v)}
+          onCommit={() => trackVisual(VISUAL)}
           format={(v) => `${fmt(v)} req/s`}
         />
         <RangeField
@@ -52,7 +52,7 @@ export function ReplicaFanout() {
           max={40}
           step={1}
           onChange={setWritePct}
-          onCommit={(v) => trackVisual(VISUAL, "write_pct", v)}
+          onCommit={() => trackVisual(VISUAL)}
           format={(v) => `${v}%`}
         />
         <Segmented
@@ -61,7 +61,7 @@ export function ReplicaFanout() {
           options={[0, 1, 2, 3, 4, 5].map((v) => ({ value: String(v), label: String(v) }))}
           onChange={(v) => {
             setReplicas(Number(v));
-            trackVisual(VISUAL, "replicas", Number(v));
+            trackVisual(VISUAL);
           }}
         />
         <Toggle
@@ -70,7 +70,7 @@ export function ReplicaFanout() {
           checked={primaryReads}
           onChange={(v) => {
             setPrimaryReads(v);
-            trackVisual(VISUAL, "primary_reads", v);
+            trackVisual(VISUAL);
           }}
         />
       </div>

@@ -202,7 +202,7 @@ export function TraceWaterfall() {
           setScenarioId(v);
           setSelected(null);
           setVerdict(null);
-          t("scenario", v);
+          t();
         }}
         options={SCENARIOS.map((s) => ({ value: s.id, label: s.label }))}
       />
@@ -236,7 +236,7 @@ export function TraceWaterfall() {
                 onClick={() => {
                   setSelected(s.id);
                   setVerdict(null);
-                  t("span", s.id);
+                  t();
                 }}
                 className={cn(
                   "flex w-full flex-col text-left outline-none focus-visible:bg-surface-3 sm:flex-row sm:items-center",
@@ -281,7 +281,7 @@ export function TraceWaterfall() {
                 onClick={() => {
                   const ok = scenario.culprits.includes(sel.id);
                   setVerdict({ id: sel.id, ok });
-                  t(`blame:${scenario.id}`, ok);
+                  t();
                 }}
                 className="rounded-lg border border-accent/40 bg-accent-soft px-2.5 py-1 text-[12px] font-medium text-accent outline-none hover:border-accent focus-visible:ring-2 focus-visible:ring-accent/60"
               >

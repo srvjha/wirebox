@@ -86,7 +86,7 @@ export function CallChainAvailability() {
         value={mode}
         onChange={(m) => {
           setMode(m);
-          t("mode", m);
+          t();
         }}
         options={[
           { value: "sync", label: "Sync: wait for everyone" },
@@ -122,7 +122,7 @@ export function CallChainAvailability() {
                   disabled={s.id === "booking"}
                   onClick={() => {
                     setDown((d) => ({ ...d, [s.id]: !isDown }));
-                    t(`down:${s.id}`, !isDown);
+                    t();
                   }}
                   className={cn(
                     "grid size-7 shrink-0 place-items-center rounded-lg border outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-30",
@@ -147,7 +147,7 @@ export function CallChainAvailability() {
                     onChange={(e) => {
                       const v = Number(e.target.value);
                       setAvail((x) => ({ ...x, [s.id]: v }));
-                      t(`availability:${s.id}`, v);
+                      t();
                     }}
                     className="rounded-lg border border-line bg-bg px-2 py-1 font-mono text-[12.5px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                   >

@@ -65,11 +65,10 @@ export function QueueWorkerSim() {
       hint="Jobs arrive (PDFs, emails, texts) and workers take them off the queue. At 20 s the on-sale opens and bookings jump 5×. Find a worker count that keeps the wait under a minute."
     >
       <div className="grid gap-4 sm:grid-cols-3">
-        <RangeControl visual={VISUAL} control="arrival_rate" label="Jobs arriving (normal)" value={rate} min={2} max={60} onChange={setRate} format={(v) => `${v}/s`} />
-        <RangeControl visual={VISUAL} control="workers" label="Workers" value={workers} min={1} max={40} onChange={setWorkers} />
+        <RangeControl visual={VISUAL} label="Jobs arriving (normal)" value={rate} min={2} max={60} onChange={setRate} format={(v) => `${v}/s`} />
+        <RangeControl visual={VISUAL} label="Workers" value={workers} min={1} max={40} onChange={setWorkers} />
         <RangeControl
           visual={VISUAL}
-          control="processing_ms"
           label="Time per job"
           value={procMs}
           min={50}
@@ -83,7 +82,6 @@ export function QueueWorkerSim() {
         On-sale burst (5× for 30 s):
         <Segmented
           visual={VISUAL}
-          control="burst"
           label="On-sale burst"
           value={burst}
           onChange={setBurst}

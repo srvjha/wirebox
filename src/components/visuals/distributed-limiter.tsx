@@ -94,16 +94,15 @@ export function DistributedLimiter() {
       title="One user, a burst, many servers"
       hint={`The limit is ${LIMIT} requests per second per user. A script fires a burst within ${BURST_MS} ms and the load balancer spreads it across servers. How many get through?`}
     >
-      <Segmented visual={VISUAL} control="mode" label="Where the counter lives" value={mode} onChange={setMode} options={MODES} />
+      <Segmented visual={VISUAL} label="Where the counter lives" value={mode} onChange={setMode} options={MODES} />
       <p className="mt-2 text-[13px] leading-relaxed text-muted">{EXPLAIN[mode]}</p>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
-        <RangeControl visual={VISUAL} control="servers" label="API servers" value={servers} min={1} max={8} onChange={setServers} />
-        <RangeControl visual={VISUAL} control="requests" label="Requests in the burst" value={requests} min={10} max={80} step={5} onChange={setRequests} />
+        <RangeControl visual={VISUAL} label="API servers" value={servers} min={1} max={8} onChange={setServers} />
+        <RangeControl visual={VISUAL} label="Requests in the burst" value={requests} min={10} max={80} step={5} onChange={setRequests} />
         <div className={cn(mode !== "getset" && "opacity-50")}>
           <RangeControl
             visual={VISUAL}
-            control="redis_rtt"
             label="Redis round trip"
             value={rtt}
             min={0.5}

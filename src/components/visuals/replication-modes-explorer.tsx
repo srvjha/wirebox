@@ -187,7 +187,7 @@ export function ReplicationModesExplorer() {
 
   const go = (n: number) => {
     setI(n);
-    tr(`step:${mode}`, n + 1);
+    tr();
   };
 
   return (
@@ -203,7 +203,7 @@ export function ReplicationModesExplorer() {
         onChange={(v) => {
           setMode(v);
           setI(0);
-          tr("mode", v);
+          tr();
         }}
         options={(Object.keys(MODES) as Mode[]).map((k) => ({ value: k, label: MODES[k].label }))}
       />

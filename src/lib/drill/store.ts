@@ -1,6 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { TestResult } from "@/sim";
+import { track } from "@/lib/analytics";
 import { DEFAULT_CONFIGS } from "./run";
 import type { Endpoint, Drill, DrillConfigs, DrillGraph, DrillNode, DrillSave, RunSummary, SchemaDesign, Step } from "./types";
 
@@ -76,6 +77,8 @@ export function getDrillStore(drill: Drill): DrillStore {
           pass: (stepId) => {
             if (get().passed.includes(stepId)) return;
             touch({ passed: [...get().passed, stepId] });
+            const index = drill.steps.findIndex((s) => s.id === stepId);
+            track("drill_step_completed", { drill: drill.slug, step: index, type: drill.steps[index]?.type ?? "unknown" });
           },
           setApi: (reqId, e) => touch({ api: { ...get().api, [reqId]: e } }),
           setSchema: (schema) => touch({ schema }),

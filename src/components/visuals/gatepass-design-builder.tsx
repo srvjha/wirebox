@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Box, Diagram, Wire } from "@/components/diagram/kit";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { Stat, VisualFrame } from "./scale-visual-parts";
 
@@ -140,7 +140,7 @@ export function GatepassDesignBuilder() {
     const next = Math.max(0, Math.min(STEPS.length - 1, to));
     if (next === step) return;
     setStep(next);
-    track("visual_interacted", { visual: VISUAL, control: "step", value: next + 1 });
+    trackVisual(VISUAL);
   };
   const show = (s: number) => n >= s;
   const tone = (s: number) => (n === s ? "accent" : "default") as "accent" | "default";

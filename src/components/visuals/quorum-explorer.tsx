@@ -46,7 +46,7 @@ export function QuorumExplorer() {
       next = [...read.slice(1), i];
     }
     setRead(next);
-    tr("pick-read", i + 1);
+    tr();
   };
 
   return (
@@ -62,7 +62,7 @@ export function QuorumExplorer() {
           min={1}
           max={7}
           onChange={(v) => setSizes(v, w, r)}
-          onCommit={(v) => tr("N", v)}
+          onCommit={tr}
         />
         <Slider
           label="Write acks (W)"
@@ -70,9 +70,9 @@ export function QuorumExplorer() {
           min={1}
           max={n}
           onChange={(v) => setSizes(n, v, r)}
-          onCommit={(v) => tr("W", v)}
+          onCommit={tr}
         />
-        <Slider label="Read from (R)" value={r} min={1} max={n} onChange={(v) => setSizes(n, w, v)} onCommit={(v) => tr("R", v)} />
+        <Slider label="Read from (R)" value={r} min={1} max={n} onChange={(v) => setSizes(n, w, v)} onCommit={tr} />
       </div>
 
       <div className="mt-4 rounded-xl border border-line bg-bg p-4">
@@ -107,7 +107,7 @@ export function QuorumExplorer() {
             variant="secondary"
             onClick={() => {
               setRead(worstRead(n, r));
-              tr("worst-case", true);
+              tr();
             }}
           >
             <TriangleAlert className="size-3.5" /> Worst-case read
@@ -124,7 +124,7 @@ export function QuorumExplorer() {
               }
               setRead(all.slice(0, r).sort((a, b) => a - b));
               setSeed((s) => s + 1);
-              tr("random-read", true);
+              tr();
             }}
           >
             <Shuffle className="size-3.5" /> Random read

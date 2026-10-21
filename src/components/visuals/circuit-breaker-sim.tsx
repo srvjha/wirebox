@@ -147,7 +147,7 @@ export function CircuitBreakerSim() {
           value={health}
           onChange={(v) => {
             setHealth(v);
-            tr("health", v);
+            tr();
           }}
           options={[
             { value: "healthy", label: "Healthy" },
@@ -161,7 +161,7 @@ export function CircuitBreakerSim() {
             variant={playing ? "secondary" : "primary"}
             onClick={() => {
               setPlaying((p) => !p);
-              tr("play", !playing);
+              tr();
             }}
           >
             {playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
@@ -176,7 +176,7 @@ export function CircuitBreakerSim() {
             aria-label="Reset"
             onClick={() => {
               setSim(initial);
-              tr("reset", true);
+              tr();
             }}
           >
             <RotateCcw className="size-3.5" />
@@ -190,7 +190,7 @@ export function CircuitBreakerSim() {
           onChange={(v) => {
             setBreaker(v);
             setSim((s) => ({ ...s, state: "closed", window: [], openUntil: 0 }));
-            tr("breaker", v);
+            tr();
           }}
         />
         <Toggle
@@ -198,7 +198,7 @@ export function CircuitBreakerSim() {
           checked={bulkhead}
           onChange={(v) => {
             setBulkhead(v);
-            tr("bulkhead", v);
+            tr();
           }}
         />
       </div>

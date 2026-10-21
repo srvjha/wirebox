@@ -73,7 +73,7 @@ export function PubSubFanout() {
   }
 
   function publish(count: number) {
-    t("publish", count);
+    t();
     const ids = Array.from({ length: count }, (_, i) => nextId + i);
     setNextId((n) => n + count);
     if (mode === "chain") {
@@ -110,7 +110,7 @@ export function PubSubFanout() {
 
   function toggle(id: string) {
     const s = subs.find((x) => x.id === id)!;
-    t(`toggle-${id}`, !s.up);
+    t();
     setSubs((ss) => ss.map((x) => (x.id === id ? { ...x, up: !x.up } : x)));
     if (mode === "pubsub" && !s.up && s.inbox.length) {
       setMessage(`${s.name} is back and catching up on ${s.inbox.length} missed event${s.inbox.length > 1 ? "s" : ""}.`);
@@ -129,7 +129,7 @@ export function PubSubFanout() {
           label="Wiring"
           value={mode}
           onChange={(m) => {
-            t("mode", m);
+            t();
             setMode(m);
             reset(m);
           }}
@@ -145,7 +145,7 @@ export function PubSubFanout() {
           <VisualButton onClick={() => publish(5)}>×5</VisualButton>
           <VisualButton
             onClick={() => {
-              t("reset", true);
+              t();
               reset();
             }}
             title="Reset"

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useReducedMotion } from "motion/react";
 import { Pause, Play, RotateCcw, Send, Waves, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { VisualFrame } from "./scale-visual-parts";
 
 const VISUAL = "rate-limit-algorithms";
@@ -163,7 +163,7 @@ export function RateLimitAlgorithms() {
     const base = pausedAt.current;
     setArrivals((a) => [...a.filter((t) => t > base - VIEW - 1), ...offsets.map((o) => base + o)].sort((x, y) => x - y));
     if (!running) setRunning(true);
-    track("visual_interacted", { visual: VISUAL, control: "fire", value: kind });
+    trackVisual(VISUAL);
   };
 
   const boundary = () => {
@@ -182,7 +182,7 @@ export function RateLimitAlgorithms() {
     pausedAt.current = 0;
     origin.current = performance.now() / 1000;
     setNow(0);
-    track("visual_interacted", { visual: VISUAL, control: "reset", value: true });
+    trackVisual(VISUAL);
   };
 
   const seen = arrivals.filter((t) => t <= now);
@@ -215,7 +215,7 @@ export function RateLimitAlgorithms() {
             aria-label={running ? "Pause the clock" : "Resume the clock"}
             onClick={() => {
               setRunning((r) => !r);
-              track("visual_interacted", { visual: VISUAL, control: "pause", value: running });
+              trackVisual(VISUAL);
             }}
           >
             {running ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}

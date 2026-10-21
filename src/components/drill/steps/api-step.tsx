@@ -59,11 +59,8 @@ export function ApiStepView({ drill, step, index, store, onNext }: Props) {
     const count = Object.values(found).reduce((n, p) => n + p.length, 0);
     setProblems(found);
     setAttempts((a) => a + 1);
-    track("drill_api_checked", { drill: drill.slug, step: index, ok: count === 0, problems: count });
-    if (count === 0 && !passed) {
-      store.getState().pass(step.id);
-      track("drill_step_completed", { drill: drill.slug, step: index, type: step.type });
-    }
+    track("drill_step_checked", { drill: drill.slug, step: index, type: "api", ok: count === 0, problems: count });
+    if (count === 0 && !passed) store.getState().pass(step.id);
   };
 
   const allOk = problems && Object.values(problems).every((p) => p.length === 0);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { Toggle, VisualFrame, compact, duration } from "./foundations-kit";
 
@@ -55,7 +55,7 @@ export function LatencyLadder() {
         checked={humanScale}
         onChange={(v) => {
           setHumanScale(v);
-          track("visual_interacted", { visual: "latency-ladder", control: "human_scale", value: v });
+          trackVisual("latency-ladder");
         }}
       />
 
@@ -70,7 +70,7 @@ export function LatencyLadder() {
                 aria-pressed={on}
                 onClick={() => {
                   setPicked(r.key);
-                  track("visual_interacted", { visual: "latency-ladder", control: "rung", value: r.key });
+                  trackVisual("latency-ladder");
                 }}
                 className={cn(
                   "grid w-full grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 rounded-xl border px-3 py-2 text-left transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none",

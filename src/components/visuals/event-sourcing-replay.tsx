@@ -100,7 +100,7 @@ export function EventSourcingReplay() {
   ];
 
   function append(ev: Ev) {
-    t("append", ev.type);
+    t();
     setEvents((es) => [...es, ev]);
     setCursor(events.length + 1);
   }
@@ -118,7 +118,7 @@ export function EventSourcingReplay() {
         ))}
         <VisualButton
           onClick={() => {
-            t("reset", true);
+            t();
             setEvents(SEED);
             setCursor(SEED.length);
           }}
@@ -199,8 +199,8 @@ export function EventSourcingReplay() {
           max={events.length}
           value={cursor}
           onChange={(e) => setCursor(Number(e.target.value))}
-          onPointerUp={() => t("cursor", cursor)}
-          onKeyUp={() => t("cursor", cursor)}
+          onPointerUp={() => t()}
+          onKeyUp={() => t()}
           className="mt-1 w-full accent-[var(--accent)]"
         />
         <label className="mt-2 flex items-center gap-2 text-[12.5px] text-muted">
@@ -208,7 +208,7 @@ export function EventSourcingReplay() {
             type="checkbox"
             checked={snapshots}
             onChange={(e) => {
-              t("snapshots", e.target.checked);
+              t();
               setSnapshots(e.target.checked);
             }}
             className="size-3.5 accent-[var(--accent)]"

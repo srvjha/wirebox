@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Plus, X } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { hash32, hex32 } from "./algo-hash";
 import { SERIES, SimButton, Segmented, Stat, VisualFrame, pct } from "./algo-kit";
 
@@ -114,7 +114,7 @@ export function ConsistentHashRing() {
     const name = NAMES.find((n) => !nodes.includes(n));
     if (!name) return;
     apply([...nodes, name], `Added node ${name}`);
-    track("visual_interacted", { visual: VISUAL, control: "add_node", value: nodes.length + 1 });
+    trackVisual(VISUAL);
   }
 
   function removeNode(name: string) {
@@ -123,7 +123,7 @@ export function ConsistentHashRing() {
       nodes.filter((n) => n !== name),
       `Removed node ${name}`,
     );
-    track("visual_interacted", { visual: VISUAL, control: "remove_node", value: name });
+    trackVisual(VISUAL);
   }
 
   return (
@@ -192,7 +192,7 @@ export function ConsistentHashRing() {
             <input
               value={lookup}
               onChange={(e) => setLookup(e.target.value)}
-              onBlur={() => track("visual_interacted", { visual: VISUAL, control: "lookup", value: lookup.length })}
+              onBlur={() => trackVisual(VISUAL)}
               spellCheck={false}
               className="h-9 w-full rounded-lg border border-line bg-bg px-3 font-mono text-[13px] text-fg outline-none focus:border-accent/60"
             />
@@ -237,7 +237,7 @@ export function ConsistentHashRing() {
             onChange={(v) => {
               setVnodes(v);
               setChange(null);
-              track("visual_interacted", { visual: VISUAL, control: "vnodes", value: v });
+              trackVisual(VISUAL);
             }}
           />
 

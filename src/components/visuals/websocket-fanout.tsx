@@ -5,7 +5,7 @@ import { useReducedMotion } from "motion/react";
 import { Power, Ticket } from "lucide-react";
 import { Box, Diagram, Wire } from "@/components/diagram/kit";
 import { Button } from "@/components/ui/button";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { Segmented, Stat, VisualFrame } from "./scale-visual-parts";
 
 const VISUAL = "websocket-fanout";
@@ -52,7 +52,7 @@ export function WebSocketFanout() {
     const usePubsub = pubsub === "on";
     const targets = usePubsub ? up : [source];
     setFlash({ source, targets, pubsub: usePubsub, key: v });
-    track("visual_interacted", { visual: VISUAL, control: "book", value: usePubsub ? "pubsub" : "local" });
+    trackVisual(VISUAL);
     later(900, () => {
       setPhones((ps) => ps.map((p) => (p.online && targets.includes(p.server) ? { ...p, seen: v } : p)));
       say(
@@ -68,7 +68,7 @@ export function WebSocketFanout() {
     if (down !== null) return;
     const victim = 1;
     setDown(victim);
-    track("visual_interacted", { visual: VISUAL, control: "restart_server", value: victim });
+    trackVisual(VISUAL);
     setPhones((ps) => ps.map((p) => (p.server === victim ? { ...p, online: false } : p)));
     say("S2 restarts for a deploy. Its 3 phones lose their sockets and wait a random 1–3 s before reconnecting.");
     const leaving = phones.filter((p) => p.server === victim).map((p) => p.id);
@@ -100,7 +100,7 @@ export function WebSocketFanout() {
     setFlash(null);
     rr.current = 0;
     setLog(["9 phones connected, 3 per server. Everyone has seat map v1832."]);
-    track("visual_interacted", { visual: VISUAL, control: "reset", value: true });
+    trackVisual(VISUAL);
   };
 
   const online = phones.filter((p) => p.online);
@@ -116,7 +116,6 @@ export function WebSocketFanout() {
       <div className="flex flex-wrap items-center gap-2">
         <Segmented
           visual={VISUAL}
-          control="pubsub"
           label="Fan-out"
           value={pubsub}
           onChange={setPubsub}

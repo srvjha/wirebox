@@ -109,7 +109,7 @@ export function CacheAsideStepper() {
     setInCache(v);
     setStep(-1);
     setPlaying(false);
-    trackVisual(VISUAL, "key_in_cache", v);
+    trackVisual(VISUAL);
   }
 
   return (
@@ -135,8 +135,8 @@ export function CacheAsideStepper() {
             onClick={() => {
               if (playing) return setPlaying(false);
               if (step === -1 || done) {
-                const p = start();
-                trackVisual(VISUAL, "send_request", p);
+                start();
+                trackVisual(VISUAL);
               }
               setPlaying(true);
             }}
@@ -163,7 +163,7 @@ export function CacheAsideStepper() {
             variant="ghost"
             onClick={() => {
               setCached(false);
-              trackVisual(VISUAL, "expire", true);
+              trackVisual(VISUAL);
             }}
           >
             <RotateCcw className="size-3.5" /> Expire key

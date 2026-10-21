@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { Segmented, Slider, VisualFrame, bytes, compact } from "./foundations-kit";
 
@@ -62,7 +62,7 @@ export function EstimationCalculator() {
     setV((s) => ({ ...s, ...patch }));
     setPreset("custom");
   };
-  const commit = (control: string, value: number) => track("visual_interacted", { visual: "estimation-calculator", control, value });
+  const commit = () => trackVisual("estimation-calculator");
 
   const results = [
     { label: "Average load", value: `${compact(avg)} req/s`, sub: `${compact(readsDay / DAY)} reads · ${compact(writesDay / DAY)} writes per second` },
@@ -83,7 +83,7 @@ export function EstimationCalculator() {
           if (p === "custom") return;
           setPreset(p);
           setV(presets[p].v);
-          track("visual_interacted", { visual: "estimation-calculator", control: "preset", value: p });
+          trackVisual("estimation-calculator");
         }}
         options={[
           ...Object.entries(presets).map(([value, p]) => ({ value, label: p.label })),
@@ -100,7 +100,7 @@ export function EstimationCalculator() {
           step={0.05}
           display={compact(dau)}
           onChange={(x) => set({ dauLog: x })}
-          onCommit={(x) => commit("dau", Math.round(10 ** x))}
+          onCommit={commit}
         />
         <Slider
           label="Requests per user per day"
@@ -109,7 +109,7 @@ export function EstimationCalculator() {
           max={200}
           display={String(v.actions)}
           onChange={(x) => set({ actions: x })}
-          onCommit={(x) => commit("actions", x)}
+          onCommit={commit}
         />
         <Slider
           label="Reads per write"
@@ -119,7 +119,7 @@ export function EstimationCalculator() {
           step={0.05}
           display={`${ratio} : 1`}
           onChange={(x) => set({ ratioLog: x })}
-          onCommit={(x) => commit("ratio", Math.round(10 ** x))}
+          onCommit={commit}
         />
         <Slider
           label="Average payload"
@@ -129,7 +129,7 @@ export function EstimationCalculator() {
           step={0.05}
           display={bytes(payload)}
           onChange={(x) => set({ payloadLog: x })}
-          onCommit={(x) => commit("payload", Math.round(10 ** x))}
+          onCommit={commit}
         />
         <Slider
           label="Peak factor (busiest second ÷ average)"
@@ -138,7 +138,7 @@ export function EstimationCalculator() {
           max={50}
           display={`× ${v.peak}`}
           onChange={(x) => set({ peak: x })}
-          onCommit={(x) => commit("peak", x)}
+          onCommit={commit}
         />
         <div className="rounded-xl border border-dashed border-line px-3 py-2 text-[12px] leading-relaxed text-subtle">
           <span className="font-mono text-muted">{compact(perDay)}</span> requests a day ÷{" "}

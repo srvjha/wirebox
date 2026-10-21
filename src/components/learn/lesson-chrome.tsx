@@ -28,7 +28,7 @@ export function LessonStatus({ slug }: { slug: string }) {
 }
 
 /** The "What you'll learn" list, built from the lesson's `## ` headings. */
-export function ChapterList({ slug, chapters }: { slug: string; chapters: Chapter[] }) {
+export function ChapterList({ chapters }: { chapters: Chapter[] }) {
   if (!chapters.length) return null;
   return (
     <nav aria-label="What you'll learn" className="mt-8 rounded-2xl border border-line bg-surface p-5">
@@ -40,7 +40,6 @@ export function ChapterList({ slug, chapters }: { slug: string; chapters: Chapte
           <li key={c.id}>
             <a
               href={`#${c.id}`}
-              onClick={() => track("lesson_chapter_clicked", { lesson: slug, chapter: c.id })}
               className="group flex items-baseline gap-3 rounded-lg py-1.5 text-[14px] text-muted transition-colors hover:text-fg"
             >
               <span className="font-mono text-[11px] text-subtle tabular-nums group-hover:text-accent">
@@ -56,7 +55,7 @@ export function ChapterList({ slug, chapters }: { slug: string; chapters: Chapte
 }
 
 /** Sticky "On this page" list with scroll-spy and reading progress. */
-export function OnThisPage({ slug, chapters }: { slug: string; chapters: Chapter[] }) {
+export function OnThisPage({ chapters }: { chapters: Chapter[] }) {
   const [active, setActive] = useState<string | null>(null);
   const [read, setRead] = useState(0);
 
@@ -100,7 +99,6 @@ export function OnThisPage({ slug, chapters }: { slug: string; chapters: Chapter
             <a
               href={`#${c.id}`}
               aria-current={active === c.id ? "location" : undefined}
-              onClick={() => track("lesson_chapter_clicked", { lesson: slug, chapter: c.id })}
               className={cn(
                 "-ml-px block border-l py-1 pl-3 text-[13px] leading-snug transition-colors",
                 active === c.id ? "border-accent text-fg" : "border-transparent text-subtle hover:text-fg",

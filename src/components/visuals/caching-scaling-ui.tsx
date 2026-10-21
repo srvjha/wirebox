@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useEffectEvent, useId, useSyncExternalStore, type ReactNode } from "react";
-import { track } from "@/lib/analytics";
+import { trackVisual as trackFirstUse } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 
 export function VisualFrame({
@@ -207,9 +207,9 @@ export function Meter({ value, label, className }: { value: number; label?: stri
   );
 }
 
-/** Track one control of a visual. */
-export function trackVisual(visual: string, control: string, value: string | number | boolean) {
-  track("visual_interacted", { visual, control, value });
+/** Track the first interaction with a visual on this page. */
+export function trackVisual(visual: string) {
+  trackFirstUse(visual);
 }
 
 /** Calls `fn` every `ms` while `running`. */

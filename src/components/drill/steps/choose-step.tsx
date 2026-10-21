@@ -17,10 +17,7 @@ export function ChooseStepView({ drill, step, index, store, onNext }: Props) {
   const pick = (id: string) => {
     store.getState().choose(step.id, id);
     track("drill_choice_made", { drill: drill.slug, step: index, option: id });
-    if (!passed) {
-      store.getState().pass(step.id);
-      track("drill_step_completed", { drill: drill.slug, step: index, type: step.type });
-    }
+    if (!passed) store.getState().pass(step.id);
   };
 
   return (

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ArrowDownWideNarrow, Plus, RotateCcw, Search } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { formatNumber } from "@/lib/utils";
 import { build, countNodes, height, insert, search, type BNode, type BTree, type InsertReport } from "./b-tree-core";
 import { Range, Segmented, SimButton, Stat, VisualFrame } from "./algo-kit";
@@ -61,14 +61,14 @@ export function BTreeSim() {
   const insertPath = new Set(report?.path ?? []);
   const findPath = new Set(find?.path ?? []);
 
-  function add(k: number, control: string) {
+  function add(k: number) {
     if (full || !Number.isFinite(k)) return;
     const res = insert(tree, k);
     setReport(res.report);
     setLastKey(k);
     setFind(null);
     if (!res.report.duplicate) setKeys((ks) => [...ks, k]);
-    track("visual_interacted", { visual: VISUAL, control, value: k });
+    trackVisual(VISUAL);
   }
 
   function nextFree(from: number) {
@@ -82,7 +82,7 @@ export function BTreeSim() {
     const r = search(tree, k);
     setFind({ key: k, ...r });
     setReport(null);
-    track("visual_interacted", { visual: VISUAL, control: "search", value: r.path.length });
+    trackVisual(VISUAL);
   }
 
   let message = "Insert a key to see where it lands.";
@@ -111,7 +111,7 @@ export function BTreeSim() {
             setOrder(v);
             setReport(null);
             setFind(null);
-            track("visual_interacted", { visual: VISUAL, control: "order", value: v });
+            trackVisual(VISUAL);
           }}
         />
         <form
@@ -119,7 +119,7 @@ export function BTreeSim() {
           onSubmit={(e) => {
             e.preventDefault();
             const k = parseInt(draft, 10);
-            if (k >= 0 && k <= 999) add(k, "insert");
+            if (k >= 0 && k <= 999) add(k);
             setDraft("");
           }}
         >
@@ -136,10 +136,10 @@ export function BTreeSim() {
           </SimButton>
         </form>
         <div className="flex flex-wrap gap-2">
-          <SimButton onClick={() => add(nextFree(Math.floor(Math.random() * 1000)), "insert_random")} disabled={full}>
+          <SimButton onClick={() => add(nextFree(Math.floor(Math.random() * 1000)))} disabled={full}>
             Random
           </SimButton>
-          <SimButton onClick={() => add(nextFree(Math.max(...keys, 0) + 1), "insert_ascending")} disabled={full} title="Insert the next key after the current maximum">
+          <SimButton onClick={() => add(nextFree(Math.max(...keys, 0) + 1))} disabled={full} title="Insert the next key after the current maximum">
             <ArrowDownWideNarrow className="size-3.5" /> Next ascending
           </SimButton>
           <SimButton
@@ -147,7 +147,7 @@ export function BTreeSim() {
               setKeys(START_KEYS);
               setReport(null);
               setFind(null);
-              track("visual_interacted", { visual: VISUAL, control: "reset", value: true });
+              trackVisual(VISUAL);
             }}
           >
             <RotateCcw className="size-3.5" /> Reset
@@ -276,7 +276,7 @@ export function BTreeHeight() {
           step={10}
           value={fanout}
           onChange={setFanout}
-          onCommit={(v) => track("visual_interacted", { visual: "b-tree-height", control: "fanout", value: v })}
+          onCommit={() => trackVisual("b-tree-height")}
         />
         <Range
           label="Rows"
@@ -285,7 +285,7 @@ export function BTreeHeight() {
           value={exp}
           onChange={setExp}
           display={formatNumber(rows)}
-          onCommit={(v) => track("visual_interacted", { visual: "b-tree-height", control: "rows", value: v })}
+          onCommit={() => trackVisual("b-tree-height")}
         />
       </div>
       <div className="mt-4 space-y-1.5">

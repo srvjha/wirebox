@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Plus, RotateCcw } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { mulberry32 } from "./algo-hash";
 import { Range, SimButton, Stat, VisualFrame } from "./algo-kit";
 import { buildQuadtree, leaves, queryBox, type QPoint } from "./geo-core";
@@ -45,7 +45,7 @@ export function QuadtreeSplit() {
   function place(x: number, y: number, control: string) {
     const c = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
     setQ(c);
-    if (control !== "keyboard") track("visual_interacted", { visual: VISUAL, control, value: `${c.x.toFixed(2)},${c.y.toFixed(2)}` });
+    if (control !== "keyboard") trackVisual(VISUAL);
   }
 
   function onPointer(e: PointerEvent<SVGSVGElement>) {
@@ -75,7 +75,7 @@ export function QuadtreeSplit() {
             max={16}
             value={capacity}
             onChange={setCapacity}
-            onCommit={(v) => track("visual_interacted", { visual: VISUAL, control: "capacity", value: v })}
+            onCommit={() => trackVisual(VISUAL)}
           />
         </div>
         <SimButton
@@ -83,7 +83,7 @@ export function QuadtreeSplit() {
           onClick={() => {
             setPoints((p) => [...p, ...scatter(100 + surges, 60, 0.62, 0.3, 0.05)]);
             setSurges((s) => s + 1);
-            track("visual_interacted", { visual: VISUAL, control: "surge", value: points.length + 60 });
+            trackVisual(VISUAL);
           }}
           disabled={points.length > 600}
         >
@@ -93,7 +93,7 @@ export function QuadtreeSplit() {
           onClick={() => {
             setPoints(START);
             setSurges(0);
-            track("visual_interacted", { visual: VISUAL, control: "reset", value: true });
+            trackVisual(VISUAL);
           }}
         >
           <RotateCcw className="size-3.5" /> Reset

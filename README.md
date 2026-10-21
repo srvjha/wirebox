@@ -24,7 +24,7 @@ your design in a simulator, and fix what breaks.
 | Drills | React Flow canvas, Zustand, an analytical simulator in `src/sim` (Vitest-calibrated) |
 | Auth | Better Auth (email/password, optional Google & GitHub) |
 | Database | Postgres 17 (Docker) + Drizzle ORM |
-| Analytics | PostHog via a `/ingest` reverse proxy; server-side sign-up events |
+| Analytics | PostHog via a `/ingest` reverse proxy |
 | AI debriefs | Pluggable provider (`src/lib/ai`): Anthropic, OpenAI (or any OpenAI-compatible API) or Gemini |
 
 ## Getting started

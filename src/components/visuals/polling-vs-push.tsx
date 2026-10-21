@@ -87,7 +87,6 @@ export function PollingVsPush() {
       <div className="grid gap-4 sm:grid-cols-3">
         <RangeControl
           visual={VISUAL}
-          control="viewers"
           label="Phones on the seat map"
           value={viewerIdx}
           min={0}
@@ -97,7 +96,6 @@ export function PollingVsPush() {
         />
         <RangeControl
           visual={VISUAL}
-          control="updates_per_minute"
           label="Seat changes per minute"
           value={updates}
           min={1}
@@ -106,7 +104,6 @@ export function PollingVsPush() {
         />
         <RangeControl
           visual={VISUAL}
-          control="poll_interval"
           label="Poll interval"
           value={interval}
           min={1}

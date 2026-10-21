@@ -108,7 +108,7 @@ async function Lesson({ slug }: { slug: string }) {
                 </div>
               </header>
 
-              <ChapterList slug={slug} chapters={chapters} />
+              <ChapterList chapters={chapters} />
 
               <div className="prose-lesson mt-10 [&_h2]:scroll-mt-28! lg:[&_h2]:scroll-mt-20! [&_h3]:scroll-mt-28! lg:[&_h3]:scroll-mt-20!">
                 <Content />
@@ -120,7 +120,7 @@ async function Lesson({ slug }: { slug: string }) {
 
             <aside className="hidden w-56 shrink-0 xl:block">
               <div className="sticky top-14 max-h-[calc(100dvh-3.5rem)] overflow-y-auto pt-12 pb-8">
-                <OnThisPage slug={slug} chapters={chapters} />
+                <OnThisPage chapters={chapters} />
               </div>
             </aside>
           </div>

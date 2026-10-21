@@ -49,7 +49,7 @@ export function RegionRouting() {
   const nameOf = (id: RegionId) => REGIONS.find((r) => r.id === id)!.name;
 
   function toggle(id: RegionId) {
-    track("fail_region", `${id}:${up(id) ? "down" : "up"}`);
+    track();
     setDown((d) => (d.includes(id) ? d.filter((x) => x !== id) : [...d, id]));
   }
 
@@ -63,7 +63,7 @@ export function RegionRouting() {
           label="Deployment mode"
           value={mode}
           onChange={(v) => {
-            track("mode", v);
+            track();
             setMode(v);
           }}
           options={[
@@ -76,7 +76,7 @@ export function RegionRouting() {
             type="checkbox"
             checked={residency}
             onChange={(e) => {
-              track("residency", e.target.checked);
+              track();
               setResidency(e.target.checked);
             }}
             className="size-3.5 accent-[var(--accent)]"

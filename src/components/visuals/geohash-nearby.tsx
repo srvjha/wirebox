@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { mulberry32 } from "./algo-hash";
 import { Range, Segmented, Stat, VisualFrame } from "./algo-kit";
@@ -87,7 +87,7 @@ export function GeohashNearby() {
       lon: Math.min(BOX.maxLon - 1e-4, Math.max(BOX.minLon + 1e-4, lon)),
     };
     setRider(clamped);
-    if (control !== "keyboard") track("visual_interacted", { visual: VISUAL, control, value: geohash(clamped.lat, clamped.lon, precision) });
+    if (control !== "keyboard") trackVisual(VISUAL);
   }
 
   function onPointer(e: PointerEvent<SVGSVGElement>) {
@@ -124,7 +124,7 @@ export function GeohashNearby() {
           options={[5, 6, 7].map((v) => ({ value: v, label: `${v} chars` }))}
           onChange={(v) => {
             setPrecision(v);
-            track("visual_interacted", { visual: VISUAL, control: "precision", value: v });
+            trackVisual(VISUAL);
           }}
         />
         <Range
@@ -135,7 +135,7 @@ export function GeohashNearby() {
           value={radius}
           onChange={setRadius}
           display={fmtM(radius)}
-          onCommit={(v) => track("visual_interacted", { visual: VISUAL, control: "radius", value: v })}
+          onCommit={() => trackVisual(VISUAL)}
         />
       </div>
       <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-[13px] text-muted">
@@ -144,7 +144,7 @@ export function GeohashNearby() {
           checked={withNeighbours}
           onChange={(e) => {
             setWithNeighbours(e.target.checked);
-            track("visual_interacted", { visual: VISUAL, control: "neighbours", value: e.target.checked });
+            trackVisual(VISUAL);
           }}
           className="size-4 accent-accent"
         />

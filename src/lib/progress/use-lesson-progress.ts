@@ -74,7 +74,6 @@ export function useLessonProgress() {
     const done = () => {
       writeKey(MERGED_USER_KEY, userId);
       mergingFor = null;
-      track("progress_synced", { items: missing.length });
     };
     if (missing.length === 0) done();
     else mutate({ lessons: missing }, { onSuccess: done, onError: () => (mergingFor = null) });
@@ -85,7 +84,7 @@ export function useLessonProgress() {
       if (getCompleted().has(slug) === done) return;
       markLocal(slug, done);
       const moduleSlug = getLesson(slug)?.module.slug ?? "unknown";
-      track(done ? "lesson_completed" : "lesson_uncompleted", { lesson: slug, module: moduleSlug });
+      if (done) track("lesson_completed", { lesson: slug, module: moduleSlug });
       if (userId) mutate({ lesson: slug, done });
     },
     [userId, mutate],

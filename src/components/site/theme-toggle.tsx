@@ -3,7 +3,6 @@
 import { Moon, Sun } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { THEME_STORAGE_KEY, type Theme } from "@/lib/theme";
-import { track } from "@/lib/analytics";
 
 const listeners = new Set<() => void>();
 
@@ -36,10 +35,7 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
-      onClick={() => {
-        setTheme(next);
-        track("theme_changed", { theme: next });
-      }}
+      onClick={() => setTheme(next)}
       className="grid size-8 place-items-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg"
       aria-label={`Switch to ${next} theme`}
     >

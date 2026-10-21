@@ -171,7 +171,7 @@ export function LoadBalancerAlgorithms() {
           onChange={(a) => {
             setAlgo(a);
             reset();
-            trackVisual(VISUAL, "algorithm", a);
+            trackVisual(VISUAL);
           }}
         />
         <div className="flex gap-1.5">
@@ -184,7 +184,7 @@ export function LoadBalancerAlgorithms() {
             variant="ghost"
             onClick={() => {
               reset();
-              trackVisual(VISUAL, "reset", true);
+              trackVisual(VISUAL);
             }}
           >
             <RotateCcw className="size-3.5" /> Reset
@@ -201,7 +201,7 @@ export function LoadBalancerAlgorithms() {
           max={120}
           step={5}
           onChange={setRate}
-          onCommit={(v) => trackVisual(VISUAL, "rate", v)}
+          onCommit={() => trackVisual(VISUAL)}
           format={(v) => `${v} req/s`}
         />
         <Toggle
@@ -210,7 +210,7 @@ export function LoadBalancerAlgorithms() {
           checked={slow}
           onChange={(v) => {
             setSlow(v);
-            trackVisual(VISUAL, "slow_server", v);
+            trackVisual(VISUAL);
           }}
         />
       </div>

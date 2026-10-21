@@ -159,7 +159,7 @@ export function SagaCompensation() {
           label="Failure to inject"
           value={s.fail}
           onChange={(v) => {
-            t("fail", v);
+            t();
             dispatch({ type: "fail", fail: v });
           }}
           options={[
@@ -174,7 +174,7 @@ export function SagaCompensation() {
             type="checkbox"
             checked={s.flakyRefund}
             onChange={(e) => {
-              t("flaky-refund", e.target.checked);
+              t();
               dispatch({ type: "flaky", on: e.target.checked });
             }}
             className="size-3.5 accent-[var(--accent)]"
@@ -248,7 +248,7 @@ export function SagaCompensation() {
         <VisualButton
           tone="accent"
           onClick={() => {
-            t("run", !s.running);
+            t();
             dispatch({ type: "run", running: !s.running });
           }}
         >
@@ -257,7 +257,7 @@ export function SagaCompensation() {
         </VisualButton>
         <VisualButton
           onClick={() => {
-            t("step", s.idx);
+            t();
             dispatch({ type: "step" });
           }}
           disabled={s.running || over}
@@ -266,7 +266,7 @@ export function SagaCompensation() {
         </VisualButton>
         <VisualButton
           onClick={() => {
-            t("reset", true);
+            t();
             dispatch({ type: "reset" });
           }}
           title="Reset"

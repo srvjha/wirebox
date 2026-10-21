@@ -167,15 +167,11 @@ function CanvasInner({ drill, store, palette, replicas = true, dbLabel, selected
         }
       }
       if (removed.length) {
-        for (const id of removed) {
-          const n = byId.get(id);
-          if (n) track("drill_component_removed", { drill, kind: n.kind });
-        }
         removeNodes(removed);
         if (selected && removed.includes(selected)) onSelect(null);
       }
     },
-    [byId, drill, moveNode, onSelect, removeNodes, selected],
+    [moveNode, onSelect, removeNodes, selected],
   );
 
   // Positions committed on drag stop clear the transient drag state.
@@ -205,8 +201,10 @@ function CanvasInner({ drill, store, palette, replicas = true, dbLabel, selected
       const b = byId.get(c.target);
       if (!a || !b) return;
       const problem = wireProblem(a.kind, b.kind);
-      track("drill_wire_added", { drill, from: a.kind, to: b.kind, ok: !problem });
-      if (problem) return say(problem);
+      if (problem) {
+        track("drill_wire_invalid", { drill, from: a.kind, to: b.kind });
+        return say(problem);
+      }
       if (graph.edges.some((e) => e.from === a.id && e.to === b.id)) return say("Those two are already wired.");
       addEdge(a.id, b.id);
     },
@@ -226,10 +224,9 @@ function CanvasInner({ drill, store, palette, replicas = true, dbLabel, selected
       };
       addNode(n);
       onSelect(n.id);
-      track("drill_component_added", { drill, kind });
       if (!at) requestAnimationFrame(() => flow.fitView({ padding: 0.25, duration: 300, maxZoom: 1.1 }));
     },
-    [addNode, flow, drill, onSelect, replicas, store],
+    [addNode, flow, onSelect, replicas, store],
   );
 
   const onDrop = useCallback(

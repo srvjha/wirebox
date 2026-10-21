@@ -65,12 +65,9 @@ function Player({ drill, store }: { drill: Drill; store: DrillStore }) {
   const next = useCallback(() => go(index + 1), [go, index]);
   const doneAndNext = useCallback(() => {
     const s = store.getState();
-    if (!s.passed.includes(step.id)) {
-      s.pass(step.id);
-      track("drill_step_completed", { drill: drill.slug, step: index, type: step.type });
-    }
+    s.pass(step.id);
     go(index + 1);
-  }, [go, index, drill.slug, step, store]);
+  }, [go, index, step, store]);
 
   if (!hydrated) return <PlayerSkeleton />;
 

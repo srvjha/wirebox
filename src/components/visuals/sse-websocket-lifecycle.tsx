@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { Segmented, VisualFrame } from "./scale-visual-parts";
 
@@ -140,7 +140,7 @@ export function SseWebSocketLifecycle() {
   const go = (n: number) => {
     const next = Math.max(0, Math.min(steps.length - 1, n));
     setStep(next);
-    track("visual_interacted", { visual: VISUAL, control: "step", value: `${proto}:${next}` });
+    trackVisual(VISUAL);
   };
 
   return (
@@ -151,7 +151,6 @@ export function SseWebSocketLifecycle() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Segmented
           visual={VISUAL}
-          control="protocol"
           label="Protocol"
           value={proto}
           onChange={(v) => {

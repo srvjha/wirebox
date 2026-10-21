@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback } from "react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 
 /**
@@ -40,7 +40,7 @@ export function VisualShell({
 /** Returns a tracker bound to one visual: `t("control", value)`. */
 export function useVisualTracker(visual: string) {
   return useCallback(
-    (control: string, value: string | number | boolean) => track("visual_interacted", { visual, control, value }),
+    () => trackVisual(visual),
     [visual],
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,7 +36,6 @@ export function VisualFrame({
 
 export function RangeControl({
   visual,
-  control,
   label,
   value,
   min,
@@ -46,7 +45,6 @@ export function RangeControl({
   format,
 }: {
   visual: string;
-  control: string;
   label: string;
   value: number;
   min: number;
@@ -56,7 +54,7 @@ export function RangeControl({
   format?: (v: number) => string;
 }) {
   const id = useId();
-  const commit = () => track("visual_interacted", { visual, control, value });
+  const commit = () => trackVisual(visual);
   return (
     <div className="min-w-0">
       <div className="flex items-baseline justify-between gap-2">
@@ -83,7 +81,6 @@ export function RangeControl({
 
 export function Segmented<T extends string>({
   visual,
-  control,
   label,
   options,
   value,
@@ -91,7 +88,6 @@ export function Segmented<T extends string>({
   className,
 }: {
   visual: string;
-  control: string;
   label: string;
   options: { value: T; label: string }[];
   value: T;
@@ -111,7 +107,7 @@ export function Segmented<T extends string>({
             onClick={() => {
               if (active) return;
               onChange(o.value);
-              track("visual_interacted", { visual, control, value: o.value });
+              trackVisual(visual);
             }}
             className={cn(
               "rounded-full border px-3 py-1 text-[12.5px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60",

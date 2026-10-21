@@ -160,17 +160,13 @@ export function Quiz({
 }
 
 /** A collapsible aside for detail most readers can skip. */
-export function Reveal({ id, title, children }: { id?: string; title: string; children: ReactNode }) {
-  const { slug } = useLesson();
+export function Reveal({ title, children }: { id?: string; title: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="not-prose my-6 rounded-2xl border border-line bg-surface">
       <button
         type="button"
-        onClick={() => {
-          if (!open) track("reveal_opened", { lesson: slug, id: id ?? title });
-          setOpen((o) => !o);
-        }}
+        onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left text-[14.5px] font-medium text-fg"
       >
         {title}

@@ -59,7 +59,6 @@ export function PartitionPruning() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Segmented
           visual={VISUAL}
-          control="partitioning"
           label="Partitioning"
           value={mode}
           onChange={setMode}
@@ -72,7 +71,6 @@ export function PartitionPruning() {
       <div className="mt-3">
         <Segmented
           visual={VISUAL}
-          control="query"
           label="Query"
           value={q}
           onChange={setQ}

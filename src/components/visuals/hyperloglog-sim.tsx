@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Repeat, RotateCcw, UserPlus } from "lucide-react";
 import { useTheme } from "@/components/site/theme-toggle";
-import { track } from "@/lib/analytics";
+import { trackVisual } from "@/lib/analytics";
 import { formatNumber } from "@/lib/utils";
 import { Range, SimButton, Stat, VisualFrame, pct } from "./algo-kit";
 import { hllAdd, hllBytes, hllEstimate, hllStdError } from "./hll-core";
@@ -96,7 +96,7 @@ export function HyperLogLogSim() {
     for (let i = s.n; i < s.n + k; i++) hllAdd(regs, s.p, `visitor-${i}`);
     const n = s.n + k;
     setS({ ...s, regs, n, history: [...s.history, { n, est: hllEstimate(regs) }].slice(-40), lastId: `visitor-${n - 1}` });
-    track("visual_interacted", { visual: VISUAL, control: "add_unique", value: n });
+    trackVisual(VISUAL);
   }
 
   function replay(count: number) {
@@ -104,7 +104,7 @@ export function HyperLogLogSim() {
     const regs = s.regs.slice();
     for (let i = 0; i < count; i++) hllAdd(regs, s.p, `visitor-${Math.floor(Math.random() * s.n)}`);
     setS({ ...s, regs, history: [...s.history, { n: s.n, est: hllEstimate(regs) }].slice(-40) });
-    track("visual_interacted", { visual: VISUAL, control: "replay_returning", value: s.n });
+    trackVisual(VISUAL);
   }
 
   function setP(p: number) {
@@ -135,7 +135,7 @@ export function HyperLogLogSim() {
             value={s.p}
             onChange={setP}
             display={`p = ${s.p} · ${formatNumber(m)} registers`}
-            onCommit={(v) => track("visual_interacted", { visual: VISUAL, control: "precision", value: v })}
+            onCommit={() => trackVisual(VISUAL)}
           />
           <div className="mt-3">
             <RegisterGrid regs={s.regs} p={s.p} />
@@ -158,7 +158,7 @@ export function HyperLogLogSim() {
             <SimButton
               onClick={() => {
                 setS(initial());
-                track("visual_interacted", { visual: VISUAL, control: "reset", value: true });
+                trackVisual(VISUAL);
               }}
             >
               <RotateCcw className="size-3.5" />
