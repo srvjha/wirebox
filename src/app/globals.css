@@ -78,7 +78,8 @@
   --color-warn: var(--warn);
   --color-err: var(--err);
   --color-ok: var(--ok);
-  --font-sans: var(--font-text);
+  /* The platform UI font: SF Pro on Apple, Segoe UI on Windows, Roboto on Android. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-geist-mono);
   --shadow-card: var(--shadow);
 }
@@ -90,7 +91,7 @@ html {
 body {
   background: var(--bg);
   color: var(--fg);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
