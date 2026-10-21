@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { Cloud, LineChart } from "lucide-react";
-import { guestLoginEnabled } from "@/lib/auth";
+import { SUPABASE_KEY, SUPABASE_URL } from "@/lib/supabase/env";
 import { SignInForm, type Provider } from "./sign-in-form";
 
 export const metadata: Metadata = {
@@ -10,13 +10,23 @@ export const metadata: Metadata = {
   description: "Sign in to sync your Wirebox progress across devices. The course itself never needs an account.",
 };
 
-/** Social providers are configured by env at runtime, so read them per request. */
+/** Ask Supabase which social providers are switched on, so the page never offers a dead button. */
+async function enabledProviders(): Promise<Provider[]> {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/settings`, {
+      headers: { apikey: SUPABASE_KEY },
+      next: { revalidate: 300 },
+    });
+    const settings = (await res.json()) as { external?: Record<string, boolean> };
+    return settings.external?.google ? ["google"] : [];
+  } catch {
+    return [];
+  }
+}
+
 async function Form() {
   await connection();
-  const providers: Provider[] = [];
-  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) providers.push("google");
-  if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) providers.push("github");
-  return <SignInForm providers={providers} guest={guestLoginEnabled} />;
+  return <SignInForm providers={await enabledProviders()} />;
 }
 
 function FormSkeleton() {

@@ -1,7 +1,8 @@
 import "server-only";
 import { and, count, countDistinct, desc, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { account, drillProgress, lessonProgress, loadTestRun, postmortem, user } from "@/lib/db/schema";
+import { drillProgress, lessonProgress, loadTestRun, postmortem } from "@/lib/db/schema";
+import { authIdentities, authUsers } from "@/lib/db/supabase-auth";
 
 const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000);
 
@@ -25,27 +26,27 @@ export async function getAdminStats() {
     db
       .select({
         // Guest accounts are counted separately so they don't inflate real sign-ups.
-        total: sql<number>`count(*) filter (where ${user.isAnonymous} is not true)`.mapWith(Number),
-        guests: sql<number>`count(*) filter (where ${user.isAnonymous})`.mapWith(Number),
-        d1: sql<number>`count(*) filter (where ${user.isAnonymous} is not true and ${user.createdAt} >= now() - interval '1 day')`.mapWith(Number),
-        d7: sql<number>`count(*) filter (where ${user.isAnonymous} is not true and ${user.createdAt} >= now() - interval '7 days')`.mapWith(Number),
-        d30: sql<number>`count(*) filter (where ${user.isAnonymous} is not true and ${user.createdAt} >= now() - interval '30 days')`.mapWith(Number),
+        total: sql<number>`count(*) filter (where ${authUsers.isAnonymous} is not true)`.mapWith(Number),
+        guests: sql<number>`count(*) filter (where ${authUsers.isAnonymous})`.mapWith(Number),
+        d1: sql<number>`count(*) filter (where ${authUsers.isAnonymous} is not true and ${authUsers.createdAt} >= now() - interval '1 day')`.mapWith(Number),
+        d7: sql<number>`count(*) filter (where ${authUsers.isAnonymous} is not true and ${authUsers.createdAt} >= now() - interval '7 days')`.mapWith(Number),
+        d30: sql<number>`count(*) filter (where ${authUsers.isAnonymous} is not true and ${authUsers.createdAt} >= now() - interval '30 days')`.mapWith(Number),
       })
-      .from(user),
+      .from(authUsers),
     db
       .select({
-        day: sql<string>`to_char(date_trunc('day', ${user.createdAt}), 'YYYY-MM-DD')`,
+        day: sql<string>`to_char(date_trunc('day', ${authUsers.createdAt}), 'YYYY-MM-DD')`,
         n: count(),
       })
-      .from(user)
-      .where(and(gte(user.createdAt, since30), sql`${user.isAnonymous} is not true`))
+      .from(authUsers)
+      .where(and(gte(authUsers.createdAt, since30), sql`${authUsers.isAnonymous} is not true`))
       .groupBy(sql`1`)
       .orderBy(sql`1`),
     db
-      .select({ provider: account.providerId, users: countDistinct(account.userId) })
-      .from(account)
-      .groupBy(account.providerId)
-      .orderBy(desc(countDistinct(account.userId))),
+      .select({ provider: authIdentities.provider, users: countDistinct(authIdentities.userId) })
+      .from(authIdentities)
+      .groupBy(authIdentities.provider)
+      .orderBy(desc(countDistinct(authIdentities.userId))),
     db.execute<{ n: number }>(sql`
       select count(distinct user_id)::int as n from (
         select ${lessonProgress.userId} as user_id from ${lessonProgress} where ${lessonProgress.completedAt} >= now() - interval '7 days'

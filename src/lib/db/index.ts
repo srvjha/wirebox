@@ -7,8 +7,10 @@ const globalForDb = globalThis as unknown as { sql?: ReturnType<typeof postgres>
 
 const sql =
   globalForDb.sql ??
-  postgres(process.env.DATABASE_URL ?? "postgres://wirebox:wirebox@localhost:5433/wirebox", {
+  postgres(process.env.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:54322/postgres", {
     max: 10,
+    // Supabase's transaction pooler (port 6543) doesn't support prepared statements.
+    prepare: false,
   });
 
 if (process.env.NODE_ENV !== "production") globalForDb.sql = sql;

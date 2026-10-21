@@ -22,6 +22,13 @@
       "when": 1792425707053,
       "tag": "0002_rename_to_drills",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792433498170,
+      "tag": "0003_supabase_auth",
+      "breakpoints": true
     }
   ]
 }

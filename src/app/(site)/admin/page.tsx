@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-const providerLabel: Record<string, string> = { credential: "Email & password", google: "Google", github: "GitHub" };
+const providerLabel: Record<string, string> = { email: "Email & password", google: "Google" };
 
 function pct(a: number, b: number) {
   return b ? `${Math.round((a / b) * 100)}%` : "–";

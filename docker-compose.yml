@@ -1,35 +1,18 @@
 name: wirebox
 
+# Local Postgres and auth come from Supabase (`pnpm db:up`), not from this file.
 services:
-  db:
-    image: postgres:17-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: wirebox
-      POSTGRES_PASSWORD: wirebox
-      POSTGRES_DB: wirebox
-    ports:
-      - "${DB_PORT:-5433}:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wirebox -d wirebox"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
-
-  # Full stack in containers: `docker compose --profile app up --build`
+  # Production build in a container: `docker compose --profile app up --build`.
+  # Point .env at a hosted Supabase project first: the container can't reach the
+  # local Supabase stack on 127.0.0.1.
   app:
     profiles: ["app"]
-    build: .
-    depends_on:
-      db:
-        condition: service_healthy
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
     env_file: .env
-    environment:
-      DATABASE_URL: postgres://wirebox:wirebox@db:5432/wirebox
     ports:
       - "3000:3000"
-
-volumes:
-  pgdata:

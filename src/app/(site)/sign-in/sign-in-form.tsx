@@ -3,14 +3,13 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
-import { ArrowRight, CircleAlert, Loader2, UserRound } from "lucide-react";
+import { ArrowRight, CircleAlert, Loader2, MailCheck } from "lucide-react";
 import { Button, buttonClass } from "@/components/ui/button";
 import { signIn, signOut, signUp, useSession } from "@/lib/auth-client";
 import { track } from "@/lib/analytics";
-import { isGuestEmail } from "@/lib/guest";
 import { cn } from "@/lib/utils";
 
-export type Provider = "google" | "github";
+export type Provider = "google";
 type Mode = "sign-in" | "sign-up";
 
 /** Only allow same-site relative redirects. */
@@ -42,17 +41,8 @@ function GoogleIcon() {
   );
 }
 
-function GitHubIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden>
-      <path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.27 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z" />
-    </svg>
-  );
-}
-
 const providerMeta: Record<Provider, { label: string; icon: () => React.ReactNode }> = {
   google: { label: "Google", icon: GoogleIcon },
-  github: { label: "GitHub", icon: GitHubIcon },
 };
 
 function Field({
@@ -96,7 +86,7 @@ function Field({
   );
 }
 
-export function SignInForm({ providers, guest = false }: { providers: Provider[]; guest?: boolean }) {
+export function SignInForm({ providers }: { providers: Provider[] }) {
   const params = useSearchParams();
   const router = useRouter();
   const next = safeNext(params.get("next"));
@@ -104,8 +94,11 @@ export function SignInForm({ providers, guest = false }: { providers: Provider[]
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | "email" | "guest" | Provider>(null);
+  const [error, setError] = useState<string | null>(
+    params.get("error") === "callback" ? "That sign-in link didn't work or has expired. Please try again." : null,
+  );
+  const [busy, setBusy] = useState<null | "email" | Provider>(null);
+  const [confirmFor, setConfirmFor] = useState<string | null>(null);
   const { data: session, isPending } = useSession();
 
   if (!isPending && session?.user) {
@@ -113,13 +106,7 @@ export function SignInForm({ providers, guest = false }: { providers: Provider[]
       <div>
         <h2 className="text-[18px] font-semibold text-fg">You&apos;re signed in</h2>
         <p className="mt-1.5 text-[14px] text-muted">
-          {isGuestEmail(session.user.email) ? (
-            <>As a guest. Your progress is saved to this guest account.</>
-          ) : (
-            <>
-              As <span className="text-fg">{session.user.email}</span>. Your progress syncs automatically.
-            </>
-          )}
+          As <span className="text-fg">{session.user.email}</span>. Your progress syncs automatically.
         </p>
         <div className="mt-6 flex flex-col gap-2">
           <Link href={next} className={buttonClass("primary", "md")}>
@@ -128,7 +115,6 @@ export function SignInForm({ providers, guest = false }: { providers: Provider[]
           <Button
             variant="ghost"
             onClick={async () => {
-              track("signed_out", {});
               await signOut();
               router.refresh();
             }}
@@ -140,25 +126,47 @@ export function SignInForm({ providers, guest = false }: { providers: Provider[]
     );
   }
 
+  if (confirmFor) {
+    return (
+      <div>
+        <MailCheck className="size-6 text-accent" aria-hidden />
+        <h2 className="mt-3 text-[18px] font-semibold text-fg">Check your email</h2>
+        <p className="mt-1.5 text-[14px] text-muted">
+          We sent a confirmation link to <span className="text-fg">{confirmFor}</span>. Open it on this device to finish
+          creating your account.
+        </p>
+        <Button variant="ghost" className="mt-6 w-full" onClick={() => setConfirmFor(null)}>
+          Use a different email
+        </Button>
+      </div>
+    );
+  }
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy("email");
-    if (mode === "sign-up") track("sign_up_started", { method: "email" });
-    else track("sign_in_started", { method: "email" });
+    track("sign_in_started", { method: "email", mode });
 
     const res =
       mode === "sign-up"
-        ? await signUp.email({ name: name.trim() || email.split("@")[0], email, password })
-        : await signIn.email({ email, password });
+        ? await signUp.email({ name: name.trim() || email.split("@")[0], email, password, next })
+        : { ...(await signIn.email({ email, password })), confirm: false };
 
     if (res.error) {
       setBusy(null);
       const msg = res.error.message ?? "";
-      if (res.error.status === 401 || /invalid/i.test(msg))
+      if (/invalid login credentials/i.test(msg))
         setError("That email and password don't match. Check them, or create an account instead.");
-      else if (/exist/i.test(msg)) setError("An account with this email already exists. Sign in instead.");
+      else if (/already registered|already exists/i.test(msg))
+        setError("An account with this email already exists. Sign in instead.");
+      else if (/email not confirmed/i.test(msg)) setError("Confirm your email first: open the link we sent you.");
       else setError(msg || "Something went wrong. Please try again.");
+      return;
+    }
+    if (res.confirm) {
+      setBusy(null);
+      setConfirmFor(email);
       return;
     }
     router.replace(next);
@@ -168,26 +176,12 @@ export function SignInForm({ providers, guest = false }: { providers: Provider[]
   const social = async (provider: Provider) => {
     setError(null);
     setBusy(provider);
-    track("sign_in_started", { method: provider });
+    track("sign_in_started", { method: provider, mode });
     const res = await signIn.social({ provider, callbackURL: next });
     if (res?.error) {
       setBusy(null);
       setError(res.error.message ?? `Couldn't start ${providerMeta[provider].label} sign-in.`);
     }
-  };
-
-  const asGuest = async () => {
-    setError(null);
-    setBusy("guest");
-    track("sign_in_started", { method: "guest" });
-    const res = await signIn.anonymous();
-    if (res?.error) {
-      setBusy(null);
-      setError(res.error.message ?? "Couldn't start a guest session.");
-      return;
-    }
-    router.replace(next);
-    router.refresh();
   };
 
   const switchMode = (m: Mode) => {
@@ -269,22 +263,6 @@ export function SignInForm({ providers, guest = false }: { providers: Provider[]
           {mode === "sign-up" ? "Create account" : "Sign in"}
         </Button>
       </form>
-
-      {guest && (
-        <div className="mt-4">
-          <Button type="button" variant="outline" className="w-full" disabled={!!busy} onClick={asGuest}>
-            {busy === "guest" ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-            ) : (
-              <UserRound className="size-4" aria-hidden />
-            )}
-            Continue as guest
-          </Button>
-          <p className="mt-1.5 text-center text-[12px] text-subtle">
-            A throwaway account for trying things out. No email or password.
-          </p>
-        </div>
-      )}
 
       <p className="mt-5 text-center text-[13px] text-subtle">
         {mode === "sign-in" ? "New here? " : "Already have an account? "}
