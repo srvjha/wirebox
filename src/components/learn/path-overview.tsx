@@ -45,7 +45,7 @@ export function OverallProgress({ parts }: { parts: NavPart[] }) {
   if (!hydrated || done === 0) return null;
   return (
     <div className="mt-6 max-w-sm">
-      <div className="flex justify-between text-[12.5px] text-subtle">
+      <div className="flex justify-between text-[14px] text-subtle">
         <span>Your progress</span>
         <span className="font-mono tabular-nums">
           {done}/{all.length} lessons
@@ -71,50 +71,50 @@ export function ModuleCard({ module, defaultOpen = false }: { module: NavModule;
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-controls={`${module.slug}-body`}
-        className="flex w-full items-start gap-4 p-4 text-left sm:p-5"
+        className="flex w-full items-start gap-4 p-5 text-left sm:p-6"
       >
         <span
           className={cn(
-            "grid size-10 shrink-0 place-items-center rounded-xl border font-mono text-[13px]",
+            "grid size-11 shrink-0 place-items-center rounded-xl border font-mono text-[14px]",
             pct === 1 ? "border-ok/40 bg-ok/10 text-ok" : "border-line bg-surface-2 text-muted",
           )}
         >
           {String(module.n).padStart(2, "0")}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[16px] font-semibold tracking-tight text-fg">{module.title}</span>
-          <span className="mt-0.5 block text-[14px] leading-relaxed text-muted">{module.summary}</span>
-          <span className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-subtle tabular-nums">
+          <span className="block text-[19px] font-semibold tracking-tight text-fg">{module.title}</span>
+          <span className="mt-1 block text-[16px] leading-relaxed text-muted">{module.summary}</span>
+          <span className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14.5px] text-subtle tabular-nums">
             <span>{total} lessons</span>
             <span>{Math.round(minutes / 6) / 10}h</span>
             {liveCount < total && <span>{liveCount === 0 ? "Being written" : `${liveCount} out now`}</span>}
           </span>
           <span className="mt-2.5 flex items-center gap-2">
             <ProgressBar value={pct} className="max-w-56 flex-1" label={`${module.title} progress`} />
-            <span className="font-mono text-[11px] text-subtle tabular-nums">
+            <span className="font-mono text-[12.5px] text-subtle tabular-nums">
               {done}/{total}
             </span>
           </span>
         </span>
-        <ChevronDown className={cn("mt-1 size-4 shrink-0 text-subtle transition-transform", open && "rotate-180")} />
+        <ChevronDown className={cn("mt-1 size-5 shrink-0 text-subtle transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <div id={`${module.slug}-body`} className="border-t border-line px-4 pt-4 pb-3 sm:px-5">
+        <div id={`${module.slug}-body`} className="border-t border-line px-5 pt-5 pb-4 sm:px-6">
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl bg-surface-2 p-3.5">
-              <p className="flex items-center gap-1.5 text-[13px] text-accent">
-                <Flag className="size-3" /> The problem
+            <div className="rounded-xl bg-surface-2 p-4">
+              <p className="flex items-center gap-1.5 text-[14px] font-medium text-accent">
+                <Flag className="size-3.5" /> The problem
               </p>
-              <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">{module.story}</p>
+              <p className="mt-2 text-[15.5px] leading-relaxed text-muted">{module.story}</p>
             </div>
-            <div className="rounded-xl bg-surface-2 p-3.5">
-              <p className="flex items-center gap-1.5 text-[13px] text-ok">
-                <Target className="size-3" /> You&apos;ll leave with
+            <div className="rounded-xl bg-surface-2 p-4">
+              <p className="flex items-center gap-1.5 text-[14px] font-medium text-ok">
+                <Target className="size-3.5" /> You&apos;ll leave with
               </p>
-              <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted">{module.outcome}</p>
+              <p className="mt-2 text-[15.5px] leading-relaxed text-muted">{module.outcome}</p>
             </div>
           </div>
-          <ol className="mt-3">
+          <ol className="mt-4">
             {module.lessons.map((l) => (
               <li key={l.slug}>
                 <LessonRow lesson={l} done={completed.has(l.slug)} />
@@ -131,14 +131,14 @@ function LessonRow({ lesson, done }: { lesson: NavLesson; done: boolean }) {
   const inner = (
     <>
       <Tick done={done} />
-      <span className="w-8 shrink-0 font-mono text-[11.5px] text-subtle">{lesson.n}</span>
+      <span className="w-9 shrink-0 font-mono text-[13px] text-subtle">{lesson.n}</span>
       <span className="min-w-0 flex-1">
-        <span className={cn("block text-[14px] leading-snug", lesson.live ? "text-fg" : "text-subtle")}>
+        <span className={cn("block text-[16px] leading-snug font-medium", lesson.live ? "text-fg" : "text-subtle")}>
           {lesson.title}
         </span>
-        <span className="mt-0.5 hidden text-[12.5px] text-subtle sm:block">{lesson.summary}</span>
+        <span className="mt-1 hidden text-[14.5px] text-subtle sm:block">{lesson.summary}</span>
       </span>
-      <span className="flex shrink-0 items-center gap-2 text-[12px] text-subtle">
+      <span className="flex shrink-0 items-center gap-2.5 text-[13.5px] text-subtle">
         {lesson.live ? (
           <span className="hidden items-center gap-1 sm:inline-flex">
             <KindIcon kind={lesson.kind} /> {kindLabel[lesson.kind]}
@@ -148,11 +148,11 @@ function LessonRow({ lesson, done }: { lesson: NavLesson; done: boolean }) {
             Being written
           </span>
         )}
-        <span className="w-9 text-right font-mono tabular-nums">{lesson.minutes}m</span>
+        <span className="w-10 text-right font-mono tabular-nums">{lesson.minutes}m</span>
       </span>
     </>
   );
-  const base = "flex items-center gap-3 rounded-lg px-2 py-2.5";
+  const base = "flex items-center gap-3.5 rounded-lg px-2.5 py-3";
   if (!lesson.live)
     return (
       <div aria-disabled="true" className={cn(base, "opacity-70")}>

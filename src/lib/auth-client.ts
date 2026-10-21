@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-export type User = { id: string; email: string; name: string };
+export type User = { id: string; email: string; name: string; image: string | null };
 type AuthError = { message: string; status?: number } | null;
 
 /** `data` is undefined while loading, null when signed out. */
@@ -18,7 +18,14 @@ let started = false;
 function toUser(u: SupabaseUser): User {
   const meta = u.user_metadata ?? {};
   const name = typeof meta.name === "string" && meta.name ? meta.name : meta.full_name;
-  return { id: u.id, email: u.email ?? "", name: typeof name === "string" && name ? name : (u.email ?? "").split("@")[0] };
+  // Google puts the profile photo in avatar_url (and picture).
+  const image = meta.avatar_url ?? meta.picture;
+  return {
+    id: u.id,
+    email: u.email ?? "",
+    name: typeof name === "string" && name ? name : (u.email ?? "").split("@")[0],
+    image: typeof image === "string" && image ? image : null,
+  };
 }
 
 function start() {
@@ -27,7 +34,8 @@ function start() {
   // Fires INITIAL_SESSION straight away, then on every sign-in, sign-out and refresh.
   supabaseBrowser().auth.onAuthStateChange((_event, session) => {
     const next = session?.user ? { user: toUser(session.user) } : null;
-    if (state.data?.user.id === next?.user.id && state.data?.user.name === next?.user.name && !state.isPending) return;
+    const prev = state.data?.user;
+    if (prev?.id === next?.user.id && prev?.name === next?.user.name && prev?.image === next?.user.image && !state.isPending) return;
     state = { data: next, isPending: false };
     listeners.forEach((l) => l());
   });
